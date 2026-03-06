@@ -1,0 +1,11 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400">
+<rect width="1200" height="400" fill="#1B1E21"/>
+<circle cx="600" cy="200" r="22" fill="#3A86FF"/>
+<rect x="200" y="190" width="350" height="20" fill="#D7C3A5"/>
+<rect x="650" y="190" width="350" height="20" fill="#D7C3A5"/>
+<text x="600" y="320" text-anchor="middle" font-family="Segoe UI, Arial" font-size="120" fill="#E8EDF0">WINDO</text>
+<text x="600" y="360" text-anchor="middle" font-family="Segoe UI, Arial" font-size="32" fill="#D7C3A5">
+Choose elevation before execution
+</text>
+</svg>

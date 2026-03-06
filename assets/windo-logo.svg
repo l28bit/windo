@@ -1,0 +1,8 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200">
+<rect width="800" height="200" fill="#1B1E21"/>
+<rect x="150" y="96" width="220" height="8" fill="#D7C3A5"/>
+<circle cx="400" cy="100" r="18" fill="#3A86FF"/>
+<rect x="430" y="96" width="220" height="8" fill="#D7C3A5"/>
+<text x="400" y="170" text-anchor="middle" font-family="Segoe UI, Arial" font-size="64" fill="#E8EDF0" letter-spacing="6">WINDO</text>
+</svg>
