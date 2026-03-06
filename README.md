@@ -157,13 +157,25 @@ windo version
 
 ---
 
-## One‑Line Install
+## Install
+
+Run in PowerShell (administrator recommended):
+
+```powershell
+iex (irm https://raw.githubusercontent.com/l28bit/windo/Genisis/bootstrap.ps1)
+```
+
+The bootstrap loader will:
+
+1. Download the installer
+2. Execute it safely from a temporary location
+3. Clean up automatically
+
+After installation restart your terminal and run:
 
 ```
-irm https://raw.githubusercontent.com/l28bit/windo/main/windo_install.ps1 | iex
+windo doctor
 ```
-
----
 
 ## Diagnostics
 
@@ -221,46 +233,6 @@ windo_manifest.json
 ```
 
 This allows rapid redeployment or inspection of execution components.
-
----
-
-## Project Structure
-
-```
-windo/
-│
-├─ windo_install.ps1
-├─ windo_runner.ps1
-├─ windo_self_update.ps1
-│
-├─ assets/
-│   ├─ windo-logo.svg
-│   ├─ windo-icon.svg
-│
-├─ README.md
-├─ LICENSE
-└─ SECURITY.md
-```
-
----
-
-## Branding Concept
-
-The WINDO symbol represents the execution bridge.
-
-```
-command ─── elevation node ─── elevated execution
-```
-
-The central node represents the moment an administrator **chooses elevation intentionally**.
-
-The wordmark subtly incorporates an activation ring around **DO**, representing the transition from command to elevated execution.
-
-```
-WIN D◉
-```
-
-The symbol metaphorically radiates around the name, emphasizing that elevation is not an afterthought — it is part of the execution circuit.
 
 ---
 
