@@ -67,20 +67,25 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 |--------|---------|
 | `windo help` | Short usage reference. |
 | `windo <command…>` | Elevate and run the command via the task bridge. |
-| `windo !!` | Re-run the last stored elevated command. |
-| `windo last` | Show the last stored command text (no execution). |
-| `windo stats` | Summarize the encrypted audit log (counts, optional avg duration). |
+| `windo !!` / `windo replay` | Re-run the last stored elevated command (`replay` is the explicit name). |
+| `windo last` | Show the last stored command text and optional metadata (no execution). |
+| `windo context [--json]` | One-screen environment summary (version, paths, tasks, last `RequestId` when known). |
+| `windo trace <RequestId>` / `windo trace --id <id>` | Find a decrypted audit entry by `RequestId`. |
+| `windo stats` | Summarize the encrypted audit log (counts, categories, optional avg duration). |
 | `windo history [-n N]` | Compact recent commands (default last 50). |
-| `windo report [-o path]` | Write a local HTML audit report (default under `Documents\windo\`). |
+| `windo report [-o path]` | Write a local HTML audit report with summary, categories, and integrity levels. |
+| `windo export [-o zip] [-n N]` | Zip bundle: manifest copy, `doctor.json` / `integrity.json` (envelope JSON), last N audit entries. |
 | `windo self-update` | Trigger the self-update scheduled task (repairs task actions). |
-| `windo version` | Version, paths, hashes, task presence. |
-| `windo doctor` | Paths, tasks, logs, quick health. |
-| `windo integrity` | Compare runner/updater SHA256 to manifest. |
+| `windo version` | Version, paths, hashes, task presence, integrity levels. |
+| `windo doctor` | Paths, tasks, logs, quick health, last `RequestId` when known. |
+| `windo integrity` | Runner vs manifest with levels **OK \| DRIFT \| TAMPERED \| UNKNOWN**. |
 | `windo verify` | Validate encrypted log format and hash chain. |
 | `windo log -n N` | Show last N log entries (decrypted). |
 | `windo cleanup [-w]` | Back up log to `.pwsh_secure`, clear active log, remove pending req/res JSON. Optional `-w` is accepted for compatibility and ignored. |
 
-Append **`--json`** or **`-Json`** to supported commands (`version`, `doctor`, `integrity`, `verify`, `log`, and the commands above where noted) for structured output suitable for scripts and ticketing.
+Append **`--json`** or **`-Json`** to supported commands for structured output. WINDO **v2.6.0+** wraps payloads in a shared envelope (`schemaVersion`, `windoVersion`, `command`, `generatedAt`, `payload`). See [`docs/json-schema.md`](docs/json-schema.md).
+
+Append **`--dry-run`** (or **`-DryRun`**) on elevated commands or `windo replay` / `windo !!` to print what would run **without** starting the task, writing req/res files, or appending the audit log. **`windo self-update --dry-run`** prints that the update task would be started only.
 
 ---
 
@@ -102,7 +107,7 @@ When **PSReadLine** is available (typical in **PowerShell 7**), the installer re
 
 - **Elevation:** scheduled tasks for the current user, **RunLevel Highest**; runner runs hidden (`pwshw.exe` if present, else `powershell.exe` with hidden window).
 - **Audit:** DPAPI (Current User), SHA256 per line, **PreviousHash** chain; `windo verify` checks the chain.
-- **Integrity:** `windo_manifest.json` stores expected SHA256 for runner and self-update; **`windo integrity`** compares disk to manifest.
+- **Integrity:** `windo_manifest.json` stores expected SHA256 for runner and self-update; **`windo integrity`** compares disk to manifest and reports **OK**, **DRIFT**, **TAMPERED**, or **UNKNOWN** per component and overall.
 
 See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
 
@@ -111,11 +116,12 @@ See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
 
 ## Reporting and automation
 
-- **`windo report`** produces a **local HTML** summary (paths, integrity status, recent audit lines). Treat reports as **sensitive**; they may echo elevated command text.
-- **`--json` / `-Json`** on `doctor`, `integrity`, `version`, `verify`, `log`, `stats`, `history`, and `last` helps pipe output into monitors, tickets, or CMDB without scraping host-colored text.
+- **`windo report`** produces a **local HTML** summary (entry counts, category breakdown, integrity levels, recent audit lines). Treat reports as **sensitive**; they may echo elevated command text.
+- **`windo export`** builds a **zip** under `Documents\windo\exports\` (or `-o`) with manifest, envelope JSON, and a truncated audit excerpt—handle as sensitive.
+- **`--json` / `-Json`** uses the **v2.6 envelope** for `doctor`, `integrity`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, and `trace`. See [`docs/json-schema.md`](docs/json-schema.md).
 - **`windo stats`** / **`windo history`** give fast situational awareness without full `log` verbosity.
 
-- Maintainer notes: [`docs/build.md`](docs/build.md) (modularization path), [`docs/branding.md`](docs/branding.md) (logo direction).
+- Maintainer notes: [`docs/build.md`](docs/build.md) (validation + optional `src/` concat), [`docs/json-schema.md`](docs/json-schema.md), [`docs/branding.md`](docs/branding.md) (logo direction).
 
 ---
 

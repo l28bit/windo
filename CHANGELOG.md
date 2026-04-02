@@ -4,6 +4,26 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.6.0] - 2026-04-01
+
+### Added
+
+- **JSON envelope (schema 2.6):** all `--json` outputs share `schemaVersion`, `windoVersion`, `command`, `generatedAt`, and `payload`. Documented in `docs/json-schema.md`.
+- **Integrity levels:** per-component and overall **OK \| DRIFT \| TAMPERED \| UNKNOWN** in `windo integrity`, doctor, version, HTML report, and export bundle.
+- **Operator commands:** `windo context`, `windo replay` (alias of `windo !!`), `windo trace <RequestId>` / `windo trace --id`, global **`--dry-run`** for the elevation path (no task, no req/res files, no audit append).
+- **Last run metadata:** `windo_last_meta.json` (`commandLine`, `storedAt`, `lastRequestId`) updated when a run completes (including timeout).
+- **Reporting:** `windo report` HTML adds summary counts, category breakdown (SUCCESS / NONZERO / ELEVATION_FAILED / OTHER), and integrity-level tables; `windo stats` text shows the same categories.
+- **Export:** `windo export [-o zip] [-n N]` creates a zip with manifest copy, `doctor.json`, `integrity.json`, and `audit_excerpt.json` (envelope-wrapped).
+- **Maintainability:** `src/windo/` scaffold, `tools/build.ps1` (validate by default; `-Concat` for review-only snippet concat), `docs/build.md` updated.
+
+### Changed
+
+- Installer and embedded `windo` function version **2.6.0**; `firstTok` exclusions extended for new verbs; usage text updated.
+
+### Security
+
+- No change to bootstrap URL pattern, scheduled task names, DPAPI on-disk log line format, or PSReadLine bindings. JSON and export/report content may include sensitive command text; operators must handle files accordingly. Pre-2.6 JSON consumers must migrate to the envelope `payload` field.
+
 ## [2.5.0] - 2026-04-01
 
 ### Added
@@ -46,6 +66,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[2.6.0]: https://github.com/l28bit/windo/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/l28bit/windo/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/l28bit/windo/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/l28bit/windo/releases/tag/v2.3.0
