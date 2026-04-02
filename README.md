@@ -101,6 +101,14 @@ When **PSReadLine** is available (typical in **PowerShell 7**), the installer re
 
 **Note:** Some terminals do not distinguish `Shift+Enter` from a normal newline. If that happens, use **`Alt+Enter`** or type `windo` explicitly. Bindings are **skipped** with a warning if PSReadLine is missing; your profile still loads.
 
+### Direct `windo <command>` tab completion (v2.6.1+)
+
+If you **start the line with `windo`**, the installer registers **`Register-WindoArgumentCompleter`**: it detects a leading `windo `, strips it, and delegates completion to **`TabExpansion2`** on the rest of the line. That lets examples like `windo git ch<TAB>` or `windo kubectl get po<TAB>` behave more like typing the underlying command alone.
+
+**Preferred workflow is still** to type the command **without** `windo`, use **native tab completion**, then add elevation with **`w,w`**, **`Shift+Enter`**, or **`Alt+Enter`**—that path remains the most reliable across hosts and terminals.
+
+**Limitations (honest):** delegation depends on **`TabExpansion2`** and the interactive host. It does not run for WINDO built-in subcommands (e.g. `windo doctor`, `windo help`) so those are not mis-completed as external tools. Partial first tokens that are ambiguous (`doc` vs `doctor` vs `docker`) may complete like a bare command line; use the preferred workflow when precision matters. If **`TabExpansion2`** is missing, registration is skipped with a warning.
+
 ---
 
 ## Security model

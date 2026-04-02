@@ -7,7 +7,7 @@ Commands that support `--json` or `-Json` emit a single **envelope** so scripts 
 | Field | Type | Description |
 |--------|------|-------------|
 | `schemaVersion` | string | `"2.6"` for WINDO v2.6.x |
-| `windoVersion` | string | Installer profile version (e.g. `"2.6.0"`) |
+| `windoVersion` | string | Installer profile version (e.g. `"2.6.1"`) |
 | `command` | string | Logical subcommand name (`doctor`, `integrity`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `export` payload in bundles, etc.) |
 | `generatedAt` | string | ISO-8601 timestamp |
 | `payload` | object | Command-specific data |
@@ -17,7 +17,7 @@ Example:
 ```json
 {
   "schemaVersion": "2.6",
-  "windoVersion": "2.6.0",
+  "windoVersion": "2.6.1",
   "command": "doctor",
   "generatedAt": "2026-04-01T12:00:00.0000000-04:00",
   "payload": { }
@@ -27,6 +27,8 @@ Example:
 ## Breaking change from pre-2.6 JSON
 
 Earlier releases returned **flat** objects (for example `{ "windoVersion": "2.5.0", ... }`). From **2.6.0**, the same information lives under **`payload`**, with the envelope fields above. Scripts should read `payload` and check `schemaVersion`.
+
+Patch releases (for example **v2.6.1**) may bump `windoVersion` without changing `schemaVersion` when JSON shape is unchanged.
 
 ## On-disk audit log
 

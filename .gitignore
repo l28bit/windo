@@ -1,0 +1,2 @@
+# Maintainer-only: tools/build.ps1 -Concat writes review artifacts here
+out/

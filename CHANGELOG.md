@@ -4,6 +4,20 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.6.1] - 2026-04-01
+
+### Added
+
+- **Delegated tab completion:** when `windo` is the first token, `Register-WindoArgumentCompleter` strips `windo ` and runs `TabExpansion2` on the remainder so `windo git ch<TAB>`, `windo docker …`, etc. can complete like the underlying command. WINDO built-in subcommands (`doctor`, `help`, …) skip delegation so they do not steal completions.
+
+### Changed
+
+- Installer and profile block version **2.6.1**; profile now registers the completer after PSReadLine (additive).
+
+### Notes
+
+- **Preferred workflow unchanged:** type the command first, then `w,w` / `Shift+Enter` / `Alt+Enter` for full native completion reliability. Direct `windo <command>` completion is best-effort and depends on `TabExpansion2` and the host.
+
 ## [2.6.0] - 2026-04-01
 
 ### Added
@@ -66,6 +80,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[2.6.1]: https://github.com/l28bit/windo/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/l28bit/windo/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/l28bit/windo/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/l28bit/windo/compare/v2.3.0...v2.4.0

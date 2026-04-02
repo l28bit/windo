@@ -1,5 +1,5 @@
 <# =====================================================================
-WINDO v2.6.0 Release-Hardened Installer
+WINDO v2.6.1 Release-Hardened Installer
 Run once in an elevated PowerShell session.
 
 Installs:
@@ -10,13 +10,13 @@ Installs:
 - Scheduled tasks:
     - WindoElevatedRunner
     - WindoSelfUpdate
-- WINDO profile block in $PROFILE (windo function + PSReadLine keybindings)
+- WINDO profile block in $PROFILE (windo function + PSReadLine keybindings + delegated tab completion)
 - Snapshot copies under $HOME\Documents\windo\
 ===================================================================== #>
 
 $ErrorActionPreference = "Stop"
 
-$WindoVersion = "2.6.0"
+$WindoVersion = "2.6.1"
 $TaskMain     = "WindoElevatedRunner"
 $TaskUpdate   = "WindoSelfUpdate"
 
@@ -1167,8 +1167,60 @@ try {
 }
 '@
 
+$WindoCompleterBlock = @'
+function Register-WindoArgumentCompleter {
+    if ($global:__WindoArgCompleterRegistered) { return }
+    if (-not (Get-Command TabExpansion2 -ErrorAction SilentlyContinue)) {
+        Write-Warning "WINDO: TabExpansion2 not available; delegated tab completion skipped."
+        return
+    }
+    Register-ArgumentCompleter -CommandName windo -ScriptBlock {
+        param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+        $builtin = [string[]]@(
+            'help', 'last', 'stats', 'history', 'report', 'export', 'self-update', 'version',
+            'doctor', 'integrity', 'verify', 'log', 'cleanup', 'context', 'trace', 'replay', '!!'
+        )
+        try {
+            if ($null -eq $commandAst) { return }
+            $line = $commandAst.Extent.Text
+            if ([string]::IsNullOrWhiteSpace($line)) { return }
+            $m = [regex]::Match($line, '^\s*windo\s+', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            if (-not $m.Success) { return }
+            $delegate = $line.Substring($m.Length)
+            if ([string]::IsNullOrWhiteSpace($delegate)) { return }
+            $firstTok = ($delegate.TrimStart() -split '\s+', 2)[0]
+            if ($firstTok) {
+                foreach ($b in $builtin) {
+                    if ($firstTok -ceq $b -or $firstTok -ieq $b) { return }
+                }
+            }
+            $cursor = $delegate.Length
+            if (-not [string]::IsNullOrEmpty($wordToComplete)) {
+                $ix = $delegate.LastIndexOf($wordToComplete, [StringComparison]::Ordinal)
+                if ($ix -ge 0) { $cursor = $ix + $wordToComplete.Length }
+            }
+            $completion = TabExpansion2 -inputScript $delegate -cursorColumn $cursor 2>$null
+            if ($null -eq $completion) { return }
+            $matches = $completion.CompletionMatches
+            if ($null -eq $matches -or $matches.Count -eq 0) { return }
+            foreach ($cm in @($matches)) {
+                [System.Management.Automation.CompletionResult]::new(
+                    $cm.CompletionText,
+                    $cm.ListItemText,
+                    $cm.ResultType,
+                    $cm.ToolTip
+                )
+            }
+        } catch {
+        }
+    }
+    $global:__WindoArgCompleterRegistered = $true
+}
+Register-WindoArgumentCompleter
+'@
+
 $profileText = Get-Content -Raw $PROFILE
-$block = $BeginMarker + "`r`n" + $WindoFunctionBody + "`r`n" + $WindoPsReadLineBlock + "`r`n" + $EndMarker + "`r`n"
+$block = $BeginMarker + "`r`n" + $WindoFunctionBody + "`r`n" + $WindoPsReadLineBlock + "`r`n" + $WindoCompleterBlock + "`r`n" + $EndMarker + "`r`n"
 Write-Utf8NoBomFile -Path $PROFILE -Content ($profileText.TrimEnd() + "`r`n`r`n" + $block)
 
 if (!(Test-Path $SnapshotDir)) { New-Item -ItemType Directory -Path $SnapshotDir | Out-Null }
