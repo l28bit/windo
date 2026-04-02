@@ -1,0 +1,14 @@
+name: Validate PowerShell
+on:
+  push:
+    branches: [ Genisis, main ]
+  pull_request:
+    branches: [ Genisis, main ]
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate syntax
+        shell: pwsh
+        run: ./tools/Validate-Windo.ps1

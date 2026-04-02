@@ -1,5 +1,5 @@
 <# =====================================================================
-WINDO v2.4.0 Release-Hardened Installer
+WINDO v2.5.0 Release-Hardened Installer
 Run once in an elevated PowerShell session.
 
 Installs:
@@ -16,7 +16,7 @@ Installs:
 
 $ErrorActionPreference = "Stop"
 
-$WindoVersion = "2.4.0"
+$WindoVersion = "2.5.0"
 $TaskMain     = "WindoElevatedRunner"
 $TaskUpdate   = "WindoSelfUpdate"
 
@@ -322,7 +322,18 @@ function windo {
     $ManifestFile = Join-Path $SecureDir "windo_manifest.json"
 
     if (!(Test-Path $SecureDir)) { New-Item -ItemType Directory -Path $SecureDir | Out-Null }
-
+    $JsonOutput = $false
+    if ($Command -and $Command.Count -gt 0) {
+        $cl = [System.Collections.ArrayList]@($Command)
+        for ($xi = $cl.Count - 1; $xi -ge 0; $xi--) {
+            $tx = [string]$cl[$xi]
+            if ($tx -eq '--json' -or $tx -eq '-Json') {
+                $JsonOutput = $true
+                $null = $cl.RemoveAt($xi)
+            }
+        }
+        $Command = @($cl)
+    }
     function _dpapi_protect([string]$s) {
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($s)
         $enc = [System.Security.Cryptography.ProtectedData]::Protect(
@@ -392,6 +403,13 @@ function windo {
         [System.IO.File]::AppendAllText($LogFile, ($entryHash + ":" + $encB64 + "`r`n"))
     }
 
+    function _suggest_if_denied([int]$exitCode, [string]$output) {
+        $low = ($output | Out-String).ToLowerInvariant()
+        if ($exitCode -eq 5 -or $exitCode -eq 740 -or $low -match 'access is denied|denied\.|requires elevation|must be run from|privilege') {
+            Write-Host "[windo] Hint: Access was denied or blocked. Check paths and ACLs; run 'windo doctor'. If tasks are missing, re-run the installer elevated once. Elevation remains deliberate — WINDO does not auto-elevate your interactive shell." -ForegroundColor DarkYellow
+        }
+    }
+
     function _pretty_print([string]$cmdLine, [int]$exitCode, [string]$output, [int]$durationMs) {
         $output = ($output | Out-String).TrimEnd()
         Write-Host "[windo v$WindoVersion] $cmdLine" -ForegroundColor Cyan
@@ -400,6 +418,28 @@ function windo {
         Write-Host "[windo] Duration: ${durationMs}ms" -ForegroundColor DarkGray
         if ([string]::IsNullOrWhiteSpace($output)) { Write-Host "[windo] Output: <no output>" -ForegroundColor DarkGray }
         else { Write-Host "[windo] Output:" -ForegroundColor Yellow; Write-Host $output }
+        _suggest_if_denied $exitCode $output
+    }
+
+    function _html_escape([string]$s) {
+        if ($null -eq $s) { return '' }
+        ($s -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;' -replace '"', '&quot;')
+    }
+
+    function _parse_log_entries {
+        $list = [System.Collections.ArrayList]@()
+        if (!(Test-Path $LogFile)) { return @() }
+        foreach ($line in @(Get-Content -Path $LogFile)) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            $parts = $line.Split(":", 2)
+            if ($parts.Count -lt 2) { continue }
+            try {
+                $json = _dpapi_unprotect $parts[1]
+                $obj = $json | ConvertFrom-Json
+                [void]$list.Add($obj)
+            } catch { }
+        }
+        return @($list)
     }
 
     function _warn_if_tampered {
@@ -412,8 +452,116 @@ function windo {
         }
     }
 
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "help") {
+        $helpText = @(
+            "windo <command...>         Elevate and run via task bridge",
+            "windo !!                    Re-run last stored elevated command",
+            "windo last                  Show last stored command (no execution)",
+            "windo stats                 Summarize encrypted audit log",
+            "windo history [-n N]        Compact recent commands (default N=50)",
+            "windo report [-o path]      Write HTML audit report under Documents\\windo",
+            "windo self-update           Repair/update scheduled task actions",
+            "windo version [--json]      Version and paths",
+            "windo doctor [--json]       Health / paths / tasks",
+            "windo integrity [--json]    Runner vs manifest hashes",
+            "windo verify [--json]       Hash chain validation on log",
+            "windo log -n N [--json]     Decrypted log entries",
+            "windo cleanup [-w]          Backup log, clear active log",
+            "Append --json or -Json on supported commands for structured output."
+        ) -join [Environment]::NewLine
+        Write-Host $helpText -ForegroundColor Yellow
+        return
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "last") {
+        if (!(Test-Path $LastCmdFile)) {
+            if ($JsonOutput) { @{ lastCommand = $null } | ConvertTo-Json | Write-Host } else { Write-Host "[windo] No previous command stored." -ForegroundColor Yellow }
+            return
+        }
+        $lc = (Get-Content -Raw -Path $LastCmdFile).Trim()
+        if ($JsonOutput) { @{ lastCommand = $lc } | ConvertTo-Json | Write-Host; return }
+        Write-Host "[windo] Last stored command (for windo !!):" -ForegroundColor Cyan
+        Write-Host $lc
+        return
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "stats") {
+        $entries = @(_parse_log_entries)
+        $okc = 0; $fail = 0; $totalMs = 0; $withDur = 0
+        foreach ($e in $entries) {
+            try { $ec = [int]$e.ExitCode } catch { $ec = -1 }
+            if ($ec -eq 0) { $okc++ } else { $fail++ }
+            if ($e.PSObject.Properties.Name -contains 'DurationMs') { $totalMs += [int]$e.DurationMs; $withDur++ }
+        }
+        $avg = if ($withDur -gt 0) { [math]::Round($totalMs / $withDur) } else { $null }
+        if ($JsonOutput) {
+            @{ windoVersion = $WindoVersion; entryCount = $entries.Count; successCount = $okc; nonZeroExitCount = $fail; avgDurationMs = $avg; logFile = $LogFile } | ConvertTo-Json -Depth 4 | Write-Host
+            return
+        }
+        Write-Host "[windo] Audit log stats" -ForegroundColor Cyan
+        Write-Host "  Entries        : $($entries.Count)"
+        Write-Host "  Exit code 0    : $okc"
+        Write-Host "  Non-zero exit  : $fail"
+        if ($null -ne $avg) { Write-Host "  Avg duration   : ${avg}ms (entries with DurationMs)" -ForegroundColor DarkGray }
+        Write-Host "  Log file       : $LogFile"
+        return
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "history") {
+        $hn = 50
+        if ($Command.Count -ge 3 -and $Command[1] -eq "-n") { [int]$hn = $Command[2] }
+        $all = @(_parse_log_entries)
+        $slice = @($all | Select-Object -Last $hn)
+        if ($JsonOutput) { @{ entries = $slice; count = $slice.Count } | ConvertTo-Json -Depth 8 | Write-Host; return }
+        Write-Host "[windo] History (last $hn entries)" -ForegroundColor Cyan
+        foreach ($e in $slice) {
+            Write-Host "  $($e.Timestamp)  ex=$($e.ExitCode)  $($e.Command)" -ForegroundColor Gray
+        }
+        return
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "report") {
+        $repOut = Join-Path (Join-Path $HOME "Documents") ("windo\windo_report_{0}.html" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+        $rix = 0
+        while ($rix -lt $Command.Count) {
+            if (($Command[$rix] -eq '-o' -or $Command[$rix] -eq '--output') -and ($rix + 1) -lt $Command.Count) {
+                $repOut = $Command[$rix + 1]
+                break
+            }
+            $rix++
+        }
+        $idr = _integrity_status
+        $ents = @(_parse_log_entries | Select-Object -Last 30)
+        $sb = [System.Text.StringBuilder]::new()
+        $null = $sb.AppendLine('<!DOCTYPE html><html><head><meta charset="utf-8"><title>WINDO audit report</title>')
+        $null = $sb.AppendLine('<style>body{font-family:Segoe UI,Arial,sans-serif;margin:24px;background:#fafafa;color:#1a1a1a;}h1{border-bottom:1px solid #ccc;} table{border-collapse:collapse;width:100%;} th,td{border:1px solid #ddd;padding:6px;text-align:left;} th{background:#eee;} .ok{color:#0a7a0a;} .bad{color:#a00;} code{background:#eee;padding:2px 4px;}</style></head><body>')
+        $null = $sb.AppendLine(("<h1>WINDO audit report</h1><p>Generated {0} on {1}</p><p>Choose elevation before execution.</p>" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), [System.Net.Dns]::GetHostName()))
+        $null = $sb.AppendLine(("<h2>Version</h2><p>{0}</p>" -f (_html_escape $WindoVersion)))
+        $null = $sb.AppendLine(("<h2>Paths</h2><table><tr><td>SecureDir</td><td><code>{0}</code></td></tr><tr><td>Log</td><td><code>{1}</code></td></tr><tr><td>Manifest</td><td><code>{2}</code></td></tr></table>" -f (_html_escape $SecureDir), (_html_escape $LogFile), (_html_escape $ManifestFile)))
+        $rs = if ($idr.RunnerMatch) { 'ok' } else { 'bad' }
+        $us = if ($idr.UpdaterMatch) { 'ok' } else { 'bad' }
+        $null = $sb.AppendLine(("<h2>Integrity</h2><table><tr><th>Component</th><th>Status</th></tr><tr><td>Runner</td><td class='{0}'>{1}</td></tr><tr><td>Self-update</td><td class='{2}'>{3}</td></tr></table>" -f $rs, $(if ($idr.RunnerMatch) { 'OK' } else { 'DRIFT' }), $us, $(if ($idr.UpdaterMatch) { 'OK' } else { 'DRIFT' })))
+        $null = $sb.AppendLine("<h2>Recent audit entries</h2><table><tr><th>Time</th><th>Exit</th><th>Command</th></tr>")
+        foreach ($e in $ents) {
+            $cmdStr = [string]$e.Command
+            if ($cmdStr.Length -gt 200) { $cmdStr = $cmdStr.Substring(0, 200) + "..." }
+            $null = $sb.AppendLine(("<tr><td>{0}</td><td>{1}</td><td>{2}</td></tr>" -f (_html_escape [string]$e.Timestamp), (_html_escape [string]$e.ExitCode), (_html_escape $cmdStr)))
+        }
+        $null = $sb.AppendLine("</table><p>Run <code>windo verify</code> for full chain validation. Reports may contain sensitive command text; handle accordingly.</p></body></html>")
+        $dir = Split-Path $repOut -Parent
+        if (!(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        [System.IO.File]::WriteAllText($repOut, $sb.ToString(), [System.Text.UTF8Encoding]::new($false))
+        Write-Host "[windo] Report written: $repOut" -ForegroundColor Green
+        return
+    }
+
     if ($Command.Count -ge 1 -and $Command[0] -eq "integrity") {
         $i = _integrity_status
+        if ($JsonOutput) {
+            @{ windoVersion = $WindoVersion; manifestPath = $ManifestFile; runner = @{ expected = $i.RunnerExpected; actual = $i.RunnerActual; match = $i.RunnerMatch }; selfUpdate = @{ expected = $i.UpdaterExpected; actual = $i.UpdaterActual; match = $i.UpdaterMatch } } | ConvertTo-Json -Depth 6 | Write-Host
+            return
+        }
         Write-Host "[windo] Integrity (runner + self-update vs manifest)" -ForegroundColor Cyan
         Write-Host "  Manifest : $ManifestFile" -ForegroundColor DarkGray
         Write-Host "  Runner expected : $($i.RunnerExpected)"
@@ -451,6 +599,15 @@ function windo {
 
     if ($Command.Count -ge 1 -and $Command[0] -eq "version") {
         $i = _integrity_status
+        $mt = $false; $ut = $false
+        try { Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null; $mt = $true } catch {}
+        try { Get-ScheduledTask -TaskName $TaskUpdate -ErrorAction Stop | Out-Null; $ut = $true } catch {}
+        if ($JsonOutput) {
+            $lcJson = $null
+            if (Test-Path $LastCmdFile) { $lcJson = (Get-Content -Raw $LastCmdFile).Trim() }
+            @{ windoVersion = $WindoVersion; profile = $PROFILE; runnerHash = (_file_hash $RunnerPath); updaterHash = (_file_hash $UpdatePath); logFile = $LogFile; lastCommand = $lcJson; integrityOk = ($i.RunnerMatch -and $i.UpdaterMatch); mainTaskPresent = $mt; updateTaskPresent = $ut } | ConvertTo-Json -Depth 4 | Write-Host
+            return
+        }
         Write-Host "[windo] Version report" -ForegroundColor Cyan
         Write-Host "  Version      : $WindoVersion"
         Write-Host "  Profile      : $PROFILE"
@@ -465,13 +622,20 @@ function windo {
     }
 
     if ($Command.Count -ge 1 -and $Command[0] -eq "doctor") {
+        $pwshwPath = (Get-Command pwshw.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
+        $mt = $false; $ut = $false
+        try { Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null; $mt = $true } catch {}
+        try { Get-ScheduledTask -TaskName $TaskUpdate -ErrorAction Stop | Out-Null; $ut = $true } catch {}
+        if ($JsonOutput) {
+            @{ windoVersion = $WindoVersion; secureDir = $SecureDir; logFile = $LogFile; taskMain = $TaskName; taskUpdate = $TaskUpdate; pwshwExe = $pwshwPath; mainTaskOk = $mt; updateTaskOk = $ut; runnerPresent = (Test-Path $RunnerPath); runnerLogPresent = (Test-Path $RunnerLast); updateLogPresent = (Test-Path $UpdateLast); integrity = _integrity_status } | ConvertTo-Json -Depth 6 | Write-Host
+            return
+        }
         Write-Host "[windo] Doctor (paths, tasks, files)" -ForegroundColor Cyan
         Write-Host "  SecureDir : $SecureDir"
         Write-Host "  LogFile   : $LogFile"
         Write-Host "  TaskMain  : $TaskName"
         Write-Host "  TaskUpd   : $TaskUpdate"
-        $pwshw = (Get-Command pwshw.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
-        if ($pwshw) { Write-Host "  pwshw.exe : $pwshw" } else { Write-Host "  pwshw.exe : (not found)" }
+        if ($pwshwPath) { Write-Host "  pwshw.exe : $pwshwPath" } else { Write-Host "  pwshw.exe : (not found)" }
         try { Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null; Write-Host "  MainTask  : OK" -ForegroundColor Green } catch { Write-Host "  MainTask  : MISSING (run installer elevated once)" -ForegroundColor Red }
         try { Get-ScheduledTask -TaskName $TaskUpdate -ErrorAction Stop | Out-Null; Write-Host "  UpdTask   : OK" -ForegroundColor Green } catch { Write-Host "  UpdTask   : MISSING (run installer elevated once)" -ForegroundColor Red }
         if (Test-Path $RunnerPath) { Write-Host "  Runner    : OK" -ForegroundColor Green } else { Write-Host "  Runner    : MISSING" -ForegroundColor Red }
@@ -505,6 +669,10 @@ function windo {
             }
             $prevStoredHash = $storedHash
         }
+        if ($JsonOutput) {
+            @{ verifyOk = $ok; physicalLines = $lines.Count } | ConvertTo-Json -Depth 4 | Write-Host
+            return
+        }
         if ($ok) { Write-Host "[windo] VERIFY: OK (hashes + chain intact)" -ForegroundColor Green }
         return
     }
@@ -513,6 +681,12 @@ function windo {
         $n = 20
         if ($Command.Count -ge 3 -and $Command[1] -eq "-n") { [int]$n = $Command[2] }
         if (!(Test-Path $LogFile)) { Write-Host "[windo] No log file found." -ForegroundColor Yellow; return }
+        if ($JsonOutput) {
+            $allL = @(_parse_log_entries)
+            $sliceL = @($allL | Select-Object -Last $n)
+            @{ entries = $sliceL; count = $sliceL.Count } | ConvertTo-Json -Depth 8 | Write-Host
+            return
+        }
         $lines = @(Get-Content -Path $LogFile | Select-Object -Last $n)
         foreach ($line in $lines) {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
@@ -568,7 +742,7 @@ function windo {
     }
 
     if (-not $Command -or $Command.Count -eq 0) {
-        Write-Host "Usage: windo <command...> | windo !! | windo self-update | windo version | windo doctor | windo integrity | windo verify | windo log -n N | windo cleanup [-w]" -ForegroundColor Yellow
+        Write-Host "Usage: windo help | windo <command...> | windo !! | windo last | windo stats | windo history | windo report | windo self-update | windo version | windo doctor | windo integrity | windo verify | windo log -n N | windo cleanup [-w]  (append --json where supported)" -ForegroundColor Yellow
         return
     }
 
@@ -579,7 +753,7 @@ function windo {
     $cmdLine = ($Command -join " ").Trim()
     if ($cmdLine) {
         $firstTok = ($cmdLine -split '\s+', 2)[0]
-        if ($firstTok -notin @('self-update', 'version', 'doctor', 'integrity', 'verify', 'log', 'cleanup')) {
+        if ($firstTok -notin @('self-update', 'version', 'doctor', 'integrity', 'verify', 'log', 'cleanup', 'help', 'last', 'stats', 'history', 'report')) {
             Set-Content -Path $LastCmdFile -Value $cmdLine -Encoding UTF8
         }
     }
@@ -621,6 +795,7 @@ function windo {
         }
         Write-Host "[windo] Timed out waiting for elevated result." -ForegroundColor Red
         if ($hint) { Write-Host "[windo] Runner trace:" -ForegroundColor Yellow; Write-Host $hint }
+        _suggest_if_denied -2 $hint
         return
     }
 
@@ -729,3 +904,4 @@ Write-Host "  windo version" -ForegroundColor Yellow
 Write-Host "  windo integrity" -ForegroundColor Yellow
 Write-Host "  windo self-update" -ForegroundColor Yellow
 Write-Host "  windo !!" -ForegroundColor Yellow
+

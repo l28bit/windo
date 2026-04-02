@@ -65,8 +65,13 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 
 | Command | Purpose |
 |--------|---------|
+| `windo help` | Short usage reference. |
 | `windo <command…>` | Elevate and run the command via the task bridge. |
 | `windo !!` | Re-run the last stored elevated command. |
+| `windo last` | Show the last stored command text (no execution). |
+| `windo stats` | Summarize the encrypted audit log (counts, optional avg duration). |
+| `windo history [-n N]` | Compact recent commands (default last 50). |
+| `windo report [-o path]` | Write a local HTML audit report (default under `Documents\windo\`). |
 | `windo self-update` | Trigger the self-update scheduled task (repairs task actions). |
 | `windo version` | Version, paths, hashes, task presence. |
 | `windo doctor` | Paths, tasks, logs, quick health. |
@@ -74,6 +79,8 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo verify` | Validate encrypted log format and hash chain. |
 | `windo log -n N` | Show last N log entries (decrypted). |
 | `windo cleanup [-w]` | Back up log to `.pwsh_secure`, clear active log, remove pending req/res JSON. Optional `-w` is accepted for compatibility and ignored. |
+
+Append **`--json`** or **`-Json`** to supported commands (`version`, `doctor`, `integrity`, `verify`, `log`, and the commands above where noted) for structured output suitable for scripts and ticketing.
 
 ---
 
@@ -98,6 +105,17 @@ When **PSReadLine** is available (typical in **PowerShell 7**), the installer re
 - **Integrity:** `windo_manifest.json` stores expected SHA256 for runner and self-update; **`windo integrity`** compares disk to manifest.
 
 See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
+
+---
+
+
+## Reporting and automation
+
+- **`windo report`** produces a **local HTML** summary (paths, integrity status, recent audit lines). Treat reports as **sensitive**; they may echo elevated command text.
+- **`--json` / `-Json`** on `doctor`, `integrity`, `version`, `verify`, `log`, `stats`, `history`, and `last` helps pipe output into monitors, tickets, or CMDB without scraping host-colored text.
+- **`windo stats`** / **`windo history`** give fast situational awareness without full `log` verbosity.
+
+- Maintainer notes: [`docs/build.md`](docs/build.md) (modularization path), [`docs/branding.md`](docs/branding.md) (logo direction).
 
 ---
 

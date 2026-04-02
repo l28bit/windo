@@ -23,3 +23,7 @@ Submit a pull request with:
 - clear description
 - testing notes
 - security considerations
+
+## Validation
+
+Before opening a PR that changes PowerShell scripts, run 	ools/Validate-Windo.ps1 in PowerShell 7 (local) or rely on the GitHub Actions workflow.

@@ -4,6 +4,23 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.5.0] - 2026-04-01
+
+### Added
+
+- **Operator UX:** `windo help`, `windo last`, `windo stats`, `windo history [-n N]`, `windo report [-o path]` (local HTML audit summary under `%USERPROFILE%\Documents\windo\` by default).
+- **Structured output:** append `--json` or `-Json` to `version`, `doctor`, `integrity`, `verify`, `log`, `stats`, `history`, and `last` for script-friendly output.
+- **Trust / visibility:** explicit access-denied hints after failed runs; timeout path suggests checking tasks and installer (`_suggest_if_denied`).
+- **Maintainability:** `tools/Validate-Windo.ps1` (AST parse all shipping scripts), `docs/build.md` (modularization direction), `docs/branding.md` (admin-focused logo guidance), `.github/workflows/validate.yml`.
+
+### Changed
+
+- Installer and embedded `windo` function version **2.5.0**; usage text and last-command exclusions updated for new subcommands.
+
+### Security
+
+- No change to the elevation model (scheduled tasks, RunLevel Highest), DPAPI logging, hash chain, or manifest semantics. HTML/JSON outputs may contain sensitive command text; operators must handle files accordingly.
+
 ## [2.4.0] - 2026-04-01
 
 ### Added
@@ -29,5 +46,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[2.5.0]: https://github.com/l28bit/windo/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/l28bit/windo/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/l28bit/windo/releases/tag/v2.3.0
