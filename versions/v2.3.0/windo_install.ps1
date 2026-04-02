@@ -1,5 +1,5 @@
 <# =====================================================================
-WINDO v2.4.0 Release-Hardened Installer
+WINDO v2.3 Release-Hardened Installer
 Run once in an elevated PowerShell session.
 
 Installs:
@@ -10,13 +10,13 @@ Installs:
 - Scheduled tasks:
     - WindoElevatedRunner
     - WindoSelfUpdate
-- WINDO profile block in $PROFILE (windo function + PSReadLine keybindings)
+- WINDO profile block in $PROFILE
 - Snapshot copies under $HOME\Documents\windo\
 ===================================================================== #>
 
 $ErrorActionPreference = "Stop"
 
-$WindoVersion = "2.4.0"
+$WindoVersion = "2.3"
 $TaskMain     = "WindoElevatedRunner"
 $TaskUpdate   = "WindoSelfUpdate"
 
@@ -414,15 +414,13 @@ function windo {
 
     if ($Command.Count -ge 1 -and $Command[0] -eq "integrity") {
         $i = _integrity_status
-        Write-Host "[windo] Integrity (runner + self-update vs manifest)" -ForegroundColor Cyan
-        Write-Host "  Manifest : $ManifestFile" -ForegroundColor DarkGray
+        Write-Host "[windo] Integrity report" -ForegroundColor Cyan
         Write-Host "  Runner expected : $($i.RunnerExpected)"
         Write-Host "  Runner actual   : $($i.RunnerActual)"
         if ($i.RunnerMatch) { Write-Host "  Runner status   : OK" -ForegroundColor Green } else { Write-Host "  Runner status   : TAMPER / DRIFT" -ForegroundColor Red }
         Write-Host "  Updater expected: $($i.UpdaterExpected)"
         Write-Host "  Updater actual  : $($i.UpdaterActual)"
         if ($i.UpdaterMatch) { Write-Host "  Updater status  : OK" -ForegroundColor Green } else { Write-Host "  Updater status  : TAMPER / DRIFT" -ForegroundColor Red }
-        if (-not ($i.RunnerMatch -and $i.UpdaterMatch)) { Write-Host "  Next: reinstall from windo_install.ps1 or run 'windo self-update' after fixing tasks." -ForegroundColor Yellow }
         return
     }
 
@@ -465,20 +463,19 @@ function windo {
     }
 
     if ($Command.Count -ge 1 -and $Command[0] -eq "doctor") {
-        Write-Host "[windo] Doctor (paths, tasks, files)" -ForegroundColor Cyan
+        Write-Host "[windo] Doctor report" -ForegroundColor Cyan
         Write-Host "  SecureDir : $SecureDir"
         Write-Host "  LogFile   : $LogFile"
         Write-Host "  TaskMain  : $TaskName"
         Write-Host "  TaskUpd   : $TaskUpdate"
         $pwshw = (Get-Command pwshw.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
         if ($pwshw) { Write-Host "  pwshw.exe : $pwshw" } else { Write-Host "  pwshw.exe : (not found)" }
-        try { Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null; Write-Host "  MainTask  : OK" -ForegroundColor Green } catch { Write-Host "  MainTask  : MISSING (run installer elevated once)" -ForegroundColor Red }
-        try { Get-ScheduledTask -TaskName $TaskUpdate -ErrorAction Stop | Out-Null; Write-Host "  UpdTask   : OK" -ForegroundColor Green } catch { Write-Host "  UpdTask   : MISSING (run installer elevated once)" -ForegroundColor Red }
+        try { Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null; Write-Host "  MainTask  : OK" -ForegroundColor Green } catch { Write-Host "  MainTask  : MISSING" -ForegroundColor Red }
+        try { Get-ScheduledTask -TaskName $TaskUpdate -ErrorAction Stop | Out-Null; Write-Host "  UpdTask   : OK" -ForegroundColor Green } catch { Write-Host "  UpdTask   : MISSING" -ForegroundColor Red }
         if (Test-Path $RunnerPath) { Write-Host "  Runner    : OK" -ForegroundColor Green } else { Write-Host "  Runner    : MISSING" -ForegroundColor Red }
         if (Test-Path $RunnerLast) { Write-Host "  RunnerLog : OK" -ForegroundColor Green } else { Write-Host "  RunnerLog : (none yet)" -ForegroundColor Yellow }
         if (Test-Path $UpdateLast) { Write-Host "  UpdLog    : OK" -ForegroundColor Green } else { Write-Host "  UpdLog    : (none yet)" -ForegroundColor Yellow }
         _warn_if_tampered
-        Write-Host "  Tip: 'windo integrity' for hashes; 'windo verify' for audit chain." -ForegroundColor DarkGray
         return
     }
 
@@ -538,12 +535,6 @@ function windo {
     }
 
     if ($Command.Count -ge 1 -and $Command[0] -eq "cleanup") {
-        $cleanupRest = @()
-        if ($Command.Count -gt 1) { $cleanupRest = @($Command[1..($Command.Count - 1)]) }
-        $unknown = $cleanupRest | Where-Object { $_ -and $_ -ne '-w' }
-        if ($unknown.Count -gt 0) {
-            Write-Host "[windo] cleanup: ignoring unknown argument(s): $($unknown -join ' ')" -ForegroundColor Yellow
-        }
         $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
         $backup = Join-Path $SecureDir ("windo_history.$stamp.enc.bak")
         if (Test-Path $LogFile) {
@@ -568,7 +559,7 @@ function windo {
     }
 
     if (-not $Command -or $Command.Count -eq 0) {
-        Write-Host "Usage: windo <command...> | windo !! | windo self-update | windo version | windo doctor | windo integrity | windo verify | windo log -n N | windo cleanup [-w]" -ForegroundColor Yellow
+        Write-Host "Usage: windo <command...> | windo !! | windo self-update | windo version | windo doctor | windo integrity | windo verify | windo log -n N | windo cleanup -w" -ForegroundColor Yellow
         return
     }
 
@@ -577,11 +568,8 @@ function windo {
     _warn_if_tampered
 
     $cmdLine = ($Command -join " ").Trim()
-    if ($cmdLine) {
-        $firstTok = ($cmdLine -split '\s+', 2)[0]
-        if ($firstTok -notin @('self-update', 'version', 'doctor', 'integrity', 'verify', 'log', 'cleanup')) {
-            Set-Content -Path $LastCmdFile -Value $cmdLine -Encoding UTF8
-        }
+    if ($cmdLine -and $cmdLine -notmatch '^(self-update|version|doctor|integrity|verify|log|cleanup)$') {
+        Set-Content -Path $LastCmdFile -Value $cmdLine -Encoding UTF8
     }
 
     $reqId   = [Guid]::NewGuid().ToString("n")
@@ -656,53 +644,8 @@ function windo {
 '@
 $WindoFunctionBody = $WindoFunctionBody.Replace("__VERSION__", $WindoVersion)
 
-$WindoPsReadLineBlock = @'
-try {
-    Import-Module PSReadLine -ErrorAction Stop
-    $null = [Microsoft.PowerShell.PSConsoleReadLine]
-
-    $windoPrefixOnly = {
-        $line = $null
-        $cursor = $null
-        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
-        if ([string]::IsNullOrWhiteSpace($line)) { return }
-        $m = [regex]::Match($line, '^(\s*)(.*)$')
-        $rest = $m.Groups[2].Value
-        if ($rest -match '^(?i)windo(\s|$)') { return }
-        $indent = $m.Groups[1].Value
-        $newLine = $indent + 'windo ' + $rest
-        [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $newLine)
-    }
-
-    $windoPrefixRun = {
-        $line = $null
-        $cursor = $null
-        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
-        if ([string]::IsNullOrWhiteSpace($line)) { return }
-        $m = [regex]::Match($line, '^(\s*)(.*)$')
-        $rest = $m.Groups[2].Value
-        if ($rest -notmatch '^(?i)windo(\s|$)') {
-            $indent = $m.Groups[1].Value
-            $newLine = $indent + 'windo ' + $rest
-            [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $newLine)
-        }
-        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
-    }
-
-    Set-PSReadLineKeyHandler -Chord 'w,w' -ScriptBlock $windoPrefixOnly
-    try {
-        Set-PSReadLineKeyHandler -Chord 'Shift+Enter' -ScriptBlock $windoPrefixRun
-    } catch { }
-    try {
-        Set-PSReadLineKeyHandler -Chord 'Alt+Enter' -ScriptBlock $windoPrefixRun
-    } catch { }
-} catch {
-    Write-Warning ("WINDO: PSReadLine keybindings skipped: " + $_.Exception.Message)
-}
-'@
-
 $profileText = Get-Content -Raw $PROFILE
-$block = $BeginMarker + "`r`n" + $WindoFunctionBody + "`r`n" + $WindoPsReadLineBlock + "`r`n" + $EndMarker + "`r`n"
+$block = $BeginMarker + "`r`n" + $WindoFunctionBody + "`r`n" + $EndMarker + "`r`n"
 Write-Utf8NoBomFile -Path $PROFILE -Content ($profileText.TrimEnd() + "`r`n`r`n" + $block)
 
 if (!(Test-Path $SnapshotDir)) { New-Item -ItemType Directory -Path $SnapshotDir | Out-Null }
@@ -711,15 +654,7 @@ Copy-Item $UpdateScript (Join-Path $SnapshotDir "windo_self_update.ps1") -Force
 Copy-Item $ManifestFile (Join-Path $SnapshotDir "windo_manifest.json") -Force
 
 $SnapshotInstaller = Join-Path $SnapshotDir "windo_install.ps1"
-$installerSource = $PSCommandPath
-if ([string]::IsNullOrWhiteSpace($installerSource)) {
-    try { $installerSource = $MyInvocation.MyCommand.Path } catch { $installerSource = $null }
-}
-if (-not [string]::IsNullOrWhiteSpace($installerSource) -and (Test-Path -LiteralPath $installerSource)) {
-    Copy-Item -LiteralPath $installerSource -Destination $SnapshotInstaller -Force
-} else {
-    Write-Warning "WINDO: Could not snapshot windo_install.ps1 (pathless or in-memory execution). Other snapshot files were written to: $SnapshotDir"
-}
+Copy-Item $PSCommandPath $SnapshotInstaller -Force
 
 Write-Host "WINDO v$WindoVersion installed and hardened." -ForegroundColor Green
 Write-Host "Snapshot saved to: $SnapshotDir" -ForegroundColor Green

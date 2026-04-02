@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $Repo = "https://raw.githubusercontent.com/l28bit/windo/Genisis/windo_install.ps1"
-$Temp = Join-Path $env:TEMP ("windo_install_" + [Guid]::NewGuid().ToString("n") + ".ps1")
+$Temp = Join-Path $env:TEMP "windo_install.ps1"
 
 Write-Host ""
 Write-Host "WINDO bootstrap starting..." -ForegroundColor Cyan

@@ -8,11 +8,7 @@ Contributions are welcome.
 1. Keep the core elevation mechanism simple.
 2. Preserve audit logging and integrity checks.
 3. Avoid features that weaken Windows security boundaries.
-4. Maintain administrator‑first design philosophy.
-
-## Default branch name
-
-The public default branch is **`Genisis`** (historical spelling). Raw GitHub URLs depend on it; do not rename it casually without a documented migration and coordination.
+4. Maintain administratorΓÇæfirst design philosophy.
 
 ## Workflow
 
