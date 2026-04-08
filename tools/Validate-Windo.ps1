@@ -4,6 +4,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $files = @(
     "bootstrap.ps1",
     "windo_install.ps1",
+    "windo_uninstall.ps1",
     "windo_runner.ps1",
     "windo_self_update.ps1"
 )

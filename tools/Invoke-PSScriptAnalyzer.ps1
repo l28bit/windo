@@ -8,6 +8,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $files = @(
     (Join-Path $root "bootstrap.ps1"),
     (Join-Path $root "windo_install.ps1"),
+    (Join-Path $root "windo_uninstall.ps1"),
     (Join-Path $root "windo_runner.ps1"),
     (Join-Path $root "windo_self_update.ps1"),
     (Join-Path $root "tools\Validate-Windo.ps1"),

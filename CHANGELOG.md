@@ -4,6 +4,14 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.7.0] - 2026-04-08
+
+### Added
+
+- **`windo upgrade`:** downloads latest `windo_install.ps1` from `Genisis` (same contract as `bootstrap.ps1`) so any prior **v2.x** install can refresh without a version check.
+- **`windo uninstall`:** downloads `windo_uninstall.ps1` and runs it **elevated** (UAC) to remove scheduled tasks, WINDO profile block, WINDO files under `.pwsh_secure`, and `%USERPROFILE%\Documents\windo\` by default.
+- **`windo_uninstall.ps1`:** standalone script with **`-Confirm`**, interactive prompt, and **`-KeepSnapshots`** to preserve `Documents\windo`.
+
 ## [2.6.2] - 2026-04-08
 
 ### Added
@@ -94,6 +102,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[2.7.0]: https://github.com/l28bit/windo/compare/v2.6.2...v2.7.0
 [2.6.2]: https://github.com/l28bit/windo/compare/v2.6.1...v2.6.2
 [2.6.1]: https://github.com/l28bit/windo/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/l28bit/windo/compare/v2.5.0...v2.6.0
