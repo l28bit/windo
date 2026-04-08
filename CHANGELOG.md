@@ -4,6 +4,12 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.7.1] - 2026-04-01
+
+### Changed
+
+- **Console polish:** ASCII spinner on interactive consoles while downloading the installer (`bootstrap.ps1`, `windo upgrade`, `windo uninstall`), while waiting for an elevated result (up to ~20s), and during `windo self-update` polling. Set `WINDO_NO_SPINNER=1`, use redirected output, or CI to keep plain text (no spinner).
+
 ## [2.7.0] - 2026-04-08
 
 ### Added
@@ -102,6 +108,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[2.7.1]: https://github.com/l28bit/windo/compare/v2.7.0...v2.7.1
 [2.7.0]: https://github.com/l28bit/windo/compare/v2.6.2...v2.7.0
 [2.6.2]: https://github.com/l28bit/windo/compare/v2.6.1...v2.6.2
 [2.6.1]: https://github.com/l28bit/windo/compare/v2.6.0...v2.6.1
