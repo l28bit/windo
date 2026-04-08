@@ -17,6 +17,11 @@ From the repo root:
 
 This runs `tools/Validate-Windo.ps1` (AST parse of `bootstrap.ps1`, `windo_install.ps1`, `windo_runner.ps1`, `windo_self_update.ps1`). **No** installer file is modified.
 
+CI also runs:
+
+- `tools/Test-WindoLogic.ps1` — integrity-level logic (see `src/windo/snippets/IntegrityLevels.ps1`)
+- `tools/Invoke-PSScriptAnalyzer.ps1` — **Error**-severity rules on shipping scripts (requires `PSScriptAnalyzer` module)
+
 ## Optional `src/` fragments
 
 To reduce monolithic edit risk without changing the install contract:

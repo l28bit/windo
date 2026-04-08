@@ -9,6 +9,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -MinimumVersion 1.21.0
       - name: Validate syntax
         shell: pwsh
         run: ./tools/Validate-Windo.ps1
+      - name: Logic tests (integrity levels)
+        shell: pwsh
+        run: ./tools/Test-WindoLogic.ps1
+      - name: PSScriptAnalyzer (Error severity)
+        shell: pwsh
+        run: ./tools/Invoke-PSScriptAnalyzer.ps1

@@ -4,6 +4,20 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.6.2] - 2026-04-08
+
+### Added
+
+- **Single source for built-in subcommands:** `$WindoBuiltinVerbs` in `windo_install.ps1` drives both profile **tab-completion** skip list (plus `!!`) and **`windo` last-command** exclusions via injected `_windo_builtin_subcommands`.
+- **`windo export --redact` / `-Redact`:** best-effort masking of path-like strings in envelope JSON written to the bundle.
+- **`docs/performance.md`:** guidance for very large audit logs; warnings when log line count exceeds ~100k for `stats`, `history`, `report`, `export`.
+- **CI / quality:** `tools/Test-WindoLogic.ps1`, `tools/Invoke-PSScriptAnalyzer.ps1` (Error severity), `src/windo/snippets/IntegrityLevels.ps1` aligned with installer integrity rules.
+
+### Changed
+
+- **Export:** `Compress-Archive` and zip presence validated; clearer failure messages.
+- Installer/profile version **2.6.2**.
+
 ## [2.6.1] - 2026-04-01
 
 ### Added
@@ -80,6 +94,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[2.6.2]: https://github.com/l28bit/windo/compare/v2.6.1...v2.6.2
 [2.6.1]: https://github.com/l28bit/windo/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/l28bit/windo/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/l28bit/windo/compare/v2.4.0...v2.5.0
