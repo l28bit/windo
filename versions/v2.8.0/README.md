@@ -90,7 +90,7 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo doctor` | Paths, tasks, logs, quick health, last `RequestId` when known. |
 | `windo integrity` | Runner vs manifest with levels **OK \| DRIFT \| TAMPERED \| UNKNOWN**. |
 | `windo verify` | Validate encrypted log format and hash chain. |
-| `windo log -n N [--tail] [--json]` | Show last N log entries (decrypted). **`--tail`** with **`--json`** reads only the last N **physical** log lines (faster on large logs). |
+| `windo log -n N` | Show last N log entries (decrypted). |
 | `windo cleanup [-w]` | Back up log to `.pwsh_secure`, clear active log, remove pending req/res JSON. Optional `-w` is accepted for compatibility and ignored. |
 | `windo upgrade` | Download and run the latest `windo_install.ps1` from `Genisis` (same as bootstrap). |
 | `windo uninstall` | Download and run the elevated uninstaller (removes tasks, profile block, WINDO files under `.pwsh_secure`, optional `Documents\windo`). |
@@ -130,16 +130,6 @@ If you **start the line with `windo`**, the installer registers **`Register-Wind
 - **Integrity:** `windo_manifest.json` stores expected SHA256 for runner and self-update; **`windo integrity`** compares disk to manifest and reports **OK**, **DRIFT**, **TAMPERED**, or **UNKNOWN** per component and overall.
 
 See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
-
-### Optional environment variables
-
-| Variable | Purpose |
-|----------|---------|
-| `WINDO_NO_SPINNER` | Set to any value to disable console spinners (redirect-safe logs). |
-| `WINDO_RUNNER_TIMEOUT_MS` | Max wait for the elevated child process (default **7200000** ms = 2 h; max **86400000**). |
-| `WINDO_RUNNER_MAX_OUTPUT_BYTES` | Approximate cap on captured stdout+stderr (default **4194304**; split per stream in the runner). |
-| `WINDO_MAX_COMMAND_CHARS` | Max length of the command line passed to `cmd.exe` (default **8191**). |
-| `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the `Genisis` branch (`bootstrap.ps1` and `windo upgrade`). |
 
 ---
 

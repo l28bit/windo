@@ -4,6 +4,16 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.8.0] - 2026-04-01
+
+### Added
+
+- **Runner limits:** configurable timeout (`WINDO_RUNNER_TIMEOUT_MS`) and captured output size (`WINDO_RUNNER_MAX_OUTPUT_BYTES`); result JSON may include `RunnerTimedOut` and `OutputTruncated`. Implementation uses a small embedded C# helper (loaded from base64 in `windo_runner.ps1`).
+- **Request validation:** max command length (`WINDO_MAX_COMMAND_CHARS`), control-character rejection, and strict `OutPath` under `.pwsh_secure` matching `windo_res.<id>.json`.
+- **`windo log --tail`** with **`--json`:** decrypt only the last N physical log lines (avoids full-file decrypt for large logs).
+- **Installer checksum:** [`checksums/installer.sha256`](checksums/installer.sha256) on `Genisis`; `bootstrap.ps1` and `windo upgrade` verify the downloaded `windo_install.ps1` unless `WINDO_SKIP_INSTALLER_SHA256` is set.
+- **Documentation:** optional env vars in README and SECURITY; `windo doctor` lists env hint keys in JSON and prints a short env section in text mode.
+
 ## [2.7.1] - 2026-04-01
 
 ### Changed
@@ -108,6 +118,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[2.8.0]: https://github.com/l28bit/windo/compare/v2.7.1...v2.8.0
 [2.7.1]: https://github.com/l28bit/windo/compare/v2.7.0...v2.7.1
 [2.7.0]: https://github.com/l28bit/windo/compare/v2.6.2...v2.7.0
 [2.6.2]: https://github.com/l28bit/windo/compare/v2.6.1...v2.6.2
