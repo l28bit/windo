@@ -457,23 +457,175 @@ function windo {
     if (!(Test-Path $SecureDir)) { New-Item -ItemType Directory -Path $SecureDir | Out-Null }
     $JsonOutput = $false
     $DryRun = $false
+    $NonInteractive = $false
+    $PreserveEnvAll = $false
+    $PreserveEnvNames = @()
+    $CommandTimeoutOverrideMs = $null
+    $HelpRequested = $false
+    $HelpTopic = $null
     if ($Command -and $Command.Count -gt 0) {
-        $cl = [System.Collections.ArrayList]@($Command)
-        for ($xi = $cl.Count - 1; $xi -ge 0; $xi--) {
-            $tx = [string]$cl[$xi]
+        $rawCommand = [System.Collections.ArrayList]@($Command)
+        $leading = 0
+        while ($leading -lt $rawCommand.Count) {
+            $tx = [string]$rawCommand[$leading]
+            if ($tx -eq '/?') {
+                $HelpRequested = $true
+                if (($leading + 1) -lt $rawCommand.Count) {
+                    $next = [string]$rawCommand[$leading + 1]
+                    if ($next -notlike '-*' -and $next -ne '/?') {
+                        $HelpTopic = $next
+                        $leading += 2
+                        continue
+                    }
+                }
+                $leading++
+                continue
+            }
+            if ($tx -eq '--') { $leading++; break }
+            if ($tx -notlike '-*' -or $tx -eq '-') { break }
+
             if ($tx -eq '--json' -or $tx -eq '-Json') {
                 $JsonOutput = $true
-                $null = $cl.RemoveAt($xi)
+                $leading++
+                continue
             }
-        }
-        for ($xi = $cl.Count - 1; $xi -ge 0; $xi--) {
-            $tx = [string]$cl[$xi]
             if ($tx -eq '--dry-run' -or $tx -eq '-DryRun') {
                 $DryRun = $true
-                $null = $cl.RemoveAt($xi)
+                $leading++
+                continue
+            }
+            if ($tx -eq '--help' -or $tx -eq '-h' -or $tx -eq '-?') {
+                $HelpRequested = $true
+                if (($leading + 1) -lt $rawCommand.Count) {
+                    $next = [string]$rawCommand[$leading + 1]
+                    if ($next -notlike '-*' -and $next -ne '/?') {
+                        $HelpTopic = $next
+                        $leading += 2
+                        continue
+                    }
+                }
+                $leading++
+                continue
+            }
+            if ($tx -eq '--non-interactive' -or $tx -eq '-n') {
+                if ($tx -eq '-n' -and ($leading + 1) -lt $rawCommand.Count) {
+                    $lookahead = [string]$rawCommand[$leading + 1]
+                    if ($lookahead -in @('log', 'history')) {
+                        break
+                    }
+                }
+                $NonInteractive = $true
+                $leading++
+                continue
+            }
+            if ($tx -eq '--preserve-env' -or $tx -eq '-E') {
+                if ($tx -eq '-E') {
+                    $PreserveEnvAll = $true
+                    $leading++
+                    continue
+                }
+                if ($leading + 1 -ge $rawCommand.Count) {
+                    Write-Host "[windo] --preserve-env requires a value of env var names or use -E for all." -ForegroundColor Yellow
+                    _windo_set_exit 2
+                    return
+                }
+                $rawEnvSpec = [string]$rawCommand[$leading + 1]
+                if (-not [string]::IsNullOrWhiteSpace($rawEnvSpec)) {
+                    $PreserveEnvNames = @($rawEnvSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                }
+                $leading += 2
+                continue
+            }
+            if ($tx -like '--preserve-env=*') {
+                $rawEnvSpec = $tx.Substring(16)
+                if (-not [string]::IsNullOrWhiteSpace($rawEnvSpec)) {
+                    $PreserveEnvNames = @($rawEnvSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                }
+                $leading++
+                continue
+            }
+            if ($tx -eq '--timeout' -or $tx -eq '-t') {
+                if ($leading + 1 -ge $rawCommand.Count) {
+                    Write-Host "[windo] $tx requires a numeric timeout value." -ForegroundColor Yellow
+                    _windo_set_exit 2
+                    return
+                }
+                $rawTimeout = [string]$rawCommand[$leading + 1]
+                $parsedTimeout = _windo_parse_timeout_override_ms $rawTimeout
+                if ($null -eq $parsedTimeout -or $parsedTimeout -lt 1) {
+                    Write-Host "[windo] Invalid timeout value: $rawTimeout. Use seconds or ms (e.g. 10, 10s, 500ms)." -ForegroundColor Yellow
+                    _windo_set_exit 2
+                    return
+                }
+                if ($parsedTimeout -gt 86400000) { $parsedTimeout = 86400000 }
+                $CommandTimeoutOverrideMs = [int]$parsedTimeout
+                $leading += 2
+                continue
+            }
+            if ($tx -like '--timeout=*' -or $tx -like '-t=*') {
+                $idx = $tx.IndexOf('=')
+                $rawTimeout = $tx.Substring($idx + 1)
+                $parsedTimeout = _windo_parse_timeout_override_ms $rawTimeout
+                if ($null -eq $parsedTimeout -or $parsedTimeout -lt 1) {
+                    Write-Host "[windo] Invalid timeout value: $rawTimeout. Use seconds or ms (e.g. 10, 10s, 500ms)." -ForegroundColor Yellow
+                    _windo_set_exit 2
+                    return
+                }
+                if ($parsedTimeout -gt 86400000) { $parsedTimeout = 86400000 }
+                $CommandTimeoutOverrideMs = [int]$parsedTimeout
+                $leading++
+                continue
+            }
+            break
+        }
+        $Command = if ($leading -eq 0) { @($rawCommand) } elseif ($leading -ge $rawCommand.Count) { @() } else { @($rawCommand[$leading..($rawCommand.Count - 1)]) }
+        if ($HelpRequested) {
+            if ($Command.Count -gt 0 -and [string]::IsNullOrWhiteSpace($HelpTopic)) { $HelpTopic = [string]$Command[0] }
+            _windo_show_help $HelpTopic
+            _windo_set_exit 0
+            return
+        }
+        if ($Command.Count -ge 1 -and $Command[-1] -eq '/?') {
+            $trimmed = @($Command[0..($Command.Count - 2)])
+            $HelpRequested = $true
+            if ([string]::IsNullOrWhiteSpace($HelpTopic)) {
+                if ($trimmed.Count -eq 1) { $HelpTopic = [string]$trimmed[0] }
+                elseif ($trimmed.Count -gt 1 -and ($trimmed[0] -ieq 'help')) { $HelpTopic = [string]$trimmed[1] }
+            }
+            $Command = @($trimmed)
+            if ($HelpRequested) {
+                _windo_show_help $HelpTopic
+                _windo_set_exit 0
+                return
             }
         }
-        $Command = @($cl)
+
+        if ($null -eq $CommandTimeoutOverrideMs -and -not [string]::IsNullOrWhiteSpace($env:SUDO_TIMEOUT)) {
+            $sudoTimeout = _windo_parse_timeout_override_ms ([string]$env:SUDO_TIMEOUT)
+            if ($null -ne $sudoTimeout -and $sudoTimeout -ge 1) {
+                if ($sudoTimeout -gt 86400000) { $sudoTimeout = 86400000 }
+                $CommandTimeoutOverrideMs = [int]$sudoTimeout
+            }
+        }
+
+        if ($Command.Count -gt 0) {
+            $cl = [System.Collections.ArrayList]@($Command)
+            for ($xi = $cl.Count - 1; $xi -ge 0; $xi--) {
+                $tx = [string]$cl[$xi]
+                if ($tx -eq '--json' -or $tx -eq '-Json') {
+                    $JsonOutput = $true
+                    $null = $cl.RemoveAt($xi)
+                }
+            }
+            for ($xi = $cl.Count - 1; $xi -ge 0; $xi--) {
+                $tx = [string]$cl[$xi]
+                if ($tx -eq '--dry-run' -or $tx -eq '-DryRun') {
+                    $DryRun = $true
+                    $null = $cl.RemoveAt($xi)
+                }
+            }
+            $Command = @($cl)
+        }
     }
 
     $global:WINDO_EXIT_CODE = 0
@@ -822,7 +974,8 @@ function windo {
 
     function _windo_run_genisis_installer {
         param(
-            [switch]$ForceContinue
+            [switch]$ForceContinue,
+            [switch]$NonInteractive
         )
         if (_windo_is_process_elevated) {
             Write-Host "[windo] install-latest: download is not performed while running as Administrator." -ForegroundColor Yellow
@@ -846,14 +999,22 @@ function windo {
                 if ($env:WINDO_INSTALL_NONINTERACTIVE -or $env:CI) {
                     Write-Host "[windo] Proceeding without prompt (WINDO_INSTALL_NONINTERACTIVE or CI set)." -ForegroundColor DarkGray
                 }
+            } elseif ($NonInteractive) {
+                Write-Host "[windo] install-latest: non-interactive mode blocks confirmation prompts. Add --force to proceed." -ForegroundColor Yellow
+                Remove-Item -LiteralPath $TempInst -Force -ErrorAction SilentlyContinue
+                _windo_set_exit 2
+                return
             } elseif (-not [Environment]::UserInteractive) {
                 Write-Host "[windo] Non-interactive session: re-run with --force or set WINDO_INSTALL_NONINTERACTIVE=1" -ForegroundColor Yellow
                 Remove-Item -LiteralPath $TempInst -Force -ErrorAction SilentlyContinue
                 _windo_set_exit 2
                 return
             } else {
+                $prompt = "Run the installer now? (UAC may prompt for elevation to register tasks.) [y/N]"
+                if (-not [string]::IsNullOrWhiteSpace($env:SUDO_PROMPT)) { $prompt = [string]$env:SUDO_PROMPT }
+                if ($prompt -notmatch '(?i)\[y\/n\]') { $prompt = "$prompt [y/N]" }
                 Write-Host "[windo] The installer is ready. You can review the file before continuing: $TempInst" -ForegroundColor Cyan
-                $ans = Read-Host "Run the installer now? (UAC may prompt for elevation to register tasks.) [y/N]"
+                $ans = Read-Host $prompt
                 if ($ans -eq 'y' -or $ans -eq 'Y' -or $ans -eq 'yes') { $runNow = $true }
             }
             if (-not $runNow) {
@@ -1006,6 +1167,49 @@ function windo {
             if ($v -gt 8191) { return 8191 }
             return $v
         } catch { return $d }
+    }
+
+    function _windo_parse_timeout_override_ms {
+        param([string]$Raw)
+        if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
+        $normalized = $Raw.Trim()
+        $m = [regex]::Match($normalized, '^(?<value>\d+)\s*(?<unit>ms|s)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if (-not $m.Success) { return $null }
+        try {
+            $val = [int64]$m.Groups['value'].Value
+            $unit = $m.Groups['unit'].Value.ToLowerInvariant()
+            if ($unit -eq 'ms') { return [int]$val }
+            return [int]($val * 1000)
+        } catch { return $null }
+    }
+
+    function _windo_collect_env_snapshot {
+        param([string[]]$Names)
+        $snapshot = [ordered]@{}
+        $namesOut = @()
+        if ($null -eq $Names -or $Names.Count -eq 0) {
+            foreach ($envRow in (Get-ChildItem Env:)) {
+                if ($envRow.Name -match '^[A-Za-z_][A-Za-z0-9_]*$') {
+                    $snapshot[$envRow.Name] = [string]$envRow.Value
+                }
+            }
+            return $snapshot
+        }
+        foreach ($name in $Names) {
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            $namesOut += [string]$name
+        }
+        if ($namesOut.Count -eq 0) { return $snapshot }
+        $seen = @{}
+        foreach ($name in $namesOut) {
+            $trimmed = $name.Trim()
+            if ($trimmed -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { continue }
+            if ($seen.ContainsKey($trimmed)) { continue }
+            $seen[$trimmed] = $true
+            $rawVal = [Environment]::GetEnvironmentVariable($trimmed, 'Process')
+            if ($null -ne $rawVal) { $snapshot[$trimmed] = [string]$rawVal }
+        }
+        return $snapshot
     }
 
     # Keep aligned with windo_runner.ps1 and src/windo/snippets/WindoConfigEffective.ps1
@@ -1194,36 +1398,342 @@ function windo {
         }
     }
 
+    function _windo_help_topics {
+        return @(
+            [pscustomobject]@{
+                Name        = "help"
+                Aliases     = @("?","--help","-h")
+                Category    = "Core"
+                Summary     = "Display WINDO usage and command docs."
+                Syntax      = @("windo help [topic]", "windo /? [topic]", "windo --help [topic]", "windo -h [topic]")
+                Description = "Use this command to discover WINDO capabilities. Omit topic for a full command index."
+                Notes       = "Global options like --json and --dry-run are accepted before any built-in command."
+                Examples    = @("windo help", "windo /? install-latest", "windo --help install")
+            },
+            [pscustomobject]@{
+                Name        = "version"
+                Category    = "Core"
+                Summary     = "Show WINDO version, file paths, and integrity checks."
+                Syntax      = @("windo version [--json]")
+                Description = "Use for quick operational checks after profile load or automation."
+                Notes       = "Use with `windo doctor` to correlate task/path state."
+                Examples    = @("windo version", "windo version --json")
+            },
+            [pscustomobject]@{
+                Name        = "install-latest"
+                Aliases     = @("upgrade")
+                Category    = "Core"
+                Summary     = "Download and run latest installer from Genisis."
+                Syntax      = @("windo install-latest [--force] [--non-interactive] [--timeout <seconds|ms>] [--preserve-env [ALL|name1,name2]]", "windo upgrade [same options]")
+                Description = "Upgrade path with non-elevated download, optional verification prompt, and optional non-interactive automation mode."
+                Notes       = "Non-interactive requires --force in current shell; WINDO_INSTALL_NONINTERACTIVE / CI auto-skips confirm."
+                Examples    = @("windo install-latest", "windo install-latest --force", "windo upgrade --non-interactive")
+            },
+            [pscustomobject]@{
+                Name        = "uninstall"
+                Category    = "Core"
+                Summary     = "Run elevated uninstaller (tasks, profile block, WINDO secure files)."
+                Syntax      = @("windo uninstall")
+                Description = "Downloads and executes elevated uninstaller; removes scheduled tasks and secure artifacts."
+                Notes       = "You may still manually remove files under $env:USERPROFILE\Documents\windo\ after run."
+                Examples    = @("windo uninstall")
+            },
+            [pscustomobject]@{
+                Name        = "self-update"
+                Category    = "Core"
+                Summary     = "Run the self-update task (repairs task actions)."
+                Syntax      = @("windo self-update [--dry-run]")
+                Description = "Triggers the maintenance task that rewrites scheduled-task action arguments if changed."
+                Notes       = "Useful after installer profile/version drift."
+                Examples    = @("windo self-update", "windo self-update --dry-run")
+            },
+            [pscustomobject]@{
+                Name        = "last"
+                Category    = "Core"
+                Summary     = "Print last stored elevated command (no execution)."
+                Syntax      = @("windo last")
+                Description = "Useful when reusing context after session restarts."
+                Notes       = "History of built-ins is intentionally not recorded here."
+                Examples    = @("windo last")
+            },
+            [pscustomobject]@{
+                Name        = "replay"
+                Aliases     = @("!!")
+                Category    = "Core"
+                Summary     = "Replay last stored elevated command."
+                Syntax      = @("windo replay", "windo !!")
+                Description = "Re-runs the last non-builtin command captured in windo_last_cmd.txt."
+                Notes       = "Any global options set on this call apply to replay invocation."
+                Examples    = @("windo replay", "windo !!", "windo replay --non-interactive")
+            },
+            [pscustomobject]@{
+                Name        = "keybindings"
+                Category    = "Shell Experience"
+                Summary     = "Inspect or set PSReadLine prefix behavior."
+                Syntax      = @("windo keybindings [status]", "windo keybindings set --chord <chord>", "windo keybindings disable|enable|reset|safe-reset")
+                Description = "Inspect effective chording, recover from broken chords, and switch to safe defaults."
+                Notes       = "safe-reset removes legacy handlers and reboots the configured chord in one command."
+                Examples    = @("windo keybindings status --json", "windo keybindings disable", "windo keybindings safe-reset")
+            },
+            [pscustomobject]@{
+                Name        = "profile"
+                Category    = "Shell Experience"
+                Summary     = "Show known profile paths and WINDO block presence."
+                Syntax      = @("windo profile [--json]")
+                Description = "Checks current host profile and standard PowerShell profile files."
+                Notes       = "Use this if bindings are not active in a host."
+                Examples    = @("windo profile", "windo profile --json")
+            },
+            [pscustomobject]@{
+                Name        = "config"
+                Category    = "Configuration"
+                Summary     = "Show effective WINDO env + runner semantics."
+                Syntax      = @("windo config [--json]")
+                Description = "Displays effective values and policy-resolution notes for env and keybinding settings."
+                Notes       = "Includes SUDO_* and WINDO_INSTALL_NONINTERACTIVE parity controls."
+                Examples    = @("windo config", "windo config --json")
+            },
+            [pscustomobject]@{
+                Name        = "backups"
+                Category    = "Maintenance"
+                Summary     = "List log backup files."
+                Syntax      = @("windo backups [--json]", "windo backups --prune --keep N --force")
+                Description = "Enumerates and optionally prunes windo_history*.enc.bak files."
+                Notes       = "Prune requires --force."
+                Examples    = @("windo backups", "windo backups --json", "windo backups --prune --keep 5 --force")
+            },
+            [pscustomobject]@{
+                Name        = "theme"
+                Category    = "Configuration"
+                Summary     = "Configure JSON envelope style (CLI only)."
+                Syntax      = @("windo theme [classic|modern|auto]")
+                Description = "Controls whether --json outputs use schema 2.6-style or modern 3.0-style envelopes."
+                Notes       = "Does not change runner, elevation, or audit behaviour."
+                Examples    = @("windo theme modern", "windo theme auto")
+            },
+            [pscustomobject]@{
+                Name        = "context"
+                Category    = "Inspection"
+                Summary     = "Show current shell, task, and environment context."
+                Syntax      = @("windo context [--json]")
+                Description = "Useful for troubleshooting profile load state and last RequestId."
+                Notes       = "Pair with windo doctor for a full status check."
+                Examples    = @("windo context", "windo context --json")
+            },
+            [pscustomobject]@{
+                Name        = "doctor"
+                Category    = "Inspection"
+                Summary     = "Quick integrity and task health scan."
+                Syntax      = @("windo doctor [--json]")
+                Description = "Checks scheduled tasks, manifest presence, and runner/log locations."
+                Notes       = "Sets $global:WINDO_EXIT_CODE for machine checks."
+                Examples    = @("windo doctor", "windo doctor --json")
+            },
+            [pscustomobject]@{
+                Name        = "integrity"
+                Category    = "Inspection"
+                Summary     = "Runner/manifest integrity comparison."
+                Syntax      = @("windo integrity [--json]")
+                Description = "Reports OK, DRIFT, TAMPERED, UNKNOWN for runner and updater manifests."
+                Notes       = "Pair with windo verify for chain integrity."
+                Examples    = @("windo integrity", "windo integrity --json")
+            },
+            [pscustomobject]@{
+                Name        = "verify"
+                Category    = "Inspection"
+                Summary     = "Validate DPAPI encrypted audit-chain integrity."
+                Syntax      = @("windo verify [--json]")
+                Description = "Verifies encrypted log format and hash chaining."
+                Notes       = "Useful for forensics and compliance checks."
+                Examples    = @("windo verify", "windo verify --json")
+            },
+            [pscustomobject]@{
+                Name        = "log"
+                Category    = "Inspection"
+                Summary     = "Decrypt and print recent audit log entries."
+                Syntax      = @("windo log -n N [--tail] [--json]")
+                Description = "Default output is human-readable; with --json returns a structured payload."
+                Notes       = "--tail with --json reads only the last N physical lines."
+                Examples    = @("windo log -n 20", "windo log -n 10 --tail --json")
+            },
+            [pscustomobject]@{
+                Name        = "stats"
+                Category    = "Inspection"
+                Summary     = "Summarize decrypted audit entries."
+                Syntax      = @("windo stats [--since YYYY-MM-DD] [--last-days N]")
+                Description = "Returns aggregate counts and optional averages based on Timestamp filters."
+                Notes       = "Filters are mutually exclusive. N must be positive."
+                Examples    = @("windo stats --last-days 7", "windo stats --since 2026-04-01")
+            },
+            [pscustomobject]@{
+                Name        = "history"
+                Category    = "Inspection"
+                Summary     = "Compact recent command history from encrypted audit."
+                Syntax      = @("windo history [-n N]")
+                Description = "Shows compact summaries for last N entries."
+                Notes       = "Defaults to 50 when -n is omitted."
+                Examples    = @("windo history", "windo history -n 20")
+            },
+            [pscustomobject]@{
+                Name        = "report"
+                Category    = "Reporting"
+                Summary     = "Write local HTML audit report."
+                Syntax      = @("windo report [-o path]")
+                Description = "Builds an HTML summary with counts and categories in Documents\\windo\\."
+                Notes       = "Uses most recent logs and integrity context."
+                Examples    = @("windo report", "windo report -o .\\windo_report.html")
+            },
+            [pscustomobject]@{
+                Name        = "export"
+                Category    = "Reporting"
+                Summary     = "Bundle manifest, config payload, and log excerpt."
+                Syntax      = @("windo export [-o zip] [-n N] [--redact]")
+                Description = "Creates an audit bundle for handoff to support/debug workflows."
+                Notes       = "Use --redact to mask path-like strings in JSON payloads."
+                Examples    = @("windo export", "windo export -o .\\bundle.zip --redact")
+            },
+            [pscustomobject]@{
+                Name        = "trace"
+                Category    = "Reporting"
+                Summary     = "Find a decrypted audit entry by RequestId."
+                Syntax      = @("windo trace <RequestId>", "windo trace --id <RequestId>")
+                Description = "Decrypts and prints a single matching audit entry."
+                Notes       = "Useful for postmortem of a specific task execution."
+                Examples    = @("windo trace 1234567890abcdef", "windo trace --id 1234567890abcdef")
+            },
+            [pscustomobject]@{
+                Name        = "cleanup"
+                Category    = "Maintenance"
+                Summary     = "Back up and clear active log; remove pending req/res files."
+                Syntax      = @("windo cleanup [-w]")
+                Description = "Creates windo_history.<timestamp>.enc.bak and clears log."
+                Notes       = "`-w` is accepted for compatibility and ignored."
+                Examples    = @("windo cleanup", "windo cleanup -w")
+            }
+        )
+    }
+
+    function _windo_show_help {
+        param([string]$Topic = "")
+        $topics = _windo_help_topics
+        $topicNorm = ""
+        if (-not [string]::IsNullOrWhiteSpace($Topic)) { $topicNorm = [string]$Topic.Trim().ToLowerInvariant() }
+
+        function _windo_render_examples([array]$rows) {
+            foreach ($ex in $rows) { Write-Host "  $ex" -ForegroundColor DarkGray }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($topicNorm)) {
+            if ($JsonOutput) {
+                _emit_json "help" @{ 
+                    topic = $null
+                    available = @($topics | Select-Object Name,Category,Aliases,Summary,Syntax,Description,Notes)
+                    usage = "windo [--json] [--dry-run] [<global sudo flag>] <command>"
+                    exitCode = 0
+                }
+                return
+            }
+            Write-Host "[windo] WINDO help" -ForegroundColor Cyan
+            Write-Host "Usage: windo [--json] [--dry-run] [<global sudo flag>] <command>" -ForegroundColor DarkGray
+            Write-Host "Global flags:" -ForegroundColor Yellow
+            Write-Host "  --json, -Json     machine-readable payload" -ForegroundColor DarkGray
+            Write-Host "  --dry-run         show command and paths only (no task + no log write)" -ForegroundColor DarkGray
+            Write-Host "  --non-interactive, -n (before command)   skip install-latest confirmation in automation" -ForegroundColor DarkGray
+            Write-Host "  --preserve-env [ALL|name1,name2], -E      pass env variables into elevated child" -ForegroundColor DarkGray
+            Write-Host "  --timeout <seconds|ms>, -t              per-command runner timeout override" -ForegroundColor DarkGray
+            Write-Host "  --help, -h, -?, /?                    command/topic help" -ForegroundColor DarkGray
+            Write-Host ""
+            Write-Host "Available commands:" -ForegroundColor Cyan
+            foreach ($group in ($topics | Group-Object -Property Category | Sort-Object Name)) {
+                Write-Host "  $($group.Name)" -ForegroundColor Yellow
+                foreach ($entry in ($group.Group | Sort-Object Name)) {
+                    $aliasText = ""
+                    if ($null -ne $entry.Aliases -and $entry.Aliases.Count -gt 0) {
+                        $aliasText = " (" + ($entry.Aliases -join ", ") + ")"
+                    }
+                    Write-Host ("    {0,-24} {1}" -f ("$($entry.Name)$aliasText"), "$($entry.Summary)") -ForegroundColor Gray
+                }
+            }
+            Write-Host ""
+            Write-Host "Run: windo help <command> or windo /? <command> for detailed usage." -ForegroundColor DarkGray
+            _windo_set_exit 0
+            return
+        }
+
+        $match = @($topics | Where-Object {
+            $name = ([string]$_.Name).ToLowerInvariant()
+            if ($name -eq $topicNorm) { return $true }
+            if ($null -ne $_.Aliases) {
+                foreach ($a in @($_.Aliases)) {
+                    if (($a.ToLowerInvariant()) -eq $topicNorm) { return $true }
+                }
+            }
+            return $false
+        }) | Select-Object -First 1
+
+        if ($null -eq $match) {
+            $match = @($topics | Where-Object {
+                $n = ([string]$_.Name).ToLowerInvariant()
+                ($n -like "*$topicNorm*")
+            }) | Select-Object -First 3
+            if ($JsonOutput) {
+                _emit_json "help" @{
+                    query = $Topic
+                    found = $false
+                    suggestions = @($match | Select-Object Name,Category,Summary)
+                    exitCode = 2
+                }
+                _windo_set_exit 2
+                return
+            }
+            Write-Host "[windo] Unknown help topic: '$Topic'" -ForegroundColor Yellow
+            if ($match.Count -gt 0) {
+                Write-Host "Did you mean:" -ForegroundColor DarkGray
+                foreach ($cand in $match) {
+                    Write-Host "  windo help $($cand.Name)" -ForegroundColor DarkGray
+                }
+            }
+            Write-Host "Use 'windo help' for full command index." -ForegroundColor DarkGray
+            _windo_set_exit 2
+            return
+        }
+
+        Write-Host "[windo] HELP: $($match.Name)" -ForegroundColor Cyan
+        if ($JsonOutput) {
+            $matchExport = $match | Select-Object Name,Aliases,Category,Summary,Description,Syntax,Notes,Examples
+            _emit_json "help" @{ query = $topicNorm; found = $true; command = $matchExport; exitCode = 0 }
+            _windo_set_exit 0
+            return
+        }
+        if ($null -ne $match.Aliases -and $match.Aliases.Count -gt 0) {
+            Write-Host "Aliases: $($match.Aliases -join ', ')" -ForegroundColor Yellow
+        }
+        Write-Host "Summary: $($match.Summary)" -ForegroundColor DarkGray
+        Write-Host "Category: $($match.Category)" -ForegroundColor DarkGray
+        Write-Host "Description: $($match.Description)" -ForegroundColor DarkGray
+        Write-Host "Syntax:" -ForegroundColor Yellow
+        foreach ($syntax in $match.Syntax) { Write-Host ("  $syntax") -ForegroundColor DarkGray }
+        if ($match.Notes) { Write-Host "Notes: $($match.Notes)" -ForegroundColor DarkGray }
+        if ($match.Examples -and $match.Examples.Count -gt 0) {
+            Write-Host "Examples:" -ForegroundColor Yellow
+            _windo_render_examples $match.Examples
+        }
+        Write-Host "Related: windo keybindings, windo config, windo doctor, windo version" -ForegroundColor DarkGray
+        _windo_set_exit 0
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "/?") {
+        $topic = $null
+        if ($Command.Count -ge 2) { $topic = [string]$Command[1] }
+        _windo_show_help $topic
+        _windo_set_exit 0
+        return
+    }
+
     if ($Command.Count -ge 1 -and $Command[0] -eq "help") {
-        $helpText = @(
-            "windo <command...>         Elevate and run via task bridge",
-            "windo !! | windo replay     Re-run last stored elevated command",
-            "windo last                  Show last stored command + metadata",
-            "windo context [--json]      Shell/WINDO environment summary",
-            "windo config [--json]       Effective WINDO_* / CI settings (runner semantics)",
-            "windo backups [--json]      List windo_history*.enc.bak; --prune --keep N --force",
-            "windo keybindings [status|set --chord <chord>|disable|enable|reset|safe-reset]  Configure keyboard shortcuts safely",
-            "windo profile [--json]      Which profile paths exist and contain the WINDO block",
-            "windo trace <RequestId>     Find audit log entry by RequestId",
-            "windo stats [--since YYYY-MM-DD] [--last-days N]   Summarize audit log (Timestamp filter; --last-days is positive int)",
-            "windo history [-n N]        Compact recent commands (default N=50)",
-            "windo report [-o path]      HTML audit report (summary + categories)",
-            "windo export [-o zip] [-n N] [--redact]  Bundle manifest + JSON + log excerpt",
-            "windo self-update           Repair/update scheduled task actions",
-            "windo version [--json]      Version and paths",
-            "windo doctor [--json]       Health / paths / tasks",
-            "windo integrity [--json]    Runner vs manifest (OK|DRIFT|TAMPERED|UNKNOWN)",
-            "windo verify [--json]       Hash chain validation on log",
-            "windo log -n N [--tail] [--json]  Decrypted log entries (--tail: last N physical lines only for JSON)",
-            "windo cleanup [-w]          Backup log, clear active log",
-            "windo theme [classic|modern|auto]  JSON envelope look for --json (prefs; runner unchanged)",
-            "windo install-latest [--force]  Download+verify non-elevated, then prompt; --force skips prompt (CI)",
-            "windo upgrade               Alias of install-latest",
-            "windo uninstall             Elevated uninstaller (tasks, profile, secure dir)",
-            "Exit: `$global:WINDO_EXIT_CODE set by doctor | integrity | verify (0=ok; see README).",
-            "Append --json or -Json; --dry-run for replay/elevated command (no elevation, no log write)."
-        ) -join [Environment]::NewLine
-        Write-Host $helpText -ForegroundColor Yellow
+        $topic = $null
+        if ($Command.Count -ge 2) { $topic = [string]$Command[1] }
+        _windo_show_help $topic
         return
     }
 
@@ -1336,6 +1846,9 @@ function windo {
             [pscustomobject]@{ name = "WINDO_RUNNER_MAX_OUTPUT_BYTES"; environmentValue = $(if ($env:WINDO_RUNNER_MAX_OUTPUT_BYTES) { [string]$env:WINDO_RUNNER_MAX_OUTPUT_BYTES } else { $null }); effectiveNote = "per-stream capture cap ${mcs} chars (derived from env total bytes; see runner)" }
             [pscustomobject]@{ name = "WINDO_MAX_COMMAND_CHARS"; environmentValue = $(if ($env:WINDO_MAX_COMMAND_CHARS) { [string]$env:WINDO_MAX_COMMAND_CHARS } else { $null }); effectiveNote = "${mcc} chars (max 8191)" }
             [pscustomobject]@{ name = "WINDO_SKIP_INSTALLER_SHA256"; environmentValue = $(if ($env:WINDO_SKIP_INSTALLER_SHA256) { [string]$env:WINDO_SKIP_INSTALLER_SHA256 } else { $null }); effectiveNote = $(if ($env:WINDO_SKIP_INSTALLER_SHA256) { "bootstrap/upgrade checksum check skipped" } else { "checksum enforced when published on Genisis" }) }
+            [pscustomobject]@{ name = "SUDO_TIMEOUT"; environmentValue = $(if ($env:SUDO_TIMEOUT) { [string]$env:SUDO_TIMEOUT } else { $null }); effectiveNote = "defaults runner timeout for --timeout when omitted (seconds or ms; clamped 1..86400000)" }
+            [pscustomobject]@{ name = "WINDO_INSTALL_NONINTERACTIVE"; environmentValue = $(if ($env:WINDO_INSTALL_NONINTERACTIVE) { [string]$env:WINDO_INSTALL_NONINTERACTIVE } else { $null }); effectiveNote = "installer confirmation bypass for install-latest" }
+            [pscustomobject]@{ name = "SUDO_PROMPT"; environmentValue = $(if ($env:SUDO_PROMPT) { [string]$env:SUDO_PROMPT } else { $null }); effectiveNote = "custom prompt text for install-latest confirmation" }
             [pscustomobject]@{ name = "WINDO_JSON_ENVELOPE"; environmentValue = $(if ($env:WINDO_JSON_ENVELOPE) { [string]$env:WINDO_JSON_ENVELOPE } else { $null }); effectiveNote = $jsonEnvNote }
             [pscustomobject]@{ name = "WINDO_PREFIX_CHORD"; environmentValue = $(if ($env:WINDO_PREFIX_CHORD) { [string]$env:WINDO_PREFIX_CHORD } else { $null }); effectiveNote = "effective chord: $($kbPolicy.chord)" }
             [pscustomobject]@{ name = "WINDO_DISABLE_PSREADLINE_BINDINGS"; environmentValue = $(if ($env:WINDO_DISABLE_PSREADLINE_BINDINGS) { [string]$env:WINDO_DISABLE_PSREADLINE_BINDINGS } else { $null }); effectiveNote = $keybindingNote }
@@ -2460,6 +2973,11 @@ function windo {
     $reqId   = [Guid]::NewGuid().ToString("n")
     $reqPath = Join-Path $SecureDir ("windo_req.$reqId.json")
     $outPath = Join-Path $SecureDir ("windo_res.$reqId.json")
+    $preservedEnvSnapshot = $null
+    if ($PreserveEnvAll -or ($PreserveEnvNames -and $PreserveEnvNames.Count -gt 0)) {
+        if ($PreserveEnvAll) { $preservedEnvSnapshot = _windo_collect_env_snapshot $null }
+        else { $preservedEnvSnapshot = _windo_collect_env_snapshot ([string[]]$PreserveEnvNames) }
+    }
 
     $pending = @{
         Timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
@@ -2468,6 +2986,9 @@ function windo {
         OutPath   = $outPath
         Host      = $env:COMPUTERNAME
         User      = "$env:USERDOMAIN\$env:USERNAME"
+        TimeoutOverrideMs = $(if ($null -eq $CommandTimeoutOverrideMs) { $null } else { [int]$CommandTimeoutOverrideMs })
+        PreserveEnvironment = $preservedEnvSnapshot
+        PreserveEnvironmentMode = $(if ($PreserveEnvAll) { "all" } elseif ($preservedEnvSnapshot) { "names" } elseif ($PreserveEnvNames -and $PreserveEnvNames.Count -gt 0) { "names" } else { $null })
     } | ConvertTo-Json -Compress
 
     Set-Content -Path $reqPath -Value $pending -Encoding UTF8
@@ -2543,19 +3064,6 @@ function windo {
     }
 }
 
-if (-not (Get-Command sudo -ErrorAction SilentlyContinue)) {
-    function sudo {
-        param(
-            [Parameter(ValueFromRemainingArguments = $true)]
-            [string[]]$CommandArgs
-        )
-        if (($CommandArgs.Count -eq 1) -and ($CommandArgs[0] -eq '!!')) {
-            windo !!
-            return
-        }
-        windo @CommandArgs
-    }
-}
 '@
 $WindoFunctionBody = $WindoFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", $WindoBuiltinVerbsArrayLiteral)
 $WindoFunctionBody = $WindoFunctionBody.Replace("__VERSION__", $WindoVersion)

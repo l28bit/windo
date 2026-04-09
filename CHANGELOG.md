@@ -15,8 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Sudo-style helper:** profile injection now adds a `sudo` convenience function when no native `sudo` command exists. It forwards arguments to `windo`, supports `sudo !!` as a quick replay shortcut, and preserves existing task/routing behavior.
 - **Builtin completion alignment:** `keybindings` is now treated as a built-in command for profile argument-completion and last-command bookkeeping consistency.
+- **Sudo-style native execution controls:** added global command flags `--non-interactive` (`-n`), `--preserve-env` (`-E`), and `--timeout` (`-t`) for elevated runs. `--non-interactive` suppresses `install-latest` confirmation prompts for automation; `--preserve-env` snapshots selected process environment variables (or `ALL`) for the elevated child; `--timeout` overrides `WINDO_RUNNER_TIMEOUT_MS` per command.
+- **SUDO_* parity knobs:** added `SUDO_TIMEOUT` (default `--timeout` source) and `SUDO_PROMPT` (custom install confirmation text), plus `WINDO_INSTALL_NONINTERACTIVE` compatibility note in install output paths.
+- **Runner request propagation:** preserved environment is now carried in the request JSON and reapplied in `windo_runner.ps1` with automatic restore, so sudo-like `--preserve-env` works in elevation without leaking permanent env mutations.
+- **Robust help experience:** added `windo help` topic mode and `windo /?`/`windo --help` support with categorized command reference and examples, including global/sudo-like flag guidance.
+- **Logic checks for sudo-like payload propagation:** `tools/Test-WindoLogic.ps1` now validates source-level presence of timeout parsing, preserve-environment capture, and runner reapplication code paths to guard regressions during release updates.
 
 ## [3.1.1] - 2026-04-01
 

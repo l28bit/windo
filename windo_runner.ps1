@@ -12,7 +12,16 @@ if (-not ("WindoRunner.ChildExec" -as [type])) {
 }
 
 function Get-WindoRunnerTimeoutMs {
+    param([object]$OverrideMs = $null)
     $d = 7200000
+    if ($null -ne $OverrideMs -and -not [string]::IsNullOrWhiteSpace([string]$OverrideMs)) {
+        try {
+            $v = [long]$OverrideMs
+            if ($v -lt 1) { return $d }
+            if ($v -gt 86400000) { return 86400000 }
+            return [int]$v
+        } catch { return $d }
+    }
     $raw = $env:WINDO_RUNNER_TIMEOUT_MS
     if ([string]::IsNullOrWhiteSpace($raw)) { return $d }
     try {
@@ -45,6 +54,51 @@ function Get-WindoMaxCommandChars {
         if ($v -gt 8191) { return 8191 }
         return $v
     } catch { return $d }
+}
+
+function Invoke-WindoPreserveEnvironment {
+    param([object]$Snapshot)
+    $restored = @{}
+    if ($null -eq $Snapshot) { return $restored }
+
+    $items = @()
+    if ($Snapshot -is [System.Collections.IDictionary]) {
+        $items = @($Snapshot.GetEnumerator())
+    } elseif ($Snapshot.PSObject -and $Snapshot.PSObject.Properties) {
+        $items = @($Snapshot.PSObject.Properties)
+    } else {
+        return $restored
+    }
+
+    foreach ($entry in $items) {
+        if ($Snapshot -is [System.Collections.IDictionary]) {
+            $name = [string]$entry.Key
+            $value = $entry.Value
+        } else {
+            $name = [string]$entry.Name
+            $value = $entry.Value
+        }
+        if ($name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { continue }
+        try { $restored[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') } catch { $restored[$name] = $null }
+        try {
+            if ($null -eq $value) {
+                [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+            } else {
+                [Environment]::SetEnvironmentVariable($name, [string]$value, 'Process')
+            }
+        } catch { }
+    }
+    return $restored
+}
+
+function Restore-WindoPreserveEnvironment {
+    param([hashtable]$State)
+    if ($null -eq $State -or $State.Count -eq 0) { return }
+    foreach ($entry in $State.GetEnumerator()) {
+        try {
+            [Environment]::SetEnvironmentVariable([string]$entry.Key, $entry.Value, 'Process')
+        } catch { }
+    }
 }
 
 function Test-WindoCommandLine([string]$cmdLine) {
@@ -102,6 +156,10 @@ try {
     $cmdLine = [string]$pending.Command
     $outPath = [string]$pending.OutPath
     $reqId   = [string]$pending.RequestId
+    $timeoutMsOverride = $null
+    if ($pending.PSObject.Properties.Name -contains "TimeoutOverrideMs") { $timeoutMsOverride = $pending.TimeoutOverrideMs }
+    $preserveEnvironment = $null
+    if ($pending.PSObject.Properties.Name -contains "PreserveEnvironment") { $preserveEnvironment = $pending.PreserveEnvironment }
 
     "PROCESS: RequestId=$reqId  OutPath=$outPath" | Add-Content -Path $RunnerLast -Encoding UTF8
     "CMD: $cmdLine" | Add-Content -Path $RunnerLast -Encoding UTF8
@@ -140,7 +198,7 @@ try {
     }
 
     $start = Get-Date
-    $timeoutMs = Get-WindoRunnerTimeoutMs
+    $timeoutMs = Get-WindoRunnerTimeoutMs $timeoutMsOverride
     $maxPer = Get-WindoRunnerMaxCharsPerStream
     $stdout = [string]$null
     $stderr = [string]$null
@@ -148,23 +206,29 @@ try {
     $truncated = $false
     $exitCode = 0
 
+    $envState = @{}
     try {
-        [WindoRunner.ChildExec]::RunCmd(
-            $cmdLine,
-            $timeoutMs,
-            $maxPer,
-            [ref]$stdout,
-            [ref]$stderr,
-            [ref]$timedOut,
-            [ref]$truncated,
-            [ref]$exitCode
-        )
-    } catch {
-        $stdout = ""
-        $stderr = ($_ | Out-String).TrimEnd()
-        $exitCode = 1
-        $timedOut = $false
-        $truncated = $false
+        $envState = Invoke-WindoPreserveEnvironment -Snapshot $preserveEnvironment
+        try {
+            [WindoRunner.ChildExec]::RunCmd(
+                $cmdLine,
+                $timeoutMs,
+                $maxPer,
+                [ref]$stdout,
+                [ref]$stderr,
+                [ref]$timedOut,
+                [ref]$truncated,
+                [ref]$exitCode
+            )
+        } catch {
+            $stdout = ""
+            $stderr = ($_ | Out-String).TrimEnd()
+            $exitCode = 1
+            $timedOut = $false
+            $truncated = $false
+        } finally {
+            Restore-WindoPreserveEnvironment -State $envState
+        }
     }
 
     if ($null -eq $stdout) { $stdout = "" }

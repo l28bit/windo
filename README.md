@@ -79,10 +79,9 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 
 | Command | Purpose |
 |--------|---------|
-| `windo help` | Short usage reference. |
+| `windo help` / `windo /?` / `windo --help` | Full command help and topic docs (`windo help <command>` for details). |
 | `windo <command…>` | Elevate and run the command via the task bridge. |
 | `windo !!` / `windo replay` | Re-run the last stored elevated command (`replay` is the explicit name). |
-| `sudo <command…>` | `sudo` is available as a profile convenience alias to `windo` when no native `sudo` command exists. `sudo !!` replays the last stored elevated command. |
 | `windo last` | Show the last stored command text and optional metadata (no execution). |
 | `windo context [--json]` | One-screen environment summary (version, paths, tasks, last `RequestId` when known). |
 | `windo config [--json]` | **v3.0+** Effective optional env (`WINDO_*`, `CI`) and runner-related semantics (timeouts, caps). |
@@ -102,7 +101,7 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo stats [--since YYYY-MM-DD] [--last-days N]` | Audit log summary; optional filters on decrypted entry **`Timestamp`** (still scans full log to decrypt). **`--last-days`** must be a **positive** integer; **`--since`** and **`--last-days`** are mutually exclusive. |
 | `windo profile [--json]` | Show known profile paths and whether the WINDO profile block is present (pwsh and Windows PowerShell paths). |
 | `windo cleanup [-w]` | Back up log to `.pwsh_secure`, clear active log, remove pending req/res JSON. Optional `-w` is accepted for compatibility and ignored. |
-| `windo install-latest` | **v3.1.0+** Download and run the latest `windo_install.ps1` from **`Genisis`**. **v3.1.1+:** download only in a **non-elevated** shell; **confirm** after verify, then run installer ( **`--force`** / env for CI). |
+| `windo install-latest [--force] [--non-interactive] [--timeout <seconds|ms>] [--preserve-env [ALL\|name1,name2]]` | **v3.1.0+** Download and run the latest `windo_install.ps1` from **`Genisis`**. **v3.1.1+:** download only in a **non-elevated** shell; **confirm** after verify, then run installer ( **`--force`** / env for CI). |
 | `windo upgrade` | Alias of **`install-latest`**. |
 | `windo theme [classic \| modern \| auto]` | **v3.1.0+** Choose **CLI JSON** “look” only: **`classic`** = `schemaVersion` **2.6** without **`meta`**; **`modern`** = **3.0** + **`meta`**; **`auto`** = follow the embedded profile. Runner, tasks, and audit **do not** change—see [`docs/json-schema.md`](docs/json-schema.md). |
 | `windo uninstall` | Download and run the elevated uninstaller (removes tasks, profile block, WINDO files under `.pwsh_secure`, optional `Documents\windo`). |
@@ -110,6 +109,11 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 Append **`--json`** or **`-Json`** to supported commands for structured output. On v3.0.0+ profiles the default envelope uses **`schemaVersion`** **`3.0`** and **`meta`**. You can still get a **2.6-style** envelope (no **`meta`**) via **`windo theme classic`** or **`WINDO_JSON_ENVELOPE`**—without downgrading WINDO itself. See [`docs/json-schema.md`](docs/json-schema.md).
 
 Append **`--dry-run`** (or **`-DryRun`**) on elevated commands or `windo replay` / `windo !!` to print what would run **without** starting the task, writing req/res files, or appending the audit log. **`windo self-update --dry-run`** prints that the update task would be started only.
+
+Global sudo-like flags for elevated commands can be placed before the command:  
+- `--non-interactive` (or `-n`) to avoid install confirmation prompts for `install-latest` in automation  
+- `--preserve-env` (or `-E`) to pass selected env vars into the elevated child  
+- `--timeout` (or `-t`) to set a per-command runner timeout override (`10`, `10s`, `500ms`)
 
 ---
 
@@ -165,6 +169,11 @@ Bindings are **skipped** with a warning if PSReadLine is missing; your profile s
   and confirm auto-detect is disabled and `effectiveChord` matches your configured fallback or requested chord.
 - **VSCode sanity:** run the same `windo keybindings status --json` and typing checks in a VSCode terminal; set `windo keybindings set --chord Alt+w` if your preferred chord differs.
 - **JSON status checks:** `windo config --json`, `windo keybindings status --json`, and `windo verify --json` should return structured payloads with `exitCode` for scripting and dashboards.
+- **Help command checks (new):**
+  - `windo help`, `windo --help`, and `windo /?` all render usage.
+  - `windo help install-latest` shows the topic doc.
+  - `windo help install-latest --json` returns a JSON payload with `found=true` and `query=install-latest`.
+  - `windo /? install-latest` is available as shorthand for in-terminal recall.
 
 ### Direct `windo <command>` tab completion (v2.6.1+)
 
@@ -194,6 +203,8 @@ See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
 | `WINDO_MAX_COMMAND_CHARS` | Max length of the command line passed to `cmd.exe` (default **8191**). |
 | `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the `Genisis` branch (`bootstrap.ps1`, **`windo install-latest`** / **`upgrade`**). |
 | `WINDO_JSON_ENVELOPE` | **v3.1.0+** Optional override for **`--json`** envelope shape: **`classic`** (2.6, no **`meta`**), **`modern`** (3.0 + **`meta`**), or **`auto`**. Overrides **`windo_prefs.json`** when set (see [`docs/json-schema.md`](docs/json-schema.md)). Does not change runner or security behavior. |
+| `SUDO_TIMEOUT` | Per-command override (seconds or `ms`, e.g. `10`, `10s`, `500ms`) for the `--timeout` flag when not passed explicitly. |
+| `SUDO_PROMPT` | Optional custom text for the `windo install-latest` confirmation prompt. |
 | `WINDO_PREFIX_CHORD` | Set explicit prefix chord for keybinding injection (`Alt+w`, `Ctrl+Alt+w`, etc). Avoid plain `w,w` unless you intentionally accept that keying any line starting with `w` may be affected. |
 | `WINDO_DISABLE_PSREADLINE_BINDINGS` | Set to `1`/`true` to disable WINDO keybindings for the session. |
 | `WINDO_AUTO_DETECT_ALT_BINDINGS` | Set to `0`/`false` to disable automatic fallback for Alt-based chords (default: enabled). |

@@ -40,6 +40,17 @@ Assert-Equal (Get-WindoEffectiveRunnerTimeoutMs "86400001") 86400000 "timeout ca
 Assert-Equal (Get-WindoEffectiveMaxCommandChars "100") 100 "max cmd respects small"
 Assert-Equal (Get-WindoEffectiveMaxCommandChars "999999") 8191 "max cmd cap 8191"
 
+$installerSource = Get-Content -Path (Join-Path $root "windo_install.ps1") -Raw
+$runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
+
+Assert-Equal (($installerSource -match "function _windo_parse_timeout_override_ms") -eq $true) $true "installer parses timeout override"
+Assert-Equal (($installerSource -match "PreserveEnvironment") -eq $true) $true "installer captures preserve-env payload"
+Assert-Equal (($installerSource -match "TimeoutOverrideMs") -eq $true) $true "installer stores timeout override in request"
+Assert-Equal (($runnerSource -match "function Get-WindoRunnerTimeoutMs") -eq $true) $true "runner exposes timeout resolution helper"
+Assert-Equal (($runnerSource -match "PreserveEnvironment") -eq $true) $true "runner reads preserve-environment payload"
+Assert-Equal (($runnerSource -match "Invoke-WindoPreserveEnvironment") -eq $true) $true "runner applies preserved environment"
+Assert-Equal (($runnerSource -match "Restore-WindoPreserveEnvironment") -eq $true) $true "runner restores preserved environment"
+
 if ($failed -gt 0) {
     Write-Host "Test-WindoLogic: $failed failure(s)." -ForegroundColor Red
     exit 1
