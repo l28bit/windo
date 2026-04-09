@@ -6,7 +6,8 @@ $files = @(
     "windo_install.ps1",
     "windo_uninstall.ps1",
     "windo_runner.ps1",
-    "windo_self_update.ps1"
+    "windo_self_update.ps1",
+    "src\windo\snippets\StatsTimeFilter.ps1"
 )
 $ok = $true
 foreach ($f in $files) {

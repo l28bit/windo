@@ -2,6 +2,7 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 . (Join-Path $root "src\windo\snippets\IntegrityLevels.ps1")
+. (Join-Path $root "src\windo\snippets\StatsTimeFilter.ps1")
 
 $failed = 0
 function Assert-Equal($a, $b, $msg) {
@@ -19,6 +20,19 @@ $hexA = "0" * 64
 $hexB = "f" * 64
 Assert-Equal (Get-WindoIntegrityComponentLevel $hexA $hexB) "TAMPERED" "two hex mismatch"
 Assert-Equal (Get-WindoIntegrityComponentLevel "nothex" "alsonot") "DRIFT" "non-hex drift"
+
+$cutSince = Get-WindoStatsTimeCutoff -SinceDate ([datetime]"2024-06-15T14:00:00Z") -LastDays $null
+Assert-Equal $cutSince ([datetime]"2024-06-15").Date "since uses date only"
+$cutDays = Get-WindoStatsTimeCutoff -SinceDate $null -LastDays 3
+Assert-Equal ($null -eq (Get-WindoStatsTimeCutoff -SinceDate $null -LastDays $null)) $true "no cutoff when no filter"
+$e1 = [pscustomobject]@{ Timestamp = "2024-01-01T12:00:00Z"; ExitCode = 0 }
+$e2 = [pscustomobject]@{ Timestamp = "2024-06-01T08:00:00Z"; ExitCode = 1 }
+$co = [datetime]"2024-05-01"
+$filt = Invoke-WindoFilterAuditEntriesByTime -Entries @($e1, $e2) -CutoffDate $co
+Assert-Equal $filt.Count 1 "filter keeps entries on/after cutoff"
+Assert-Equal ([string]$filt[0].Timestamp) "2024-06-01T08:00:00Z" "filtered row is june"
+$all = Invoke-WindoFilterAuditEntriesByTime -Entries @($e1) -CutoffDate $null
+Assert-Equal $all.Count 1 "null cutoff passes through"
 
 if ($failed -gt 0) {
     Write-Host "Test-WindoLogic: $failed failure(s)." -ForegroundColor Red

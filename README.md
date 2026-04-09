@@ -91,7 +91,7 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo integrity` | Runner vs manifest with levels **OK \| DRIFT \| TAMPERED \| UNKNOWN**. |
 | `windo verify` | Validate encrypted log format and hash chain. |
 | `windo log -n N [--tail] [--json]` | Show last N log entries (decrypted). **`--tail`** with **`--json`** reads only the last N **physical** log lines (faster on large logs). |
-| `windo stats [--since YYYY-MM-DD] [--last-days N]` | Audit log summary; optional filters on decrypted entry **`Timestamp`** (still scans full log to decrypt). |
+| `windo stats [--since YYYY-MM-DD] [--last-days N]` | Audit log summary; optional filters on decrypted entry **`Timestamp`** (still scans full log to decrypt). **`--last-days`** must be a **positive** integer; **`--since`** and **`--last-days`** are mutually exclusive. |
 | `windo profile [--json]` | Show known profile paths and whether the WINDO profile block is present (pwsh and Windows PowerShell paths). |
 | `windo cleanup [-w]` | Back up log to `.pwsh_secure`, clear active log, remove pending req/res JSON. Optional `-w` is accepted for compatibility and ignored. |
 | `windo upgrade` | Download and run the latest `windo_install.ps1` from `Genisis` (same as bootstrap). |
@@ -148,7 +148,7 @@ See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
 | Code | Typical meaning |
 |------|-----------------|
 | 0 | Success / OK |
-| 2 | Doctor: main task or runner missing; verify: no log or empty log; stats: bad `--since` / conflicting filters |
+| 2 | Doctor: main task or runner missing; verify: no log or empty log; stats: bad `--since`, conflicting filters, invalid or missing `--last-days`, or non-positive `--last-days` (no JSON envelope on stats validation errors) |
 | 3 | Doctor or integrity: manifest/hash state not OK (DRIFT/TAMPERED) |
 | 4 | Verify: hash chain or format failure |
 | 6 | Doctor or integrity: UNKNOWN component level |
@@ -162,7 +162,7 @@ Scripts: run `windo doctor` (or `integrity` / `verify`), then test **`$global:WI
 
 - **`windo report`** produces a **local HTML** summary (entry counts, category breakdown, integrity levels, recent audit lines). Treat reports as **sensitive**; they may echo elevated command text.
 - **`windo export`** builds a **zip** under `Documents\windo\exports\` (or `-o`) with manifest, envelope JSON, and a truncated audit excerpt—handle as sensitive.
-- **`--json` / `-Json`** uses the **v2.6 envelope** for `doctor`, `integrity`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, and `trace`. See [`docs/json-schema.md`](docs/json-schema.md).
+- **`--json` / `-Json`** uses the **v2.6 envelope** for `doctor`, `integrity`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, and `profile`. See [`docs/json-schema.md`](docs/json-schema.md).
 - **`windo stats`** / **`windo history`** give fast situational awareness without full `log` verbosity.
 
 - Maintainer notes: [`docs/build.md`](docs/build.md) (validation + optional `src/` concat), [`docs/json-schema.md`](docs/json-schema.md), [`docs/performance.md`](docs/performance.md) (large logs), [`docs/branding.md`](docs/branding.md) (logo direction).

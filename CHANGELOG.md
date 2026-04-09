@@ -4,6 +4,18 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.9.1] - 2026-04-01
+
+### Added
+
+- **`src/windo/snippets/StatsTimeFilter.ps1`:** shared cutoff + filter helpers (mirrors installer stats time logic); covered by **`tools/Test-WindoLogic.ps1`**.
+- **`docs/json-schema.md`:** `stats` and `profile` payload fields, **`payload.exitCode`** table, **`--json`** envelope list includes **`profile`**.
+
+### Changed
+
+- **`windo stats`:** stricter **`--last-days`** handling — value required after the flag, must parse as an integer and be **> 0**; clearer errors; JSON **`filterLastDays`** is omitted unless **`--last-days`** was used.
+- **`windo stats --json`:** **`payload.exitCode`** (**0**) for parity with other automation-friendly payloads.
+
 ## [2.9.0] - 2026-04-01
 
 ### Added
@@ -127,6 +139,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[2.9.1]: https://github.com/l28bit/windo/compare/v2.9.0...v2.9.1
 [2.9.0]: https://github.com/l28bit/windo/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/l28bit/windo/compare/v2.7.1...v2.8.0
 [2.7.1]: https://github.com/l28bit/windo/compare/v2.7.0...v2.7.1

@@ -19,7 +19,7 @@ This runs `tools/Validate-Windo.ps1` (AST parse of `bootstrap.ps1`, `windo_insta
 
 CI also runs:
 
-- `tools/Test-WindoLogic.ps1` — integrity-level logic (see `src/windo/snippets/IntegrityLevels.ps1`)
+- `tools/Test-WindoLogic.ps1` — integrity-level logic (`src/windo/snippets/IntegrityLevels.ps1`) and stats time filter (`src/windo/snippets/StatsTimeFilter.ps1`)
 - `tools/Invoke-PSScriptAnalyzer.ps1` — **Error**-severity rules on shipping scripts (requires `PSScriptAnalyzer` module)
 
 ## Optional `src/` fragments
