@@ -86,6 +86,7 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo context [--json]` | One-screen environment summary (version, paths, tasks, last `RequestId` when known). |
 | `windo config [--json]` | **v3.0+** Effective optional env (`WINDO_*`, `CI`) and runner-related semantics (timeouts, caps). |
 | `windo backups [--json]` | **v3.0+** List encrypted log backups (`windo_history*.enc.bak`); **`--prune --keep N --force`** removes older files. |
+| `windo keybindings [status|set --chord <chord>|disable|enable|reset]` | Inspect and control `windo` PSReadLine prefixing behavior (no install required, applies to current session when possible). |
 | `windo trace <RequestId>` / `windo trace --id <id>` | Find a decrypted audit entry by `RequestId`. |
 | `windo stats` | Summarize the encrypted audit log (counts, categories, optional avg duration). |
 | `windo history [-n N]` | Compact recent commands (default last 50). |
@@ -113,15 +114,43 @@ Append **`--dry-run`** (or **`-DryRun`**) on elevated commands or `windo replay`
 
 ## PSReadLine keybindings (v2.4.0+)
 
-When **PSReadLine** is available (typical in **PowerShell 7**), the installer registers optional bindings so you can **type normally** and only add `windo` when you mean to:
+When **PSReadLine** is available (typical in **PowerShell 7**), WINDO registers optional bindings so you can type normally and only add `windo` when you mean to. The active prefix chord is resolved in this order:
+
+1. `WINDO_PREFIX_CHORD` environment variable (preferred)
+2. `keybindingPrefixChord` in `windo_prefs.json`
+3. VSCode fallback (`TERM_PROGRAM == vscode`): `Alt+w`
+4. Default: `w,w`
 
 | Input | Action |
 |--------|--------|
-| `w,w` | Prefix the current line with `windo ` (no-op if empty or line already starts with `windo`). |
+| `<prefix chord>` | Prefix the current line with `windo ` (no-op if empty or line already starts with `windo`). |
 | `Shift+Enter` | Prefix, then **submit** the line. |
 | `Alt+Enter` | Same as `Shift+Enter` if your terminal does not send Shift+Enter reliably. |
 
-**Note:** Some terminals do not distinguish `Shift+Enter` from a normal newline. If that happens, use **`Alt+Enter`** or type `windo` explicitly. Bindings are **skipped** with a warning if PSReadLine is missing; your profile still loads.
+If your terminal treats `w,w` as a real key sequence (some VSCode setups), plain `w` can appear blocked. Use the recovery path:
+
+```powershell
+windo keybindings disable
+windo keybindings set --chord Alt+w
+windo keybindings status --json
+```
+
+To keep the classic style everywhere, set `WINDO_PREFIX_CHORD=w,w` in your profile session and avoid `windo keybindings` edits for that machine.
+
+Bindings are **skipped** with a warning if PSReadLine is missing; your profile still loads.
+
+### Quick verification checklist
+
+- **Normal shell (pwsh/Windows PowerShell):** open a fresh shell and run `windo keybindings status --json`; confirm `policy.enabled` and `policy.chord`.
+- **Plain typing check:** in a fresh prompt, type `w` and `hello`; it should appear as expected (single-character typing works).
+- **Prefix shortcut check:** type `g` + `it` (or any text), then press your reported chord (for example `Alt+w`) and ensure `windo ` is prepended.
+- **Terminal profile reload check:** run:
+  - `windo keybindings disable`
+  - `windo keybindings enable`
+  - `windo keybindings status`
+  and confirm outputs update.
+- **VSCode sanity:** run the same `windo keybindings status --json` and typing checks in a VSCode terminal; set `windo keybindings set --chord Alt+w` if legacy `w,w` interferes.
+- **JSON status checks:** `windo config --json`, `windo keybindings status --json`, and `windo verify --json` should return structured payloads with `exitCode` for scripting and dashboards.
 
 ### Direct `windo <command>` tab completion (v2.6.1+)
 
@@ -151,6 +180,8 @@ See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
 | `WINDO_MAX_COMMAND_CHARS` | Max length of the command line passed to `cmd.exe` (default **8191**). |
 | `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the `Genisis` branch (`bootstrap.ps1`, **`windo install-latest`** / **`upgrade`**). |
 | `WINDO_JSON_ENVELOPE` | **v3.1.0+** Optional override for **`--json`** envelope shape: **`classic`** (2.6, no **`meta`**), **`modern`** (3.0 + **`meta`**), or **`auto`**. Overrides **`windo_prefs.json`** when set (see [`docs/json-schema.md`](docs/json-schema.md)). Does not change runner or security behavior. |
+| `WINDO_PREFIX_CHORD` | Set explicit prefix chord for keybinding injection (`w,w`, `Alt+w`, etc). |
+| `WINDO_DISABLE_PSREADLINE_BINDINGS` | Set to `1`/`true` to disable WINDO keybindings for the session. |
 | `WINDO_INSTALL_NONINTERACTIVE` | **v3.1.1+** If set, **`windo install-latest`** runs the downloaded installer **without** an interactive confirmation (for CI; use with care). |
 | `WINDO_BOOTSTRAP_FORCE_INSTALL` | **v3.1.1+** If set, **`bootstrap.ps1`** launches the installer **without** **`Read-Host`** after download (CI / scripts). |
 
