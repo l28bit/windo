@@ -6,8 +6,10 @@ This tree holds **maintainer-facing** snippets that mirror logic embedded in the
 
 | Path | Role |
 |------|------|
-| `snippets/JsonEnvelope.ps1` | JSON envelope helper aligned with `schemaVersion` **2.6** |
+| `snippets/JsonEnvelope.ps1` | JSON envelope helper (`schemaVersion` **3.0** + **`meta`**) |
 | `snippets/IntegrityLevels.ps1` | Integrity level helpers; must match `windo_install.ps1` embedded `_integrity_component_level` rules |
+| `snippets/StatsTimeFilter.ps1` | Audit **`stats`** time cutoff / filter (mirrors installer) |
+| `snippets/WindoConfigEffective.ps1` | Runner timeout / output / command-length effective values (tests + docs) |
 | (future) | Additional fragments as described in `docs/build.md` |
 
 Installer **`$WindoBuiltinVerbs`** at the top of `windo_install.ps1` is the single source for built-in subcommand names (profile completer + `windo` last-command exclusions).

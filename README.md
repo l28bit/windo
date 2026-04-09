@@ -80,6 +80,8 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo !!` / `windo replay` | Re-run the last stored elevated command (`replay` is the explicit name). |
 | `windo last` | Show the last stored command text and optional metadata (no execution). |
 | `windo context [--json]` | One-screen environment summary (version, paths, tasks, last `RequestId` when known). |
+| `windo config [--json]` | **v3.0+** Effective optional env (`WINDO_*`, `CI`) and runner-related semantics (timeouts, caps). |
+| `windo backups [--json]` | **v3.0+** List encrypted log backups (`windo_history*.enc.bak`); **`--prune --keep N --force`** removes older files. |
 | `windo trace <RequestId>` / `windo trace --id <id>` | Find a decrypted audit entry by `RequestId`. |
 | `windo stats` | Summarize the encrypted audit log (counts, categories, optional avg duration). |
 | `windo history [-n N]` | Compact recent commands (default last 50). |
@@ -97,7 +99,7 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo upgrade` | Download and run the latest `windo_install.ps1` from `Genisis` (same as bootstrap). |
 | `windo uninstall` | Download and run the elevated uninstaller (removes tasks, profile block, WINDO files under `.pwsh_secure`, optional `Documents\windo`). |
 
-Append **`--json`** or **`-Json`** to supported commands for structured output. WINDO **v2.6.0+** wraps payloads in a shared envelope (`schemaVersion`, `windoVersion`, `command`, `generatedAt`, `payload`). See [`docs/json-schema.md`](docs/json-schema.md).
+Append **`--json`** or **`-Json`** to supported commands for structured output. WINDO **v3.0.0+** uses envelope **`schemaVersion`** **`3.0`** and adds **`meta`** (PowerShell / OS). Earlier v2.6.x builds used **`schemaVersion`** **`2.6`** without **`meta`**. See [`docs/json-schema.md`](docs/json-schema.md).
 
 Append **`--dry-run`** (or **`-DryRun`**) on elevated commands or `windo replay` / `windo !!` to print what would run **without** starting the task, writing req/res files, or appending the audit log. **`windo self-update --dry-run`** prints that the update task would be started only.
 
@@ -148,7 +150,7 @@ See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
 | Code | Typical meaning |
 |------|-----------------|
 | 0 | Success / OK |
-| 2 | Doctor: main task or runner missing; verify: no log or empty log; stats: bad `--since`, conflicting filters, invalid or missing `--last-days`, or non-positive `--last-days` (no JSON envelope on stats validation errors) |
+| 2 | Doctor: main task or runner missing; verify: no log or empty log; stats: bad `--since`, conflicting filters, invalid or missing `--last-days`, or non-positive `--last-days` (no JSON envelope on stats validation errors); backups: bad args or prune without **`--force`** |
 | 3 | Doctor or integrity: manifest/hash state not OK (DRIFT/TAMPERED) |
 | 4 | Verify: hash chain or format failure |
 | 6 | Doctor or integrity: UNKNOWN component level |
@@ -162,7 +164,7 @@ Scripts: run `windo doctor` (or `integrity` / `verify`), then test **`$global:WI
 
 - **`windo report`** produces a **local HTML** summary (entry counts, category breakdown, integrity levels, recent audit lines). Treat reports as **sensitive**; they may echo elevated command text.
 - **`windo export`** builds a **zip** under `Documents\windo\exports\` (or `-o`) with manifest, envelope JSON, and a truncated audit excerpt—handle as sensitive.
-- **`--json` / `-Json`** uses the **v2.6 envelope** for `doctor`, `integrity`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, and `profile`. See [`docs/json-schema.md`](docs/json-schema.md).
+- **`--json` / `-Json`** uses the **v3.0 envelope** (and **`meta`**) on v3.0.0+ installs for `doctor`, `integrity`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `profile`, `config`, and `backups`. See [`docs/json-schema.md`](docs/json-schema.md).
 - **`windo stats`** / **`windo history`** give fast situational awareness without full `log` verbosity.
 
 - Maintainer notes: [`docs/build.md`](docs/build.md) (validation + optional `src/` concat), [`docs/json-schema.md`](docs/json-schema.md), [`docs/performance.md`](docs/performance.md) (large logs), [`docs/branding.md`](docs/branding.md) (logo direction).

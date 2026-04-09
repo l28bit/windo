@@ -19,7 +19,7 @@ This runs `tools/Validate-Windo.ps1` (AST parse of `bootstrap.ps1`, `windo_insta
 
 CI also runs:
 
-- `tools/Test-WindoLogic.ps1` — integrity-level logic (`src/windo/snippets/IntegrityLevels.ps1`) and stats time filter (`src/windo/snippets/StatsTimeFilter.ps1`)
+- `tools/Test-WindoLogic.ps1` — integrity-level logic (`src/windo/snippets/IntegrityLevels.ps1`), stats time filter (`src/windo/snippets/StatsTimeFilter.ps1`), and effective env helpers (`src/windo/snippets/WindoConfigEffective.ps1`)
 - `tools/Invoke-PSScriptAnalyzer.ps1` — **Error**-severity rules on shipping scripts (requires `PSScriptAnalyzer` module)
 
 ## Optional `src/` fragments
@@ -43,4 +43,4 @@ No build step is required for end users.
 
 ## JSON CLI schema
 
-Structured command output uses a shared envelope (`schemaVersion` **2.6**). See [`docs/json-schema.md`](json-schema.md).
+Structured command output uses a shared envelope (`schemaVersion` **3.0** on current installs; **2.6** on older v2.x profiles). See [`docs/json-schema.md`](json-schema.md).

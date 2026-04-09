@@ -1,4 +1,4 @@
-# WINDO JSON output (schema 2.6)
+# WINDO JSON output (schema 3.0)
 
 Commands that support `--json` or `-Json` emit a single **envelope** so scripts can rely on stable top-level fields.
 
@@ -6,29 +6,49 @@ Commands that support `--json` or `-Json` emit a single **envelope** so scripts 
 
 | Field | Type | Description |
 |--------|------|-------------|
-| `schemaVersion` | string | `"2.6"` for WINDO v2.6.x |
-| `windoVersion` | string | Installer profile version (e.g. `"2.9.1"`) |
-| `command` | string | Logical subcommand name (`doctor`, `integrity`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `profile`, `export` payload in bundles, etc.) |
+| `schemaVersion` | string | **`"3.0"`** for WINDO **v3.0.0+** CLI JSON (v2.6.x installers emitted `"2.6"`) |
+| `windoVersion` | string | Installer profile version (e.g. `"3.0.0"`) |
+| `command` | string | Logical subcommand name (`doctor`, `integrity`, `config`, `backups`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `profile`, `export` payload in bundles, etc.) |
 | `generatedAt` | string | ISO-8601 timestamp |
+| `meta` | object | Host context (see below). **New in v3.0.0.** |
 | `payload` | object | Command-specific data |
+
+### `meta` (v3.0.0+)
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `psEdition` | string | e.g. `Core` or `Desktop` |
+| `psVersion` | string | PowerShell version (e.g. `7.5.5`) |
+| `osVersion` | string | `Environment.OSVersion` string |
 
 Example:
 
 ```json
 {
-  "schemaVersion": "2.6",
-  "windoVersion": "2.9.1",
+  "schemaVersion": "3.0",
+  "windoVersion": "3.0.0",
   "command": "doctor",
   "generatedAt": "2026-04-01T12:00:00.0000000-04:00",
+  "meta": {
+    "psEdition": "Core",
+    "psVersion": "7.5.5",
+    "osVersion": "Microsoft Windows NT 10.0.26200.0"
+  },
   "payload": { }
 }
 ```
+
+## Migrating from schema 2.6
+
+- **v2.6.x** envelopes had **no** `meta` object; **`schemaVersion`** was **`"2.6"`**.
+- **v3.0.0+** adds **`meta`** and sets **`schemaVersion`** to **`"3.0"`**. **`payload` shapes** for existing commands are unchanged unless noted in the changelog.
+- Automation should accept **`schemaVersion`** **`2.6`** or **`3.0`** (or branch on `schemaVersion` if you need `meta`).
 
 ## Breaking change from pre-2.6 JSON
 
 Earlier releases returned **flat** objects (for example `{ "windoVersion": "2.5.0", ... }`). From **2.6.0**, the same information lives under **`payload`**, with the envelope fields above. Scripts should read `payload` and check `schemaVersion`.
 
-Patch releases (for example **v2.6.1**) may bump `windoVersion` without changing `schemaVersion` when JSON shape is unchanged.
+Patch releases may bump `windoVersion` without changing `schemaVersion` when JSON shape is unchanged.
 
 ## On-disk audit log
 
@@ -49,6 +69,29 @@ Several commands mirror **`$global:WINDO_EXIT_CODE`** inside **`payload.exitCode
 | `verify` | 0, 2, 4 | Log missing/empty vs chain failure |
 | `stats` | 0 | Success; invalid filters exit **before** JSON is printed (host exit **2**, no envelope) |
 | `profile` | 0 | Listing only |
+| `config` | 0 | Listing only |
+| `backups` | 0, 2 | **2** = bad args, prune without `--force`, prune failure |
+
+## `config` payload (v3.0.0+)
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `secureDir` | string | WINDO secure directory (`.pwsh_secure`) |
+| `settings` | array | Rows: `name`, `environmentValue` (string or null), `effectiveNote` (human-readable effective behavior) |
+| `exitCode` | number | **0** |
+
+## `backups` payload (v3.0.0+)
+
+Lists **`windo_history*.enc.bak`** files created by **`windo cleanup`** (newest first).
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `backups` | array | Objects: `name`, `fullPath`, `lastWriteTime`, `sizeBytes` |
+| `backupCount` | number | (list mode) count of backup files |
+| `exitCode` | number | **0** on success |
+| `prunedFiles` | array of string | (after **`--prune --keep N --force`**) basenames removed |
+| `keep` | number | requested keep count when pruning |
+| `error` | string | when **`exitCode`** is **2** |
 
 ## `stats` payload (v2.9.0+)
 

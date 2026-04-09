@@ -4,6 +4,20 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.0.0] - 2026-04-01
+
+### Added
+
+- **`windo config`:** prints effective optional environment (`WINDO_*`, `CI`) with runner-aligned semantics (timeout ms, per-stream capture derived from `WINDO_RUNNER_MAX_OUTPUT_BYTES`, command length cap). **`--json`** returns structured rows plus `secureDir`.
+- **`windo backups`:** lists `windo_history*.enc.bak` under the secure dir (newest first). **`windo backups --prune --keep N --force`** deletes older backups, keeping **N** newest files (destructive; **`--force`** required).
+- **JSON schema 3.0:** CLI envelope includes **`meta`** (`psEdition`, `psVersion`, `osVersion`). **`schemaVersion`** is **`3.0`** on v3.0.0+ profiles.
+- **`src/windo/snippets/WindoConfigEffective.ps1`:** shared effective-value helpers for tests (mirrors runner/installer).
+- **`src/windo/snippets/JsonEnvelope.ps1`:** optional **`meta`**; aligned with v3 envelope.
+
+### Changed
+
+- **Breaking (JSON consumers):** scripts that only accept **`schemaVersion`** **`2.6`** must allow **`3.0`** (or branch on version). Payload layouts for existing commands are unchanged except for the new envelope **`meta`** field.
+
 ## [2.9.1] - 2026-04-01
 
 ### Added
@@ -139,6 +153,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[3.0.0]: https://github.com/l28bit/windo/compare/v2.9.1...v3.0.0
 [2.9.1]: https://github.com/l28bit/windo/compare/v2.9.0...v2.9.1
 [2.9.0]: https://github.com/l28bit/windo/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/l28bit/windo/compare/v2.7.1...v2.8.0

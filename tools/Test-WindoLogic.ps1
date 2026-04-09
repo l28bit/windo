@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 . (Join-Path $root "src\windo\snippets\IntegrityLevels.ps1")
 . (Join-Path $root "src\windo\snippets\StatsTimeFilter.ps1")
+. (Join-Path $root "src\windo\snippets\WindoConfigEffective.ps1")
 
 $failed = 0
 function Assert-Equal($a, $b, $msg) {
@@ -33,6 +34,11 @@ Assert-Equal $filt.Count 1 "filter keeps entries on/after cutoff"
 Assert-Equal ([string]$filt[0].Timestamp) "2024-06-01T08:00:00Z" "filtered row is june"
 $all = Invoke-WindoFilterAuditEntriesByTime -Entries @($e1) -CutoffDate $null
 Assert-Equal $all.Count 1 "null cutoff passes through"
+
+Assert-Equal (Get-WindoEffectiveRunnerTimeoutMs "") 7200000 "timeout default"
+Assert-Equal (Get-WindoEffectiveRunnerTimeoutMs "86400001") 86400000 "timeout cap"
+Assert-Equal (Get-WindoEffectiveMaxCommandChars "100") 100 "max cmd respects small"
+Assert-Equal (Get-WindoEffectiveMaxCommandChars "999999") 8191 "max cmd cap 8191"
 
 if ($failed -gt 0) {
     Write-Host "Test-WindoLogic: $failed failure(s)." -ForegroundColor Red
