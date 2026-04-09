@@ -685,14 +685,29 @@ function windo {
             $chordSource = $null
         }
 
+        $autoDetectAlt = [string]$env:WINDO_AUTO_DETECT_ALT_BINDINGS
+        $autoDetectAltEnabled = $true
+        if (-not [string]::IsNullOrWhiteSpace($autoDetectAlt)) {
+            $autoDetectAltEnabled = _windo_parse_bool_value -Raw $autoDetectAlt -Default $true
+        }
+
+        $fallbackChord = [string]$env:WINDO_KEYBINDING_FALLBACK_CHORD
+        if ([string]::IsNullOrWhiteSpace($fallbackChord)) { $fallbackChord = "w,w" } else { $fallbackChord = $fallbackChord.Trim() }
+
         [pscustomobject]@{
             enabled = [bool](-not $disabled)
             disabled = [bool]$disabled
             disabledSource = $disabledSource
+            autoDetectAlt = [bool]$autoDetectAltEnabled
+            fallbackChord = $fallbackChord
+            requestedChord = $chord
+            requestedSource = $chordSource
             chord = $chord
             chordSource = $chordSource
             prefChord = $prefChord
             envChord = $(if ([string]::IsNullOrWhiteSpace($envChord)) { $null } else { $envChord.Trim() })
+            autoDetected = $false
+            autoDetectedReason = $null
         }
     }
 
@@ -741,7 +756,36 @@ function windo {
             [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
         }
 
-        try { Set-PSReadLineKeyHandler -Chord $policy.chord -ScriptBlock $windoPrefixOnly } catch { }
+        $requestedChord = $policy.chord
+        $prefixCandidates = [System.Collections.ArrayList]@()
+        [void]$prefixCandidates.Add($requestedChord)
+        if ($policy.autoDetectAlt -and ($requestedChord -like 'Alt+*') -and ([string]::IsNullOrWhiteSpace($policy.fallbackChord) -eq $false) -and ($policy.fallbackChord -ne $requestedChord)) {
+            [void]$prefixCandidates.Add($policy.fallbackChord)
+        }
+
+        $selectedPrefixChord = $null
+        foreach ($candidate in ($prefixCandidates | Select-Object -Unique)) {
+            try {
+                Set-PSReadLineKeyHandler -Chord $candidate -ScriptBlock $windoPrefixOnly -ErrorAction Stop
+                $handler = Get-PSReadLineKeyHandler -Chord $candidate -ErrorAction Stop
+                if ($null -ne $handler) {
+                    $selectedPrefixChord = $candidate
+                    break
+                }
+            } catch {
+                try { Remove-PSReadLineKeyHandler -Chord $candidate -ErrorAction SilentlyContinue } catch { }
+            }
+        }
+        if ($null -eq $selectedPrefixChord) { return }
+        if ($selectedPrefixChord -ne $requestedChord) {
+            $policy.chord = $selectedPrefixChord
+            $policy.chordSource = "auto-fallback"
+            $policy.autoDetected = $true
+            $policy.autoDetectedReason = "alt binding did not bind, fallback to '$selectedPrefixChord'"
+        } else {
+            $policy.appliedChord = $selectedPrefixChord
+        }
+
         try { Set-PSReadLineKeyHandler -Chord 'Shift+Enter' -ScriptBlock $windoPrefixRun } catch { }
         try { Set-PSReadLineKeyHandler -Chord 'Alt+Enter' -ScriptBlock $windoPrefixRun } catch { }
         return $true
@@ -1161,7 +1205,7 @@ function windo {
             "windo context [--json]      Shell/WINDO environment summary",
             "windo config [--json]       Effective WINDO_* / CI settings (runner semantics)",
             "windo backups [--json]      List windo_history*.enc.bak; --prune --keep N --force",
-            "windo keybindings [status|set --chord <chord>|disable|enable|reset]  Configure keyboard shortcuts safely",
+            "windo keybindings [status|set --chord <chord>|disable|enable|reset|safe-reset]  Configure keyboard shortcuts safely",
             "windo profile [--json]      Which profile paths exist and contain the WINDO block",
             "windo trace <RequestId>     Find audit log entry by RequestId",
             "windo stats [--since YYYY-MM-DD] [--last-days N]   Summarize audit log (Timestamp filter; --last-days is positive int)",
@@ -1298,6 +1342,8 @@ function windo {
             [pscustomobject]@{ name = "WINDO_JSON_ENVELOPE"; environmentValue = $(if ($env:WINDO_JSON_ENVELOPE) { [string]$env:WINDO_JSON_ENVELOPE } else { $null }); effectiveNote = $jsonEnvNote }
             [pscustomobject]@{ name = "WINDO_PREFIX_CHORD"; environmentValue = $(if ($env:WINDO_PREFIX_CHORD) { [string]$env:WINDO_PREFIX_CHORD } else { $null }); effectiveNote = "effective chord: $($kbPolicy.chord)" }
             [pscustomobject]@{ name = "WINDO_DISABLE_PSREADLINE_BINDINGS"; environmentValue = $(if ($env:WINDO_DISABLE_PSREADLINE_BINDINGS) { [string]$env:WINDO_DISABLE_PSREADLINE_BINDINGS } else { $null }); effectiveNote = $keybindingNote }
+            [pscustomobject]@{ name = "WINDO_AUTO_DETECT_ALT_BINDINGS"; environmentValue = $(if ($env:WINDO_AUTO_DETECT_ALT_BINDINGS) { [string]$env:WINDO_AUTO_DETECT_ALT_BINDINGS } else { $null }); effectiveNote = $(if ($kbPolicy.autoDetectAlt) { "alt-chord auto fallback enabled" } else { "alt-chord auto fallback disabled" }) }
+            [pscustomobject]@{ name = "WINDO_KEYBINDING_FALLBACK_CHORD"; environmentValue = $(if ($env:WINDO_KEYBINDING_FALLBACK_CHORD) { [string]$env:WINDO_KEYBINDING_FALLBACK_CHORD } else { $null }); effectiveNote = "fallback chord: $($kbPolicy.fallbackChord)" }
             [pscustomobject]@{ name = "WINDO_KEYBINDING_POLICY"; environmentValue = $null; effectiveNote = "effective source chord=$($kbPolicy.chordSource); enabled=$($kbPolicy.enabled)" }
         )
         if ($JsonOutput) {
@@ -1514,8 +1560,13 @@ function windo {
             if ($policy.enabled -and ($null -ne $policy.chord) -and ($chords -notcontains $policy.chord)) {
                 $chords = @($policy.chord) + $chords
             }
+            if ($policy.enabled -and $policy.autoDetectAlt -and $policy.fallbackChord) {
+                $fallbackChord = $policy.fallbackChord
+                if ($chords -notcontains $fallbackChord) { $chords = @($fallbackChord) + $chords }
+            }
             $registered = [System.Collections.ArrayList]@()
             $hasRh = Get-Command Get-PSReadLineKeyHandler -ErrorAction SilentlyContinue
+            $effectiveChord = $null
             foreach ($c in ($chords | Select-Object -Unique)) {
                 $isReg = $false
                 if ($hasRh) {
@@ -1524,6 +1575,7 @@ function windo {
                         if ($null -ne $handler) { $isReg = $true }
                     } catch { }
                 }
+                if ($isReg -and $null -eq $effectiveChord) { $effectiveChord = $c }
                 [void]$registered.Add([ordered]@{
                     chord = $c
                     registered = $isReg
@@ -1536,15 +1588,17 @@ function windo {
                     prefsFile = $PrefsFile
                     policy = $policy
                     bindings = @($registered)
+                    effectiveChord = $effectiveChord
                     psReadLineAvailable = [bool]$hasRh
                     exitCode = 0
                 }
             } else {
                 Write-Host "[windo] PSReadLine keybindings policy" -ForegroundColor Cyan
                 Write-Host "  Policy enabled : $($policy.enabled)" -ForegroundColor DarkGray
-                Write-Host "  Effective      : $(if ($policy.enabled) { $policy.chord } else { '(disabled)' })" -ForegroundColor DarkGray
+                Write-Host "  Effective      : $(if ($policy.enabled) { if ($effectiveChord) { $effectiveChord } else { '(none)' }) else { '(disabled)' })" -ForegroundColor DarkGray
                 if ($policy.enabled) {
                     Write-Host "  Source         : chord=$($policy.chordSource), prefs=$($PrefsFile)" -ForegroundColor DarkGray
+                    if ($policy.autoDetected) { Write-Host "  Auto-detect    : $($policy.autoDetectedReason)" -ForegroundColor DarkGray }
                 } else {
                     Write-Host "  Disabled by   : $(if ($policy.disabledSource) { $policy.disabledSource } else { 'runtime default' })" -ForegroundColor DarkGray
                 }
@@ -1668,7 +1722,28 @@ function windo {
             return
         }
 
-        Write-Host "[windo] keybindings: expected status | set --chord <chord> | disable | enable | reset  (got: $sub)" -ForegroundColor Yellow
+        if ($sub -eq "safe-reset") {
+            $map = _windo_read_windo_prefs_map
+            $map['keybindingPrefixChord'] = "Alt+w"
+            $map['keybindingDisabled'] = $false
+            if (-not (_windo_save_windo_prefs $map)) {
+                Write-Host "[windo] keybindings safe-reset: could not update $PrefsFile" -ForegroundColor Red
+                _windo_set_exit 2
+                return
+            }
+            _windo_apply_runtime_keybindings | Out-Null
+            $policy = _windo_resolve_keybinding_policy
+            if ($JsonOutput) {
+                _emit_json "keybindings" @{ action = "safe-reset"; policy = $policy; profilePath = $PROFILE; prefsFile = $PrefsFile; exitCode = 0 }
+            } else {
+                Write-Host "[windo] keybindings safe-reset completed (legacy handlers removed, Alt+w preference reapplied)." -ForegroundColor Green
+                Write-Host "  Effective: $(if ($policy.enabled) { $policy.chord } else { '(disabled)' }) (source=$($policy.chordSource))" -ForegroundColor DarkGray
+            }
+            _windo_set_exit 0
+            return
+        }
+
+        Write-Host "[windo] keybindings: expected status | set --chord <chord> | disable | enable | reset | safe-reset  (got: $sub)" -ForegroundColor Yellow
         _windo_set_exit 2
         return
     }
@@ -2173,6 +2248,8 @@ function windo {
                     WINDO_JSON_ENVELOPE = $(if ($env:WINDO_JSON_ENVELOPE) { $env:WINDO_JSON_ENVELOPE } else { $null })
                     WINDO_PREFIX_CHORD = $(if ($env:WINDO_PREFIX_CHORD) { $env:WINDO_PREFIX_CHORD } else { $null })
                     WINDO_DISABLE_PSREADLINE_BINDINGS = $(if ($env:WINDO_DISABLE_PSREADLINE_BINDINGS) { $env:WINDO_DISABLE_PSREADLINE_BINDINGS } else { $null })
+                    WINDO_AUTO_DETECT_ALT_BINDINGS = $(if ($env:WINDO_AUTO_DETECT_ALT_BINDINGS) { $env:WINDO_AUTO_DETECT_ALT_BINDINGS } else { $null })
+                    WINDO_KEYBINDING_FALLBACK_CHORD = $(if ($env:WINDO_KEYBINDING_FALLBACK_CHORD) { $env:WINDO_KEYBINDING_FALLBACK_CHORD } else { $null })
                 }
             }
             _windo_set_exit $docExit
@@ -2200,7 +2277,7 @@ function windo {
         _warn_if_tampered
         Write-Host "  Env (optional overrides; unset = defaults)" -ForegroundColor DarkGray
         Write-Host "    WINDO_NO_SPINNER, WINDO_RUNNER_TIMEOUT_MS, WINDO_RUNNER_MAX_OUTPUT_BYTES" -ForegroundColor DarkGray
-        Write-Host "    WINDO_MAX_COMMAND_CHARS, WINDO_SKIP_INSTALLER_SHA256, WINDO_JSON_ENVELOPE, WINDO_PREFIX_CHORD, WINDO_DISABLE_PSREADLINE_BINDINGS  (see README / SECURITY)" -ForegroundColor DarkGray
+        Write-Host "    WINDO_MAX_COMMAND_CHARS, WINDO_SKIP_INSTALLER_SHA256, WINDO_JSON_ENVELOPE, WINDO_PREFIX_CHORD, WINDO_DISABLE_PSREADLINE_BINDINGS, WINDO_AUTO_DETECT_ALT_BINDINGS, WINDO_KEYBINDING_FALLBACK_CHORD  (see README / SECURITY)" -ForegroundColor DarkGray
         Write-Host "  Tip: 'windo config' for effective env; 'windo integrity' for hashes; 'windo verify' for audit chain." -ForegroundColor DarkGray
         Write-Host "  Exit code    : $docExitT  (`$global:WINDO_EXIT_CODE; 0=ok, 2=task/runner, 3=integrity, 6=unknown integrity)" -ForegroundColor DarkGray
         _windo_set_exit $docExitT
@@ -2527,10 +2604,24 @@ try {
         }
 
         if ($disabled) { $chord = $null }
+        $autoDetectAlt = [string]$env:WINDO_AUTO_DETECT_ALT_BINDINGS
+        $autoDetectAltEnabled = $true
+        if (-not [string]::IsNullOrWhiteSpace($autoDetectAlt)) {
+            $autoDetectAltEnabled = __windo_parse_bool_value -Raw $autoDetectAlt -Default $true
+        }
+        $fallbackChord = [string]$env:WINDO_KEYBINDING_FALLBACK_CHORD
+        if ([string]::IsNullOrWhiteSpace($fallbackChord)) { $fallbackChord = "w,w" } else { $fallbackChord = $fallbackChord.Trim() }
         [pscustomobject]@{
             enabled = [bool](-not $disabled)
+            autoDetectAlt = [bool]$autoDetectAltEnabled
+            fallbackChord = $fallbackChord
             chord = $chord
             source = $(if ([string]::IsNullOrWhiteSpace($envChord)) { if (-not [string]::IsNullOrWhiteSpace($prefChord)) { "prefs" } else { "auto" } } else { "env" })
+            chordSource = $(if ([string]::IsNullOrWhiteSpace($envChord)) { if (-not [string]::IsNullOrWhiteSpace($prefChord)) { "prefs" } else { "auto" } } else { "env" })
+            requestedChord = $chord
+            requestedSource = $(if ([string]::IsNullOrWhiteSpace($envChord)) { if (-not [string]::IsNullOrWhiteSpace($prefChord)) { "prefs" } else { "auto" } } else { "env" })
+            autoDetected = $false
+            autoDetectedReason = $null
         }
     }
 
@@ -2573,7 +2664,38 @@ try {
         [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
     }
 
-    try { Set-PSReadLineKeyHandler -Chord $policy.chord -ScriptBlock $windoPrefixOnly } catch { }
+        $requestedChord = $policy.chord
+        $prefixCandidates = [System.Collections.ArrayList]@()
+        [void]$prefixCandidates.Add($requestedChord)
+
+        if ($policy.autoDetectAlt -and ($requestedChord -like 'Alt+*') -and ([string]::IsNullOrWhiteSpace($policy.fallbackChord) -eq $false) -and ($policy.fallbackChord -ne $requestedChord)) {
+            [void]$prefixCandidates.Add($policy.fallbackChord)
+        }
+
+        $selectedPrefixChord = $null
+        foreach ($candidate in ($prefixCandidates | Select-Object -Unique)) {
+            try {
+                Set-PSReadLineKeyHandler -Chord $candidate -ScriptBlock $windoPrefixOnly -ErrorAction Stop
+                $handler = Get-PSReadLineKeyHandler -Chord $candidate -ErrorAction Stop
+                if ($null -ne $handler) {
+                    $selectedPrefixChord = $candidate
+                    break
+                }
+            } catch {
+                try { Remove-PSReadLineKeyHandler -Chord $candidate -ErrorAction SilentlyContinue } catch { }
+            }
+        }
+
+        if ($null -eq $selectedPrefixChord) { return }
+        if ($selectedPrefixChord -ne $requestedChord) {
+            $policy.chord = $selectedPrefixChord
+            $policy.chordSource = "auto-fallback"
+            $policy.autoDetected = $true
+            $policy.autoDetectedReason = "alt binding did not bind, fallback to '$selectedPrefixChord'"
+        } else {
+            $policy.appliedChord = $selectedPrefixChord
+        }
+
     try {
         Set-PSReadLineKeyHandler -Chord 'Shift+Enter' -ScriptBlock $windoPrefixRun
     } catch { }
@@ -2635,7 +2757,18 @@ Register-WindoArgumentCompleter
 '@
 $WindoCompleterBlock = $WindoCompleterBlock.Replace("__WINDO_BUILTIN_ARRAY__", $WindoBuiltinVerbsArrayLiteral)
 
-$profileText = Get-Content -Raw $PROFILE
+$profileText = ''
+if (Test-Path -LiteralPath $PROFILE) {
+    try {
+        $profileText = Get-Content -Raw -LiteralPath $PROFILE
+        if ($profileText -match [regex]::Escape($BeginMarker)) {
+            $legacyBlockPattern = "(?ms)" + [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker) + "\r?\n?"
+            $profileText = [regex]::Replace($profileText, $legacyBlockPattern, '')
+        }
+    } catch {
+        $profileText = ''
+    }
+}
 $block = $BeginMarker + "`r`n" + $WindoFunctionBody + "`r`n" + $WindoPsReadLineBlock + "`r`n" + $WindoCompleterBlock + "`r`n" + $EndMarker + "`r`n"
 Write-Utf8NoBomFile -Path $PROFILE -Content ($profileText.TrimEnd() + "`r`n`r`n" + $block)
 

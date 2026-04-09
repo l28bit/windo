@@ -86,7 +86,7 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo context [--json]` | One-screen environment summary (version, paths, tasks, last `RequestId` when known). |
 | `windo config [--json]` | **v3.0+** Effective optional env (`WINDO_*`, `CI`) and runner-related semantics (timeouts, caps). |
 | `windo backups [--json]` | **v3.0+** List encrypted log backups (`windo_history*.enc.bak`); **`--prune --keep N --force`** removes older files. |
-| `windo keybindings [status|set --chord <chord>|disable|enable|reset]` | Inspect and control `windo` PSReadLine prefixing behavior (no install required, applies to current session when possible). |
+| `windo keybindings [status|set --chord <chord>|disable|enable|reset|safe-reset]` | Inspect and control `windo` PSReadLine prefixing behavior (no install required, applies to current session when possible). |
 | `windo trace <RequestId>` / `windo trace --id <id>` | Find a decrypted audit entry by `RequestId`. |
 | `windo stats` | Summarize the encrypted audit log (counts, categories, optional avg duration). |
 | `windo history [-n N]` | Compact recent commands (default last 50). |
@@ -135,13 +135,21 @@ windo keybindings set --chord Alt+w
 windo keybindings status --json
 ```
 
+If the chord still feels wrong in your terminal, try:
+
+```powershell
+windo keybindings safe-reset
+```
+
+`safe-reset` removes legacy WINDO handlers, reapplies `Alt+w`, and then applies fallback logic in one command.
+
 To keep the classic style everywhere, set `WINDO_PREFIX_CHORD=w,w` in your profile session and avoid `windo keybindings` edits for that machine.
 
 Bindings are **skipped** with a warning if PSReadLine is missing; your profile still loads.
 
 ### Quick verification checklist
 
-- **Normal shell (pwsh/Windows PowerShell):** open a fresh shell and run `windo keybindings status --json`; confirm `policy.enabled` and `policy.chord`.
+- **Normal shell (pwsh/Windows PowerShell):** open a fresh shell and run `windo keybindings status --json`; confirm `policy.enabled` and `effectiveChord`.
 - **Plain typing check:** in a fresh prompt, type `w` and `hello`; it should appear as expected (single-character typing works).
 - **Prefix shortcut check:** type `g` + `it` (or any text), then press your reported chord (for example `Alt+w`) and ensure `windo ` is prepended.
 - **Terminal profile reload check:** run:
@@ -149,6 +157,11 @@ Bindings are **skipped** with a warning if PSReadLine is missing; your profile s
   - `windo keybindings enable`
   - `windo keybindings status`
   and confirm outputs update.
+- **Auto-detect behavior check:** intentionally disable auto fallback and run:
+  - `Set-Item -Path Env:WINDO_AUTO_DETECT_ALT_BINDINGS -Value 0`
+  - `windo keybindings safe-reset`
+  - `windo keybindings status --json`
+  and confirm auto-detect is disabled and `effectiveChord` matches your configured fallback or requested chord.
 - **VSCode sanity:** run the same `windo keybindings status --json` and typing checks in a VSCode terminal; set `windo keybindings set --chord Alt+w` if legacy `w,w` interferes.
 - **JSON status checks:** `windo config --json`, `windo keybindings status --json`, and `windo verify --json` should return structured payloads with `exitCode` for scripting and dashboards.
 
@@ -182,6 +195,8 @@ See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
 | `WINDO_JSON_ENVELOPE` | **v3.1.0+** Optional override for **`--json`** envelope shape: **`classic`** (2.6, no **`meta`**), **`modern`** (3.0 + **`meta`**), or **`auto`**. Overrides **`windo_prefs.json`** when set (see [`docs/json-schema.md`](docs/json-schema.md)). Does not change runner or security behavior. |
 | `WINDO_PREFIX_CHORD` | Set explicit prefix chord for keybinding injection (`w,w`, `Alt+w`, etc). |
 | `WINDO_DISABLE_PSREADLINE_BINDINGS` | Set to `1`/`true` to disable WINDO keybindings for the session. |
+| `WINDO_AUTO_DETECT_ALT_BINDINGS` | Set to `0`/`false` to disable automatic fallback for Alt-based chords (default: enabled). |
+| `WINDO_KEYBINDING_FALLBACK_CHORD` | Alternate chord to fallback to when automatic Alt detection cannot keep `Alt+*` usable. Default: `w,w`. |
 | `WINDO_INSTALL_NONINTERACTIVE` | **v3.1.1+** If set, **`windo install-latest`** runs the downloaded installer **without** an interactive confirmation (for CI; use with care). |
 | `WINDO_BOOTSTRAP_FORCE_INSTALL` | **v3.1.1+** If set, **`bootstrap.ps1`** launches the installer **without** **`Read-Host`** after download (CI / scripts). |
 
