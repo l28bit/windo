@@ -4,6 +4,15 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.9.0] - 2026-04-01
+
+### Added
+
+- **`windo profile`:** lists standard profile paths (current host + common pwsh / Windows PowerShell locations) and whether the WINDO block (`# >>> WINDO-BEGIN >>>`) is present; **`--json`** returns structured rows.
+- **`windo stats --since YYYY-MM-DD`** and **`windo stats --last-days N`:** filter summarized entries by decrypted audit **`Timestamp`** (mutually exclusive filters).
+- **Exit codes for automation:** **`$global:WINDO_EXIT_CODE`** (and **`exitCode`** in JSON for doctor / integrity / verify) with documented meanings (0, 2, 3, 4, 6).
+- **`docs/build.md`:** branch **`Genisis`**, **`checksums/installer.sha256`**, and **`Encode-ChildExec.ps1`** / **`ChildExec.cs`** maintenance notes.
+
 ## [2.8.0] - 2026-04-01
 
 ### Added
@@ -118,6 +127,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[2.9.0]: https://github.com/l28bit/windo/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/l28bit/windo/compare/v2.7.1...v2.8.0
 [2.7.1]: https://github.com/l28bit/windo/compare/v2.7.0...v2.7.1
 [2.7.0]: https://github.com/l28bit/windo/compare/v2.6.2...v2.7.0

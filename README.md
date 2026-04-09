@@ -91,6 +91,8 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo integrity` | Runner vs manifest with levels **OK \| DRIFT \| TAMPERED \| UNKNOWN**. |
 | `windo verify` | Validate encrypted log format and hash chain. |
 | `windo log -n N [--tail] [--json]` | Show last N log entries (decrypted). **`--tail`** with **`--json`** reads only the last N **physical** log lines (faster on large logs). |
+| `windo stats [--since YYYY-MM-DD] [--last-days N]` | Audit log summary; optional filters on decrypted entry **`Timestamp`** (still scans full log to decrypt). |
+| `windo profile [--json]` | Show known profile paths and whether the WINDO profile block is present (pwsh and Windows PowerShell paths). |
 | `windo cleanup [-w]` | Back up log to `.pwsh_secure`, clear active log, remove pending req/res JSON. Optional `-w` is accepted for compatibility and ignored. |
 | `windo upgrade` | Download and run the latest `windo_install.ps1` from `Genisis` (same as bootstrap). |
 | `windo uninstall` | Download and run the elevated uninstaller (removes tasks, profile block, WINDO files under `.pwsh_secure`, optional `Documents\windo`). |
@@ -140,6 +142,18 @@ See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
 | `WINDO_RUNNER_MAX_OUTPUT_BYTES` | Approximate cap on captured stdout+stderr (default **4194304**; split per stream in the runner). |
 | `WINDO_MAX_COMMAND_CHARS` | Max length of the command line passed to `cmd.exe` (default **8191**). |
 | `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the `Genisis` branch (`bootstrap.ps1` and `windo upgrade`). |
+
+**Automation exit codes (`$global:WINDO_EXIT_CODE`):** set after **`windo doctor`**, **`windo integrity`**, and **`windo verify`** (also exposed as **`exitCode`** in JSON payloads where applicable).
+
+| Code | Typical meaning |
+|------|-----------------|
+| 0 | Success / OK |
+| 2 | Doctor: main task or runner missing; verify: no log or empty log; stats: bad `--since` / conflicting filters |
+| 3 | Doctor or integrity: manifest/hash state not OK (DRIFT/TAMPERED) |
+| 4 | Verify: hash chain or format failure |
+| 6 | Doctor or integrity: UNKNOWN component level |
+
+Scripts: run `windo doctor` (or `integrity` / `verify`), then test **`$global:WINDO_EXIT_CODE`**.
 
 ---
 

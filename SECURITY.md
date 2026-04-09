@@ -34,6 +34,10 @@ Request JSON files under `.pwsh_secure` are writable by the same user as WINDO. 
 
 `bootstrap.ps1` and **`windo upgrade`** download `windo_install.ps1` from the **`Genisis`** branch. If [`checksums/installer.sha256`](checksums/installer.sha256) is present on that branch, the downloaded file’s SHA256 must match unless **`WINDO_SKIP_INSTALLER_SHA256`** is set. If the checksum file is missing (older branches) or the URL fails, the check is skipped.
 
+## Automation exit codes
+
+For **`windo doctor`**, **`windo integrity`**, and **`windo verify`**, WINDO sets **`$global:WINDO_EXIT_CODE`** (and includes **`exitCode`** in JSON payloads where applicable). See the README table for meanings (for example: missing task or runner, integrity state, verify chain failure). This supports non-interactive scripts without relying on parsing human-readable output.
+
 ## Reporting Issues
 
 If you discover a vulnerability, please open a private security advisory or contact the maintainer before publishing details.
