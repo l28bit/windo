@@ -4,6 +4,20 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.1.2] - TBD
+
+### Fixed
+
+- **Keybinding policy:** the default interactive prefix no longer uses `w,w` by default. A plain `w`-key prefix could make commands that start with `w` (for example `w`, `where`, `winget`, `wsl`, etc.) feel untypeable.
+  - Default prefix is now `Alt+w` on all hosts.
+  - Auto-detection fallback remains available and now defaults to a non-typing chord (`Alt+;`) to avoid reintroducing `w` capture.
+- **`windo keybindings status`/`set` robustness:** keybinding policy is now normalized consistently for both active session state and persisted profile block.
+
+### Added
+
+- **Sudo-style helper:** profile injection now adds a `sudo` convenience function when no native `sudo` command exists. It forwards arguments to `windo`, supports `sudo !!` as a quick replay shortcut, and preserves existing task/routing behavior.
+- **Builtin completion alignment:** `keybindings` is now treated as a built-in command for profile argument-completion and last-command bookkeeping consistency.
+
 ## [3.1.1] - 2026-04-01
 
 ### Security
@@ -171,6 +185,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[3.1.2]: https://github.com/l28bit/windo/compare/v3.1.1...v3.1.2
 [3.1.1]: https://github.com/l28bit/windo/compare/v3.1.0...v3.1.1
 [3.1.0]: https://github.com/l28bit/windo/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/l28bit/windo/compare/v2.9.1...v3.0.0
