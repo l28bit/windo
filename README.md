@@ -34,13 +34,17 @@ WINDO does **not** bypass Windows security boundaries; it uses a controlled elev
 iex (irm https://raw.githubusercontent.com/l28bit/windo/Genisis/bootstrap.ps1)
 ```
 
-Run from an **elevated** PowerShell session when you want the installer to register scheduled tasks and write `%USERPROFILE%\.pwsh_secure\` without surprises.
+Run the **installer** from an **elevated** session when you want scheduled tasks registered and `%USERPROFILE%\.pwsh_secure\` updated without permission issues—**after** you have downloaded and confirmed.
 
-**Upgrade from any installed v2.x** (same mechanism as bootstrap): after WINDO is loaded in your profile, run:
+**Upgrade from any installed v2.x / v3.x:** with WINDO loaded in your profile, run **`windo install-latest`** from a **normal (non-elevated)** window. The installer is **not** downloaded while Administrator (avoids high-privilege fetch). After checksum verification you get a **prompt** before the installer runs (UAC may appear when tasks are registered). Use **`windo install-latest --force`** or **`WINDO_INSTALL_NONINTERACTIVE=1`** in CI/automation.
 
 ```powershell
-windo upgrade
+windo install-latest
 ```
+
+(`windo upgrade` is the same command.)
+
+**Bootstrap** (`iex (irm …/bootstrap.ps1)`): same rule—**do not run from an elevated shell**; the script exits with instructions. After download you are prompted before launch (or set **`WINDO_BOOTSTRAP_FORCE_INSTALL=1`** / **`CI`** for unattended).
 
 Or use the bootstrap one-liner above, or run `.\windo_install.ps1` from a clone. There is no version gate: the installer replaces the WINDO profile block and refreshes secure-dir artifacts.
 
@@ -96,10 +100,12 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo stats [--since YYYY-MM-DD] [--last-days N]` | Audit log summary; optional filters on decrypted entry **`Timestamp`** (still scans full log to decrypt). **`--last-days`** must be a **positive** integer; **`--since`** and **`--last-days`** are mutually exclusive. |
 | `windo profile [--json]` | Show known profile paths and whether the WINDO profile block is present (pwsh and Windows PowerShell paths). |
 | `windo cleanup [-w]` | Back up log to `.pwsh_secure`, clear active log, remove pending req/res JSON. Optional `-w` is accepted for compatibility and ignored. |
-| `windo upgrade` | Download and run the latest `windo_install.ps1` from `Genisis` (same as bootstrap). |
+| `windo install-latest` | **v3.1.0+** Download and run the latest `windo_install.ps1` from **`Genisis`**. **v3.1.1+:** download only in a **non-elevated** shell; **confirm** after verify, then run installer ( **`--force`** / env for CI). |
+| `windo upgrade` | Alias of **`install-latest`**. |
+| `windo theme [classic \| modern \| auto]` | **v3.1.0+** Choose **CLI JSON** “look” only: **`classic`** = `schemaVersion` **2.6** without **`meta`**; **`modern`** = **3.0** + **`meta`**; **`auto`** = follow the embedded profile. Runner, tasks, and audit **do not** change—see [`docs/json-schema.md`](docs/json-schema.md). |
 | `windo uninstall` | Download and run the elevated uninstaller (removes tasks, profile block, WINDO files under `.pwsh_secure`, optional `Documents\windo`). |
 
-Append **`--json`** or **`-Json`** to supported commands for structured output. WINDO **v3.0.0+** uses envelope **`schemaVersion`** **`3.0`** and adds **`meta`** (PowerShell / OS). Earlier v2.6.x builds used **`schemaVersion`** **`2.6`** without **`meta`**. See [`docs/json-schema.md`](docs/json-schema.md).
+Append **`--json`** or **`-Json`** to supported commands for structured output. On v3.0.0+ profiles the default envelope uses **`schemaVersion`** **`3.0`** and **`meta`**. You can still get a **2.6-style** envelope (no **`meta`**) via **`windo theme classic`** or **`WINDO_JSON_ENVELOPE`**—without downgrading WINDO itself. See [`docs/json-schema.md`](docs/json-schema.md).
 
 Append **`--dry-run`** (or **`-DryRun`**) on elevated commands or `windo replay` / `windo !!` to print what would run **without** starting the task, writing req/res files, or appending the audit log. **`windo self-update --dry-run`** prints that the update task would be started only.
 
@@ -143,14 +149,17 @@ See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
 | `WINDO_RUNNER_TIMEOUT_MS` | Max wait for the elevated child process (default **7200000** ms = 2 h; max **86400000**). |
 | `WINDO_RUNNER_MAX_OUTPUT_BYTES` | Approximate cap on captured stdout+stderr (default **4194304**; split per stream in the runner). |
 | `WINDO_MAX_COMMAND_CHARS` | Max length of the command line passed to `cmd.exe` (default **8191**). |
-| `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the `Genisis` branch (`bootstrap.ps1` and `windo upgrade`). |
+| `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the `Genisis` branch (`bootstrap.ps1`, **`windo install-latest`** / **`upgrade`**). |
+| `WINDO_JSON_ENVELOPE` | **v3.1.0+** Optional override for **`--json`** envelope shape: **`classic`** (2.6, no **`meta`**), **`modern`** (3.0 + **`meta`**), or **`auto`**. Overrides **`windo_prefs.json`** when set (see [`docs/json-schema.md`](docs/json-schema.md)). Does not change runner or security behavior. |
+| `WINDO_INSTALL_NONINTERACTIVE` | **v3.1.1+** If set, **`windo install-latest`** runs the downloaded installer **without** an interactive confirmation (for CI; use with care). |
+| `WINDO_BOOTSTRAP_FORCE_INSTALL` | **v3.1.1+** If set, **`bootstrap.ps1`** launches the installer **without** **`Read-Host`** after download (CI / scripts). |
 
 **Automation exit codes (`$global:WINDO_EXIT_CODE`):** set after **`windo doctor`**, **`windo integrity`**, and **`windo verify`** (also exposed as **`exitCode`** in JSON payloads where applicable).
 
 | Code | Typical meaning |
 |------|-----------------|
 | 0 | Success / OK |
-| 2 | Doctor: main task or runner missing; verify: no log or empty log; stats: bad `--since`, conflicting filters, invalid or missing `--last-days`, or non-positive `--last-days` (no JSON envelope on stats validation errors); backups: bad args or prune without **`--force`** |
+| 2 | Doctor: main task or runner missing; verify: no log or empty log; stats: bad `--since`, conflicting filters, invalid or missing `--last-days`, or non-positive `--last-days` (no JSON envelope on stats validation errors); backups: bad args or prune without **`--force`**; **`install-latest`** / **`upgrade`**: session is elevated (download blocked) or non-interactive without **`--force`** / **`WINDO_INSTALL_NONINTERACTIVE`** |
 | 3 | Doctor or integrity: manifest/hash state not OK (DRIFT/TAMPERED) |
 | 4 | Verify: hash chain or format failure |
 | 6 | Doctor or integrity: UNKNOWN component level |
@@ -164,7 +173,7 @@ Scripts: run `windo doctor` (or `integrity` / `verify`), then test **`$global:WI
 
 - **`windo report`** produces a **local HTML** summary (entry counts, category breakdown, integrity levels, recent audit lines). Treat reports as **sensitive**; they may echo elevated command text.
 - **`windo export`** builds a **zip** under `Documents\windo\exports\` (or `-o`) with manifest, envelope JSON, and a truncated audit excerpt—handle as sensitive.
-- **`--json` / `-Json`** uses the **v3.0 envelope** (and **`meta`**) on v3.0.0+ installs for `doctor`, `integrity`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `profile`, `config`, and `backups`. See [`docs/json-schema.md`](docs/json-schema.md).
+- **`--json` / `-Json`** uses the **v3.0 envelope** (and usually **`meta`**) on v3.0.0+ installs for `doctor`, `integrity`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `profile`, `config`, `backups`, and **`theme`**. Use **`windo theme`** / **`WINDO_JSON_ENVELOPE`** if you prefer the older 2.6-style JSON wrapper. See [`docs/json-schema.md`](docs/json-schema.md).
 - **`windo stats`** / **`windo history`** give fast situational awareness without full `log` verbosity.
 
 - Maintainer notes: [`docs/build.md`](docs/build.md) (validation + optional `src/` concat), [`docs/json-schema.md`](docs/json-schema.md), [`docs/performance.md`](docs/performance.md) (large logs), [`docs/branding.md`](docs/branding.md) (logo direction).

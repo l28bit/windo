@@ -10,6 +10,19 @@ Commands that support `--json` or `-Json` emit a single **envelope** so scripts 
 
 **Summary:** **`windoVersion`** = actual WINDO release; **`schemaVersion`** = JSON wrapper version for automation authors.
 
+## JSON envelope theme (v3.1.0+)
+
+If you prefer the **pre-v3 JSON “look”** (no top-level **`meta`**, and **`schemaVersion`: `"2.6"`**) but want to stay on the **latest WINDO** for runner fixes and security, use presentation-only controls—**never** an old installer:
+
+| Mechanism | Purpose |
+|-----------|---------|
+| **`windo theme classic`** | Writes **`jsonEnvelope`: `classic`** to **`%USERPROFILE%\.pwsh_secure\windo_prefs.json`**. Effective **`--json`** output uses a **2.6-shaped** envelope (no **`meta`**). |
+| **`windo theme modern`** | **`meta`** + **`schemaVersion` `3.0`** (when the embedded profile supports it). |
+| **`windo theme auto`** | Follow the embedded profile’s default (**`$SchemaVersion`** in the installed function). |
+| **`WINDO_JSON_ENVELOPE`** | Environment override: **`classic`** \| **`modern`** \| **`auto`**. Takes precedence over **`windo_prefs.json`**. |
+
+**Unchanged by theme:** elevated runner, scheduled tasks, DPAPI audit log, manifest integrity, request validation, and installer checksum behavior. Theme affects **CLI JSON formatting only**.
+
 ## Envelope
 
 | Field | Type | Description |
@@ -18,10 +31,10 @@ Commands that support `--json` or `-Json` emit a single **envelope** so scripts 
 | `windoVersion` | string | Installer profile version (e.g. `"3.0.0"`) |
 | `command` | string | Logical subcommand name (`doctor`, `integrity`, `config`, `backups`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `profile`, `export` payload in bundles, etc.) |
 | `generatedAt` | string | ISO-8601 timestamp |
-| `meta` | object | Host context (see below). **New in v3.0.0.** |
+| `meta` | object | Host context (see below). Present when the effective theme is **modern** (or **auto** on v3.0.0+ profiles). Omitted in **classic** theme. |
 | `payload` | object | Command-specific data |
 
-### `meta` (v3.0.0+)
+### `meta` (when present)
 
 | Field | Type | Description |
 |--------|------|-------------|
@@ -79,6 +92,20 @@ Several commands mirror **`$global:WINDO_EXIT_CODE`** inside **`payload.exitCode
 | `profile` | 0 | Listing only |
 | `config` | 0 | Listing only |
 | `backups` | 0, 2 | **2** = bad args, prune without `--force`, prune failure |
+| `theme` | 0, 2 | **2** = invalid subcommand or prefs write failure |
+
+## `theme` payload (v3.1.0+)
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `jsonEnvelopeFile` | string \| null | Value from **`windo_prefs.json`** (`classic` / `modern` / `auto`) |
+| `environmentOverride` | string \| null | **`WINDO_JSON_ENVELOPE`** when set |
+| `effective` | object | `schemaVersion` (**`2.6`** or **`3.0`**) and **`includeMeta`** (bool) |
+| `embeddedProfileSchema` | string | Embedded **`$SchemaVersion`** (show mode) |
+| `saved` | bool | (set mode) **true** when preset was written |
+| `jsonEnvelope` | string | (set mode) value saved |
+| `prefsFile` | string | Path to **`windo_prefs.json`** |
+| `exitCode` | number | **0** on success |
 
 ## `config` payload (v3.0.0+)
 

@@ -1,5 +1,5 @@
 <# =====================================================================
-WINDO v3.1.1 Release-Hardened Installer
+WINDO v3.1.0 Release-Hardened Installer
 Run once in an elevated PowerShell session.
 
 Installs:
@@ -18,7 +18,7 @@ Maintainer: new windo subcommands must be added to $WindoBuiltinVerbs (single so
 
 $ErrorActionPreference = "Stop"
 
-$WindoVersion = "3.1.1"
+$WindoVersion = "3.1.0"
 
 # Single source of truth for embedded profile: completer skip-list (plus '!!') and windo last-command first-token exclusions.
 $WindoBuiltinVerbs = @(
@@ -482,16 +482,6 @@ function windo {
         try { $global:LASTEXITCODE = $Code } catch { }
     }
 
-    function _windo_is_process_elevated {
-        try {
-            $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-            $pr = [Security.Principal.WindowsPrincipal]$id
-            return $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-        } catch {
-            return $false
-        }
-    }
-
     function _dpapi_protect([string]$s) {
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($s)
         $enc = [System.Security.Cryptography.ProtectedData]::Protect(
@@ -627,57 +617,22 @@ function windo {
     }
 
     function _windo_run_genisis_installer {
-        param(
-            [switch]$ForceContinue
-        )
-        if (_windo_is_process_elevated) {
-            Write-Host "[windo] install-latest: download is not performed while running as Administrator." -ForegroundColor Yellow
-            Write-Host "  This avoids fetching remote code in a high-privilege session. Open a normal (non-elevated)" -ForegroundColor DarkGray
-            Write-Host "  PowerShell window and run:  windo install-latest" -ForegroundColor DarkGray
-            Write-Host "  You will get a verified download there, then a prompt before the installer runs (UAC may follow)." -ForegroundColor DarkGray
-            _windo_set_exit 2
-            return
-        }
         $InstUrl = "https://raw.githubusercontent.com/l28bit/windo/Genisis/windo_install.ps1"
         $TempInst = Join-Path $env:TEMP ("windo_install_" + [Guid]::NewGuid().ToString("n") + ".ps1")
         try {
-            _windo_invoke_rest_with_spinner -Uri $InstUrl -OutFile $TempInst -Label "Downloading latest installer from Genisis (non-elevated)..."
+            _windo_invoke_rest_with_spinner -Uri $InstUrl -OutFile $TempInst -Label "Downloading latest installer from Genisis..."
             if (!(Test-Path $TempInst)) { throw "Download failed." }
             _windo_verify_installer_sha256_optional $TempInst
             if ((Get-Item $TempInst).Length -lt 5000) { throw "Installer file size looks invalid." }
-            Write-Host "[windo] Download finished; checksum verified when published on Genisis." -ForegroundColor Green
-            $runNow = $false
-            if ($ForceContinue -or $env:WINDO_INSTALL_NONINTERACTIVE -or $env:CI) {
-                $runNow = $true
-                if ($env:WINDO_INSTALL_NONINTERACTIVE -or $env:CI) {
-                    Write-Host "[windo] Proceeding without prompt (WINDO_INSTALL_NONINTERACTIVE or CI set)." -ForegroundColor DarkGray
-                }
-            } elseif (-not [Environment]::UserInteractive) {
-                Write-Host "[windo] Non-interactive session: re-run with --force or set WINDO_INSTALL_NONINTERACTIVE=1" -ForegroundColor Yellow
-                Remove-Item -LiteralPath $TempInst -Force -ErrorAction SilentlyContinue
-                _windo_set_exit 2
-                return
-            } else {
-                Write-Host "[windo] The installer is ready. You can review the file before continuing: $TempInst" -ForegroundColor Cyan
-                $ans = Read-Host "Run the installer now? (UAC may prompt for elevation to register tasks.) [y/N]"
-                if ($ans -eq 'y' -or $ans -eq 'Y' -or $ans -eq 'yes') { $runNow = $true }
-            }
-            if (-not $runNow) {
-                Write-Host "[windo] Cancelled; temporary installer removed." -ForegroundColor DarkYellow
-                Remove-Item -LiteralPath $TempInst -Force -ErrorAction SilentlyContinue
-                _windo_set_exit 0
-                return
-            }
             $runnerExe = "powershell.exe"
             $pwshExe = Get-Command pwsh.exe -ErrorAction SilentlyContinue
             if ($pwshExe) { $runnerExe = $pwshExe.Source }
-            Write-Host "[windo] Starting installer ($runnerExe). When it finishes, reload: . `$PROFILE" -ForegroundColor Yellow
+            Write-Host "[windo] Running installer ($runnerExe). When it finishes, reload: . `$PROFILE" -ForegroundColor Yellow
             & $runnerExe -NoProfile -ExecutionPolicy Bypass -File $TempInst
         } catch {
             Write-Host "[windo] Could not install from Genisis: $($_.Exception.Message)" -ForegroundColor Red
-            _windo_set_exit 1
         } finally {
-            if (Test-Path -LiteralPath $TempInst) { Remove-Item -LiteralPath $TempInst -Force -ErrorAction SilentlyContinue }
+            if (Test-Path $TempInst) { Remove-Item $TempInst -Force -ErrorAction SilentlyContinue }
         }
     }
 
@@ -1022,7 +977,7 @@ function windo {
             "windo log -n N [--tail] [--json]  Decrypted log entries (--tail: last N physical lines only for JSON)",
             "windo cleanup [-w]          Backup log, clear active log",
             "windo theme [classic|modern|auto]  JSON envelope look for --json (prefs; runner unchanged)",
-            "windo install-latest [--force]  Download+verify non-elevated, then prompt; --force skips prompt (CI)",
+            "windo install-latest        Same as upgrade: latest Genisis installer (prefers pwsh.exe)",
             "windo upgrade               Alias of install-latest",
             "windo uninstall             Elevated uninstaller (tasks, profile, secure dir)",
             "Exit: `$global:WINDO_EXIT_CODE set by doctor | integrity | verify (0=ok; see README).",
@@ -1348,19 +1303,7 @@ function windo {
     }
 
     if ($Command.Count -ge 1 -and ($Command[0] -eq "upgrade" -or $Command[0] -eq "install-latest")) {
-        $forceInst = $false
-        if ($Command.Count -gt 1) {
-            foreach ($a in $Command[1..($Command.Count - 1)]) {
-                $aa = [string]$a
-                if ($aa -eq '--force' -or $aa -eq '-Force') { $forceInst = $true }
-                else {
-                    Write-Host "[windo] install-latest: unknown argument '$aa' (use --force to skip confirmation)" -ForegroundColor Yellow
-                    _windo_set_exit 2
-                    return
-                }
-            }
-        }
-        _windo_run_genisis_installer -ForceContinue:$forceInst
+        _windo_run_genisis_installer
         return
     }
 

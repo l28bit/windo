@@ -32,11 +32,11 @@ Request JSON files under `.pwsh_secure` are writable by the same user as WINDO. 
 
 ## Bootstrap and upgrade integrity
 
-`bootstrap.ps1` and **`windo upgrade`** download `windo_install.ps1` from the **`Genisis`** branch. If [`checksums/installer.sha256`](checksums/installer.sha256) is present on that branch, the downloaded file’s SHA256 must match unless **`WINDO_SKIP_INSTALLER_SHA256`** is set. If the checksum file is missing (older branches) or the URL fails, the check is skipped.
+`bootstrap.ps1`, **`windo install-latest`**, and **`windo upgrade`** (same as install-latest) download `windo_install.ps1` from the **`Genisis`** branch. **v3.1.1+:** that download is **refused while the shell is elevated** (Administrator), so remote content is not fetched under high privilege; run from a normal user PowerShell, confirm after verification, then the installer may prompt **UAC** for task registration. Unattended flows may set **`WINDO_BOOTSTRAP_FORCE_INSTALL`**, **`WINDO_INSTALL_NONINTERACTIVE`**, or **`CI`** as documented in the README. If [`checksums/installer.sha256`](checksums/installer.sha256) is present on that branch, the downloaded file’s SHA256 must match unless **`WINDO_SKIP_INSTALLER_SHA256`** is set. If the checksum file is missing (older branches) or the URL fails, the check is skipped.
 
 ## JSON envelope (v3.0.0+)
 
-`--json` output uses **`schemaVersion`** **`3.0`** and may include **`meta`** (PowerShell edition/version and a host OS version string). This is for diagnostics and automation context only—not a substitute for log redaction when sharing exports.
+`--json` output uses **`schemaVersion`** **`3.0`** and may include **`meta`** (PowerShell edition/version and a host OS version string) unless you set presentation-only **`windo theme classic`** or **`WINDO_JSON_ENVELOPE=classic`** (v3.1.0+). **`meta`** is for diagnostics and automation context only—not a substitute for log redaction when sharing exports. Theme preferences do **not** weaken runner validation, audit logging, or installer checksums.
 
 ## Automation exit codes
 

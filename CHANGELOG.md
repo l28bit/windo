@@ -4,6 +4,24 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.1.1] - 2026-04-01
+
+### Security
+
+- **`windo install-latest` / `windo upgrade`:** the Genisis installer is **not** downloaded while the process is **elevated** (Administrator). Users must run the command from a **non-elevated** shell; after SHA256 verification (when published), an interactive **confirmation** runs before starting the installer. **`--force`**, **`WINDO_INSTALL_NONINTERACTIVE`**, or **`CI`** skips the prompt for automation.
+- **`bootstrap.ps1`:** same **no download when elevated** rule; after a verified download, **`Read-Host`** confirms before launching the installer unless **`WINDO_BOOTSTRAP_FORCE_INSTALL`** or **`CI`** is set.
+
+## [3.1.0] - 2026-04-01
+
+### Added
+
+- **`windo install-latest`:** explicit “get current Genisis installer” command (same behavior as **`windo upgrade`**); runs the downloaded script with **`pwsh.exe`** when present, otherwise **`powershell.exe`**.
+- **`windo theme`:** sets **CLI JSON envelope presentation** only—**`classic`** (`schemaVersion` **2.6**, no **`meta`**), **`modern`** (**3.0** + **`meta`**), or **`auto`** (follow embedded profile). Preferences persist in **`%USERPROFILE%\.pwsh_secure\windo_prefs.json`**; optional env **`WINDO_JSON_ENVELOPE`** overrides the file. Does **not** downgrade runner, tasks, or audit security.
+
+### Changed
+
+- **`windo upgrade`** is documented as an **alias** of **`install-latest`** (shared implementation).
+
 ## [3.0.0] - 2026-04-01
 
 ### Added
@@ -153,6 +171,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Baseline described in repository history and under `versions/v2.3.0/`.
 
+[3.1.1]: https://github.com/l28bit/windo/compare/v3.1.0...v3.1.1
+[3.1.0]: https://github.com/l28bit/windo/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/l28bit/windo/compare/v2.9.1...v3.0.0
 [2.9.1]: https://github.com/l28bit/windo/compare/v2.9.0...v2.9.1
 [2.9.0]: https://github.com/l28bit/windo/compare/v2.8.0...v2.9.0
