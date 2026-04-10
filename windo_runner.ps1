@@ -60,6 +60,8 @@ function Invoke-WindoPreserveEnvironment {
     param([object]$Snapshot)
     $restored = @{}
     if ($null -eq $Snapshot) { return $restored }
+    $maxEntries = 256
+    $maxValueLength = 8192
 
     $items = @()
     if ($Snapshot -is [System.Collections.IDictionary]) {
@@ -69,6 +71,7 @@ function Invoke-WindoPreserveEnvironment {
     } else {
         return $restored
     }
+    if ($items.Count -gt $maxEntries) { return $restored }
 
     foreach ($entry in $items) {
         if ($Snapshot -is [System.Collections.IDictionary]) {
@@ -79,6 +82,7 @@ function Invoke-WindoPreserveEnvironment {
             $value = $entry.Value
         }
         if ($name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { continue }
+        if ($null -ne $value -and ([string]$value).Length -gt $maxValueLength) { continue }
         try { $restored[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') } catch { $restored[$name] = $null }
         try {
             if ($null -eq $value) {
@@ -125,6 +129,63 @@ function Test-WindoResultPath([string]$outPath, [string]$secureDir) {
     return $null
 }
 
+function _windo_get_member_value([object]$Object, [string]$Name) {
+    if ($null -eq $Object) { return $null }
+
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) { return $Object[$Name] }
+        $matched = @($Object.Keys | Where-Object { $_ -ieq $Name } | Select-Object -First 1)
+        if ($matched.Count -gt 0) { return $Object[$matched[0]] }
+        return $null
+    }
+
+    if (-not $Object.PSObject -or -not $Object.PSObject.Properties) { return $null }
+    $prop = $Object.PSObject.Properties | Where-Object { $_.Name -ieq $Name } | Select-Object -First 1
+    if ($prop) { return $prop.Value }
+    return $null
+}
+
+function _dpapi_unprotect([string]$Base64Input) {
+    try {
+        $enc = [Convert]::FromBase64String($Base64Input)
+        $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
+            $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+        )
+        [System.Text.Encoding]::UTF8.GetString($bytes)
+    } catch {
+        return $null
+    }
+}
+
+function _windo_unprotect_text([string]$EncryptedText) {
+    if ([string]::IsNullOrWhiteSpace($EncryptedText)) { return $null }
+    if ($EncryptedText.Length -gt 262144) { return $null }
+    return _dpapi_unprotect $EncryptedText
+}
+
+function _windo_resolve_preserve_environment([object]$Payload) {
+    if ($null -eq $Payload) { return $null }
+
+    if ($Payload -is [string]) {
+        try { return $Payload | ConvertFrom-Json } catch { return $null }
+    }
+
+    $payloadType = _windo_get_member_value $Payload "Type"
+    $payloadData = _windo_get_member_value $Payload "Data"
+    if (-not [string]::IsNullOrWhiteSpace([string]$payloadType) -and -not [string]::IsNullOrWhiteSpace([string]$payloadData)) {
+        if ([string]$payloadType -ieq "dpapi-json") {
+            $json = _windo_unprotect_text [string]$payloadData
+            if ($null -ne $json) {
+                try { return $json | ConvertFrom-Json } catch { return $null }
+            }
+            return $null
+        }
+        return $null
+    }
+
+    return $Payload
+}
+
 "RUNNER START: $([DateTime]::Now.ToString('s'))" | Set-Content -Path $RunnerLast -Encoding UTF8
 
 $createdNew = $false
@@ -159,7 +220,9 @@ try {
     $timeoutMsOverride = $null
     if ($pending.PSObject.Properties.Name -contains "TimeoutOverrideMs") { $timeoutMsOverride = $pending.TimeoutOverrideMs }
     $preserveEnvironment = $null
-    if ($pending.PSObject.Properties.Name -contains "PreserveEnvironment") { $preserveEnvironment = $pending.PreserveEnvironment }
+    if ($pending.PSObject.Properties.Name -contains "PreserveEnvironment") {
+        $preserveEnvironment = _windo_resolve_preserve_environment $pending.PreserveEnvironment
+    }
 
     "PROCESS: RequestId=$reqId  OutPath=$outPath" | Add-Content -Path $RunnerLast -Encoding UTF8
     "CMD: $cmdLine" | Add-Content -Path $RunnerLast -Encoding UTF8

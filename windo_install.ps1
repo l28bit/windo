@@ -190,6 +190,102 @@ function Test-WindoResultPath([string]$outPath, [string]$secureDir) {
     return $null
 }
 
+function Invoke-WindoPreserveEnvironment {
+    param([object]$Snapshot)
+    $restored = @{}
+    if ($null -eq $Snapshot) { return $restored }
+
+    $items = @()
+    if ($Snapshot -is [System.Collections.IDictionary]) {
+        $items = @($Snapshot.GetEnumerator())
+    } elseif ($Snapshot.PSObject -and $Snapshot.PSObject.Properties) {
+        $items = @($Snapshot.PSObject.Properties)
+    } else {
+        return $restored
+    }
+
+    foreach ($entry in $items) {
+        if ($Snapshot -is [System.Collections.IDictionary]) {
+            $name = [string]$entry.Key
+            $value = $entry.Value
+        } else {
+            $name = [string]$entry.Name
+            $value = $entry.Value
+        }
+        if ($name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { continue }
+        try { $restored[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') } catch { $restored[$name] = $null }
+        try {
+            if ($null -eq $value) {
+                [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+            } else {
+                [Environment]::SetEnvironmentVariable($name, [string]$value, 'Process')
+            }
+        } catch { }
+    }
+    return $restored
+}
+
+function Restore-WindoPreserveEnvironment {
+    param([hashtable]$State)
+    if ($null -eq $State -or $State.Count -eq 0) { return }
+    foreach ($entry in $State.GetEnumerator()) {
+        try {
+            [Environment]::SetEnvironmentVariable([string]$entry.Key, $entry.Value, 'Process')
+        } catch { }
+    }
+}
+
+function _windo_get_member_value([object]$Object, [string]$Name) {
+    if ($null -eq $Object) { return $null }
+
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) { return $Object[$Name] }
+        $matched = @($Object.Keys | Where-Object { $_ -ieq $Name } | Select-Object -First 1)
+        if ($matched.Count -gt 0) { return $Object[$matched[0]] }
+        return $null
+    }
+
+    if (-not $Object.PSObject -or -not $Object.PSObject.Properties) { return $null }
+    $prop = $Object.PSObject.Properties | Where-Object { $_.Name -ieq $Name } | Select-Object -First 1
+    if ($prop) { return $prop.Value }
+    return $null
+}
+
+function _windo_unprotect_text([string]$EncryptedText) {
+    if ([string]::IsNullOrWhiteSpace($EncryptedText)) { return $null }
+    try {
+        $enc = [Convert]::FromBase64String($EncryptedText)
+        $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
+            $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+        )
+        [System.Text.Encoding]::UTF8.GetString($bytes)
+    } catch {
+        return $null
+    }
+}
+
+function _windo_resolve_preserve_environment([object]$Payload) {
+    if ($null -eq $Payload) { return $null }
+
+    if ($Payload -is [string]) {
+        try { return $Payload | ConvertFrom-Json } catch { return $null }
+    }
+
+    $payloadType = _windo_get_member_value $Payload "Type"
+    $payloadData = _windo_get_member_value $Payload "Data"
+    if (-not [string]::IsNullOrWhiteSpace([string]$payloadType) -and -not [string]::IsNullOrWhiteSpace([string]$payloadData)) {
+        if ([string]$payloadType -ieq "dpapi-json") {
+            $json = _windo_unprotect_text [string]$payloadData
+            if ($null -ne $json) {
+                try { return $json | ConvertFrom-Json } catch { return $null }
+            }
+            return $null
+        }
+    }
+
+    return $Payload
+}
+
 "RUNNER START: $([DateTime]::Now.ToString('s'))" | Set-Content -Path $RunnerLast -Encoding UTF8
 
 $createdNew = $false
@@ -221,6 +317,12 @@ try {
     $cmdLine = [string]$pending.Command
     $outPath = [string]$pending.OutPath
     $reqId   = [string]$pending.RequestId
+    $timeoutMsOverride = $null
+    if ($pending.PSObject.Properties.Name -contains "TimeoutOverrideMs") { $timeoutMsOverride = $pending.TimeoutOverrideMs }
+    $preserveEnvironment = $null
+    if ($pending.PSObject.Properties.Name -contains "PreserveEnvironment") {
+        $preserveEnvironment = _windo_resolve_preserve_environment $pending.PreserveEnvironment
+    }
 
     "PROCESS: RequestId=$reqId  OutPath=$outPath" | Add-Content -Path $RunnerLast -Encoding UTF8
     "CMD: $cmdLine" | Add-Content -Path $RunnerLast -Encoding UTF8
@@ -259,7 +361,7 @@ try {
     }
 
     $start = Get-Date
-    $timeoutMs = Get-WindoRunnerTimeoutMs
+    $timeoutMs = Get-WindoRunnerTimeoutMs $timeoutMsOverride
     $maxPer = Get-WindoRunnerMaxCharsPerStream
     $stdout = [string]$null
     $stderr = [string]$null
@@ -267,23 +369,29 @@ try {
     $truncated = $false
     $exitCode = 0
 
+    $envState = @{}
     try {
-        [WindoRunner.ChildExec]::RunCmd(
-            $cmdLine,
-            $timeoutMs,
-            $maxPer,
-            [ref]$stdout,
-            [ref]$stderr,
-            [ref]$timedOut,
-            [ref]$truncated,
-            [ref]$exitCode
-        )
-    } catch {
-        $stdout = ""
-        $stderr = ($_ | Out-String).TrimEnd()
-        $exitCode = 1
-        $timedOut = $false
-        $truncated = $false
+        $envState = Invoke-WindoPreserveEnvironment -Snapshot $preserveEnvironment
+        try {
+            [WindoRunner.ChildExec]::RunCmd(
+                $cmdLine,
+                $timeoutMs,
+                $maxPer,
+                [ref]$stdout,
+                [ref]$stderr,
+                [ref]$timedOut,
+                [ref]$truncated,
+                [ref]$exitCode
+            )
+        } catch {
+            $stdout = ""
+            $stderr = ($_ | Out-String).TrimEnd()
+            $exitCode = 1
+            $timedOut = $false
+            $truncated = $false
+        } finally {
+            Restore-WindoPreserveEnvironment -State $envState
+        }
     }
 
     if ($null -eq $stdout) { $stdout = "" }
@@ -531,7 +639,12 @@ function windo {
                 }
                 $rawEnvSpec = [string]$rawCommand[$leading + 1]
                 if (-not [string]::IsNullOrWhiteSpace($rawEnvSpec)) {
-                    $PreserveEnvNames = @($rawEnvSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                    if ($rawEnvSpec -match '^(?i)all$') {
+                        $PreserveEnvAll = $true
+                        $PreserveEnvNames = @()
+                    } else {
+                        $PreserveEnvNames = @($rawEnvSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                    }
                 }
                 $leading += 2
                 continue
@@ -539,7 +652,12 @@ function windo {
             if ($tx -like '--preserve-env=*') {
                 $rawEnvSpec = $tx.Substring(16)
                 if (-not [string]::IsNullOrWhiteSpace($rawEnvSpec)) {
-                    $PreserveEnvNames = @($rawEnvSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                    if ($rawEnvSpec -match '^(?i)all$') {
+                        $PreserveEnvAll = $true
+                        $PreserveEnvNames = @()
+                    } else {
+                        $PreserveEnvNames = @($rawEnvSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                    }
                 }
                 $leading++
                 continue
@@ -589,15 +707,10 @@ function windo {
             $trimmed = @($Command[0..($Command.Count - 2)])
             $HelpRequested = $true
             if ([string]::IsNullOrWhiteSpace($HelpTopic)) {
-                if ($trimmed.Count -eq 1) { $HelpTopic = [string]$trimmed[0] }
-                elseif ($trimmed.Count -gt 1 -and ($trimmed[0] -ieq 'help')) { $HelpTopic = [string]$trimmed[1] }
+                if ($trimmed.Count -gt 1 -and ($trimmed[0] -ieq 'help')) { $HelpTopic = [string]$trimmed[1] }
+                elseif ($trimmed.Count -ge 1) { $HelpTopic = [string]$trimmed[0] }
             }
             $Command = @($trimmed)
-            if ($HelpRequested) {
-                _windo_show_help $HelpTopic
-                _windo_set_exit 0
-                return
-            }
         }
 
         if ($null -eq $CommandTimeoutOverrideMs -and -not [string]::IsNullOrWhiteSpace($env:SUDO_TIMEOUT)) {
@@ -610,21 +723,136 @@ function windo {
 
         if ($Command.Count -gt 0) {
             $cl = [System.Collections.ArrayList]@($Command)
-            for ($xi = $cl.Count - 1; $xi -ge 0; $xi--) {
-                $tx = [string]$cl[$xi]
+            $hasCmd = $false
+            $cmd = ""
+            if ($cl.Count -gt 0) {
+                $cmd = [string]$cl[0].ToLowerInvariant()
+                $hasCmd = $true
+            }
+            $allowTimeoutLikeFlags = $hasCmd -and $cmd -notin @('history', 'log')
+            $i = 0
+            while ($i -lt $cl.Count) {
+                $tx = [string]$cl[$i]
+                if ($tx -eq '--') { break }
+
                 if ($tx -eq '--json' -or $tx -eq '-Json') {
                     $JsonOutput = $true
-                    $null = $cl.RemoveAt($xi)
+                    $null = $cl.RemoveAt($i)
+                    continue
                 }
-            }
-            for ($xi = $cl.Count - 1; $xi -ge 0; $xi--) {
-                $tx = [string]$cl[$xi]
                 if ($tx -eq '--dry-run' -or $tx -eq '-DryRun') {
                     $DryRun = $true
-                    $null = $cl.RemoveAt($xi)
+                    $null = $cl.RemoveAt($i)
+                    continue
                 }
+
+                if ($tx -eq '--help' -or $tx -eq '-h' -or $tx -eq '-?' -or $tx -eq '/?') {
+                    $HelpRequested = $true
+                    if ([string]::IsNullOrWhiteSpace($HelpTopic)) {
+                        if ($hasCmd -and $cmd -eq 'help' -and ($i + 1) -lt $cl.Count) {
+                            $HelpTopic = [string]$cl[$i + 1]
+                        } else {
+                            $HelpTopic = $cmd
+                        }
+                    }
+                    $null = $cl.RemoveAt($i)
+                    continue
+                }
+
+                if ($allowTimeoutLikeFlags -and ($tx -eq '--non-interactive' -or $tx -eq '-n')) {
+                    if ($tx -eq '-n' -and ($i + 1) -lt $cl.Count) {
+                        $lookahead = [string]$cl[$i + 1]
+                        if ($lookahead -in @('log', 'history')) {
+                            break
+                        }
+                    }
+                    $NonInteractive = $true
+                    $null = $cl.RemoveAt($i)
+                    continue
+                }
+
+                if ($allowTimeoutLikeFlags -and ($tx -eq '--preserve-env' -or $tx -eq '-E')) {
+                    if ($tx -eq '-E') {
+                        $PreserveEnvAll = $true
+                        $null = $cl.RemoveAt($i)
+                        continue
+                    }
+                    if (($i + 1) -ge $cl.Count) {
+                        Write-Host "[windo] --preserve-env requires a value of env var names or use -E for all." -ForegroundColor Yellow
+                        _windo_set_exit 2
+                        return
+                    }
+                    $rawEnvSpec = [string]$cl[$i + 1]
+                    if (-not [string]::IsNullOrWhiteSpace($rawEnvSpec)) {
+                        if ($rawEnvSpec -match '^(?i)all$') {
+                            $PreserveEnvAll = $true
+                            $PreserveEnvNames = @()
+                        } else {
+                            $PreserveEnvNames = @($rawEnvSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                        }
+                    }
+                    $null = $cl.RemoveAt($i + 1)
+                    $null = $cl.RemoveAt($i)
+                    continue
+                }
+                if ($allowTimeoutLikeFlags -and ($tx -like '--preserve-env=*')) {
+                    $rawEnvSpec = $tx.Substring(16)
+                    if (-not [string]::IsNullOrWhiteSpace($rawEnvSpec)) {
+                        if ($rawEnvSpec -match '^(?i)all$') {
+                            $PreserveEnvAll = $true
+                            $PreserveEnvNames = @()
+                        } else {
+                            $PreserveEnvNames = @($rawEnvSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                        }
+                    }
+                    $null = $cl.RemoveAt($i)
+                    continue
+                }
+
+                if ($allowTimeoutLikeFlags -and ($tx -eq '--timeout' -or $tx -eq '-t')) {
+                    if (($i + 1) -ge $cl.Count) {
+                        Write-Host "[windo] $tx requires a numeric timeout value." -ForegroundColor Yellow
+                        _windo_set_exit 2
+                        return
+                    }
+                    $rawTimeout = [string]$cl[$i + 1]
+                    $parsedTimeout = _windo_parse_timeout_override_ms $rawTimeout
+                    if ($null -eq $parsedTimeout -or $parsedTimeout -lt 1) {
+                        Write-Host "[windo] Invalid timeout value: $rawTimeout. Use seconds or ms (e.g. 10, 10s, 500ms)." -ForegroundColor Yellow
+                        _windo_set_exit 2
+                        return
+                    }
+                    if ($parsedTimeout -gt 86400000) { $parsedTimeout = 86400000 }
+                    $CommandTimeoutOverrideMs = [int]$parsedTimeout
+                    $null = $cl.RemoveAt($i + 1)
+                    $null = $cl.RemoveAt($i)
+                    continue
+                }
+
+                if ($allowTimeoutLikeFlags -and ($tx -like '--timeout=*' -or $tx -like '-t=*')) {
+                    $idx = $tx.IndexOf('=')
+                    $rawTimeout = $tx.Substring($idx + 1)
+                    $parsedTimeout = _windo_parse_timeout_override_ms $rawTimeout
+                    if ($null -eq $parsedTimeout -or $parsedTimeout -lt 1) {
+                        Write-Host "[windo] Invalid timeout value: $rawTimeout. Use seconds or ms (e.g. 10, 10s, 500ms)." -ForegroundColor Yellow
+                        _windo_set_exit 2
+                        return
+                    }
+                    if ($parsedTimeout -gt 86400000) { $parsedTimeout = 86400000 }
+                    $CommandTimeoutOverrideMs = [int]$parsedTimeout
+                    $null = $cl.RemoveAt($i)
+                    continue
+                }
+
+                $i++
             }
             $Command = @($cl)
+        }
+        if ($HelpRequested) {
+            if ($Command.Count -gt 0 -and [string]::IsNullOrWhiteSpace($HelpTopic)) { $HelpTopic = [string]$Command[0] }
+            _windo_show_help $HelpTopic
+            _windo_set_exit 0
+            return
         }
     }
 
@@ -1210,6 +1438,21 @@ function windo {
             if ($null -ne $rawVal) { $snapshot[$trimmed] = [string]$rawVal }
         }
         return $snapshot
+    }
+
+    function _windo_build_preserve_environment_payload {
+        param([object]$Snapshot)
+        if ($null -eq $Snapshot) { return $null }
+        try {
+            $json = $Snapshot | ConvertTo-Json -Depth 20 -Compress
+            return [ordered]@{
+                Version = 1
+                Type    = "dpapi-json"
+                Data    = _dpapi_protect $json
+            }
+        } catch {
+            return $null
+        }
     }
 
     # Keep aligned with windo_runner.ps1 and src/windo/snippets/WindoConfigEffective.ps1
@@ -2276,7 +2519,7 @@ function windo {
                 }
             }
         }
-        _windo_run_genisis_installer -ForceContinue:$forceInst
+        _windo_run_genisis_installer -ForceContinue:$forceInst -NonInteractive:$NonInteractive
         return
     }
 
@@ -2974,9 +3217,11 @@ function windo {
     $reqPath = Join-Path $SecureDir ("windo_req.$reqId.json")
     $outPath = Join-Path $SecureDir ("windo_res.$reqId.json")
     $preservedEnvSnapshot = $null
+    $preservedEnvPayload = $null
     if ($PreserveEnvAll -or ($PreserveEnvNames -and $PreserveEnvNames.Count -gt 0)) {
         if ($PreserveEnvAll) { $preservedEnvSnapshot = _windo_collect_env_snapshot $null }
         else { $preservedEnvSnapshot = _windo_collect_env_snapshot ([string[]]$PreserveEnvNames) }
+        $preservedEnvPayload = _windo_build_preserve_environment_payload $preservedEnvSnapshot
     }
 
     $pending = @{
@@ -2987,7 +3232,7 @@ function windo {
         Host      = $env:COMPUTERNAME
         User      = "$env:USERDOMAIN\$env:USERNAME"
         TimeoutOverrideMs = $(if ($null -eq $CommandTimeoutOverrideMs) { $null } else { [int]$CommandTimeoutOverrideMs })
-        PreserveEnvironment = $preservedEnvSnapshot
+        PreserveEnvironment = $preservedEnvPayload
         PreserveEnvironmentMode = $(if ($PreserveEnvAll) { "all" } elseif ($preservedEnvSnapshot) { "names" } elseif ($PreserveEnvNames -and $PreserveEnvNames.Count -gt 0) { "names" } else { $null })
     } | ConvertTo-Json -Compress
 
