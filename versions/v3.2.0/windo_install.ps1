@@ -1,5 +1,5 @@
 <# =====================================================================
-WINDO v3.2.1 Release-Hardened Installer
+WINDO v3.2.0 Release-Hardened Installer
 Run once in an elevated PowerShell session.
 
 Installs:
@@ -18,7 +18,7 @@ Maintainer: new windo subcommands must be added to $WindoBuiltinVerbs (single so
 
 $ErrorActionPreference = "Stop"
 
-$WindoVersion = "3.2.1"
+$WindoVersion = "3.2.0"
 
 # Single source of truth for embedded profile: completer skip-list (plus '!!') and windo last-command first-token exclusions.
 $WindoBuiltinVerbs = @(
@@ -1329,64 +1329,6 @@ Use: windo prompt --json   (machine-readable bundle)
         return $true
     }
 
-    function _windo_keybinding_inspect_chord_for_doctor {
-        param(
-            [string]$Chord,
-            [ValidateSet('prefix', 'run')]
-            [string]$Role
-        )
-        $row = [ordered]@{
-            chord                 = $Chord
-            role                  = $Role
-            handlerPresent        = $false
-            looksLikeWindoBinding = $false
-            scriptPreview         = $null
-            advisory              = $null
-        }
-        if ([string]::IsNullOrWhiteSpace($Chord)) {
-            $row.advisory = "empty chord"
-            return [pscustomobject]$row
-        }
-        if (!(Get-Command Get-PSReadLineKeyHandler -ErrorAction SilentlyContinue)) {
-            $row.advisory = "PSReadLine key handler API not available"
-            return [pscustomobject]$row
-        }
-        $h = $null
-        try {
-            $h = Get-PSReadLineKeyHandler -Chord $Chord -ErrorAction Stop
-        } catch {
-            $row.advisory = "no handler registered (or chord not bound in this host)"
-            return [pscustomobject]$row
-        }
-        if ($null -eq $h) {
-            $row.advisory = "no handler registered"
-            return [pscustomobject]$row
-        }
-        $row.handlerPresent = $true
-        $script = ""
-        try {
-            if ($null -ne $h.ScriptBlock) {
-                $script = $h.ScriptBlock.ToString()
-            } elseif ($null -ne $h.Function -and -not [string]::IsNullOrWhiteSpace([string]$h.Function)) {
-                $script = "Function: " + [string]$h.Function
-            }
-        } catch {
-            $script = "(could not stringify handler)"
-        }
-        $max = 420
-        if ($script.Length -gt $max) { $row.scriptPreview = $script.Substring(0, $max) + "..." } else { $row.scriptPreview = $script }
-
-        if ($Role -eq 'prefix') {
-            $row.looksLikeWindoBinding = [bool]($script -match '(?i)windo')
-        } else {
-            $row.looksLikeWindoBinding = [bool](($script -match '(?i)windo') -and ($script -match 'AcceptLine'))
-        }
-        if (-not $row.looksLikeWindoBinding) {
-            $row.advisory = "Handler does not match WINDO heuristics for this role; another module may have claimed this chord."
-        }
-        return [pscustomobject]$row
-    }
-
     function _json_envelope([string]$commandName, $payload) {
         $r = _windo_resolve_json_envelope
         if (-not $r.includeMeta) {
@@ -1932,10 +1874,10 @@ Use: windo prompt --json   (machine-readable bundle)
                 Name        = "keybindings"
                 Category    = "Shell Experience"
                 Summary     = "Inspect or set PSReadLine prefix behavior."
-                Syntax      = @("windo keybindings [status]", "windo keybindings doctor [--json]", "windo keybindings set --chord <chord>", "windo keybindings disable|enable|reset|safe-reset")
+                Syntax      = @("windo keybindings [status]", "windo keybindings set --chord <chord>", "windo keybindings disable|enable|reset|safe-reset")
                 Description = "Inspect effective chording, recover from broken chords, and switch to safe defaults."
-                Notes       = "safe-reset removes legacy handlers and reboots the configured chord in one command. doctor uses advisory heuristics to spot non-WINDO handlers on WINDO chords."
-                Examples    = @("windo keybindings status --json", "windo keybindings doctor", "windo keybindings disable", "windo keybindings safe-reset")
+                Notes       = "safe-reset removes legacy handlers and reboots the configured chord in one command."
+                Examples    = @("windo keybindings status --json", "windo keybindings disable", "windo keybindings safe-reset")
             },
             [pscustomobject]@{
                 Name        = "profile"
@@ -2113,16 +2055,16 @@ Use: windo prompt --json   (machine-readable bundle)
                 Category    = "Developers"
                 Summary     = "Scaffold a local WINDO module folder."
                 Syntax      = @("windo dev init-module [name]")
-                Description = "Creates module.json, Load.ps1, and README.md under Documents\\windo\\modules for contributors."
+                Description = "Creates module.json and Load.ps1 under Documents\\windo\\modules for contributors."
                 Notes       = "Does not enable the module; use windo modules enable."
                 Examples    = @("windo dev init-module my-mod")
             },
             [pscustomobject]@{
                 Name        = "session"
                 Category    = "Inspection"
-                Summary     = "Compact session-oriented summary (audit tail + integrity + last command)."
+                Summary     = "Compact session-oriented summary (context + integrity + last command)."
                 Syntax      = @("windo session [--json]")
-                Description = "Combines task presence, integrity levels, last stored interactive command, and the last decrypted audit entries (compact) for dashboards."
+                Description = "Combines elements of context, doctor-style integrity flags, and last stored command/meta for dashboards."
                 Notes       = "Read-only; does not execute elevated tasks."
                 Examples    = @("windo session --json")
             }
@@ -2371,16 +2313,9 @@ Use: windo prompt --json   (machine-readable bundle)
             [pscustomobject]@{ name = "WINDO_AUTO_DETECT_ALT_BINDINGS"; environmentValue = $(if ($env:WINDO_AUTO_DETECT_ALT_BINDINGS) { [string]$env:WINDO_AUTO_DETECT_ALT_BINDINGS } else { $null }); effectiveNote = $(if ($kbPolicy.autoDetectAlt) { "alt-chord auto fallback enabled" } else { "alt-chord auto fallback disabled" }) }
             [pscustomobject]@{ name = "WINDO_KEYBINDING_FALLBACK_CHORD"; environmentValue = $(if ($env:WINDO_KEYBINDING_FALLBACK_CHORD) { [string]$env:WINDO_KEYBINDING_FALLBACK_CHORD } else { $null }); effectiveNote = "fallback chord: $($kbPolicy.fallbackChord)" }
             [pscustomobject]@{ name = "WINDO_KEYBINDING_POLICY"; environmentValue = $null; effectiveNote = "effective source chord=$($kbPolicy.chordSource); enabled=$($kbPolicy.enabled)" }
-            [pscustomobject]@{ name = "WINDO_EXTRAS_INDEX_URL"; environmentValue = $(if ($env:WINDO_EXTRAS_INDEX_URL) { [string]$env:WINDO_EXTRAS_INDEX_URL } else { $null }); effectiveNote = "resolved extras index: $(_windo_extras_index_url)" }
         )
         if ($JsonOutput) {
-            _emit_json "config" @{
-                settings = @($rows)
-                secureDir = $SecureDir
-                keybindingPolicy = $kbPolicy
-                extrasIndexUrl = (_windo_extras_index_url)
-                exitCode = 0
-            }
+            _emit_json "config" @{ settings = @($rows); secureDir = $SecureDir; keybindingPolicy = $kbPolicy; exitCode = 0 }
             _windo_set_exit 0
             return
         }
@@ -2969,7 +2904,7 @@ Use: windo prompt --json   (machine-readable bundle)
   "name": "$mid",
   "version": "0.1.0",
   "entry": "Load.ps1",
-  "requiresWindoVersion": "3.2.1"
+  "requiresWindoVersion": "3.2.0"
 }
 "@
         $lp = @"
@@ -2977,21 +2912,9 @@ Use: windo prompt --json   (machine-readable bundle)
 `$WindoModuleId = '$mid'
 Write-Host "[WINDO module $mid] loaded." -ForegroundColor DarkGray
 "@
-        $readme = @"
-# WINDO module: $mid
-
-Local-only module loaded after the WINDO profile block.
-
-Enable: windo modules enable $mid
-
-Trust: review Load.ps1 (and any other files) before enabling. Modules run in your interactive shell context.
-
-See the WINDO repository docs/modules-and-extras.md for the modules and extras trust model.
-"@
         Set-Content -LiteralPath (Join-Path $modDir "module.json") -Value $mj.Trim() -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $modDir "Load.ps1") -Value $lp.Trim() -Encoding UTF8
-        Set-Content -LiteralPath (Join-Path $modDir "README.md") -Value $readme.Trim() -Encoding UTF8
-        if ($JsonOutput) { _emit_json "dev" @{ action = "init-module"; moduleId = $mid; path = $modDir; readme = (Join-Path $modDir "README.md"); exitCode = 0 } }
+        if ($JsonOutput) { _emit_json "dev" @{ action = "init-module"; moduleId = $mid; path = $modDir; exitCode = 0 } }
         else { Write-Host "[windo] Scaffolded module at $modDir" -ForegroundColor Green; Write-Host "  Enable: windo modules enable $mid" -ForegroundColor DarkGray }
         _windo_set_exit 0
         return
@@ -3005,40 +2928,6 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
         $meta = _read_last_meta
         $lc = $null
         if (Test-Path $LastCmdFile) { $lc = (Get-Content -Raw -Path $LastCmdFile -ErrorAction SilentlyContinue).Trim() }
-        $auditAll = @(_parse_log_entries)
-        $lastAudit = $null
-        $recentAudit = [System.Collections.ArrayList]@()
-        if ($auditAll.Count -gt 0) {
-            $lastAudit = $auditAll[$auditAll.Count - 1]
-            $take = [Math]::Min(5, $auditAll.Count)
-            foreach ($a in @($auditAll | Select-Object -Last $take)) {
-                $elev = $null
-                if ($a.PSObject.Properties.Name -contains 'Elevation') { $elev = [string]$a.Elevation }
-                $rid = $null
-                if ($a.PSObject.Properties.Name -contains 'RequestId') { $rid = [string]$a.RequestId }
-                [void]$recentAudit.Add([ordered]@{
-                    timestamp = [string]$a.Timestamp
-                    command = [string]$a.Command
-                    exitCode = [int]$a.ExitCode
-                    elevation = $elev
-                    requestId = $rid
-                })
-            }
-        }
-        $lastAuditPayload = $null
-        if ($null -ne $lastAudit) {
-            $le = $null
-            if ($lastAudit.PSObject.Properties.Name -contains 'Elevation') { $le = [string]$lastAudit.Elevation }
-            $lrid = $null
-            if ($lastAudit.PSObject.Properties.Name -contains 'RequestId') { $lrid = [string]$lastAudit.RequestId }
-            $lastAuditPayload = @{
-                timestamp = [string]$lastAudit.Timestamp
-                command = [string]$lastAudit.Command
-                exitCode = [int]$lastAudit.ExitCode
-                elevation = $le
-                requestId = $lrid
-            }
-        }
         $pl = @{
             windoVersion = $WindoVersion
             secureDir = $SecureDir
@@ -3050,8 +2939,6 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             lastCommand = $lc
             lastRequestId = $(if ($meta -and $meta.PSObject.Properties.Name -contains 'lastRequestId') { [string]$meta.lastRequestId } else { $null })
             lastStoredAt = $(if ($meta -and $meta.PSObject.Properties.Name -contains 'storedAt') { [string]$meta.storedAt } else { $null })
-            lastAudit = $lastAuditPayload
-            recentAudit = @($recentAudit)
             exitCode = 0
         }
         if ($JsonOutput) { _emit_json "session" $pl }
@@ -3062,12 +2949,6 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             Write-Host "  Integrity  : $($ix.OverallLevel) (runner $($ix.RunnerLevel), updater $($ix.UpdaterLevel))"
             if ($lc) { Write-Host "  Last cmd   : $lc" -ForegroundColor DarkGray }
             if ($pl.lastRequestId) { Write-Host "  Last reqId : $($pl.lastRequestId)" -ForegroundColor DarkGray }
-            if ($null -ne $lastAuditPayload) {
-                Write-Host "  Last audit : $($lastAuditPayload.timestamp)  exit=$($lastAuditPayload.exitCode)  $($lastAuditPayload.elevation)" -ForegroundColor DarkGray
-                Write-Host "             $($lastAuditPayload.command)" -ForegroundColor DarkGray
-            } else {
-                Write-Host "  Last audit : (no log entries yet)" -ForegroundColor DarkGray
-            }
         }
         _windo_set_exit 0
         return
@@ -3076,45 +2957,6 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
     if ($Command.Count -ge 1 -and $Command[0] -eq "keybindings") {
         $sub = "status"
         if ($Command.Count -ge 2) { $sub = [string]$Command[1].Trim().ToLowerInvariant() }
-
-        if ($sub -eq "doctor") {
-            try {
-                Import-Module PSReadLine -ErrorAction Stop | Out-Null
-                $null = [Microsoft.PowerShell.PSConsoleReadLine]
-            } catch {
-                if ($JsonOutput) { _emit_json "keybindings" @{ error = "PSReadLine not available: $($_.Exception.Message)"; exitCode = 2 } } else { Write-Host "[windo] keybindings doctor: PSReadLine not available." -ForegroundColor Red }
-                _windo_set_exit 2
-                return
-            }
-            $policy = _windo_resolve_keybinding_policy
-            $checks = [System.Collections.ArrayList]@()
-            if ($policy.enabled -and -not [string]::IsNullOrWhiteSpace($policy.chord)) {
-                [void]$checks.Add((_windo_keybinding_inspect_chord_for_doctor -Chord $policy.chord -Role 'prefix'))
-            } else {
-                [void]$checks.Add([pscustomobject]@{ chord = $policy.chord; role = 'prefix'; handlerPresent = $false; looksLikeWindoBinding = $false; scriptPreview = $null; advisory = "WINDO keybindings disabled or no chord configured in policy." })
-            }
-            [void]$checks.Add((_windo_keybinding_inspect_chord_for_doctor -Chord 'Shift+Enter' -Role 'run'))
-            [void]$checks.Add((_windo_keybinding_inspect_chord_for_doctor -Chord 'Alt+Enter' -Role 'run'))
-            $anyAdv = @($checks | Where-Object { $null -ne $_.advisory -and -not [string]::IsNullOrWhiteSpace([string]$_.advisory) })
-            if ($JsonOutput) {
-                _emit_json "keybindings" @{
-                    subcommand = 'doctor'
-                    policy = $policy
-                    chordChecks = @($checks)
-                    anyAdvisory = [bool]($anyAdv.Count -gt 0)
-                    exitCode = 0
-                }
-            } else {
-                Write-Host "[windo] keybindings doctor (advisory — heuristic only)" -ForegroundColor Cyan
-                foreach ($c in $checks) {
-                    $st = if ($c.looksLikeWindoBinding) { 'ok' } else { 'review' }
-                    Write-Host "  [$st] $($c.role) $($c.chord)" -ForegroundColor $(if ($c.looksLikeWindoBinding) { 'Green' } else { 'Yellow' })
-                    if ($c.advisory) { Write-Host "       $($c.advisory)" -ForegroundColor DarkYellow }
-                }
-            }
-            _windo_set_exit 0
-            return
-        }
 
         if ($sub -eq "status") {
             $policy = _windo_resolve_keybinding_policy
@@ -3310,7 +3152,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             return
         }
 
-        Write-Host "[windo] keybindings: expected status | doctor | set --chord <chord> | disable | enable | reset | safe-reset  (got: $sub)" -ForegroundColor Yellow
+        Write-Host "[windo] keybindings: expected status | set --chord <chord> | disable | enable | reset | safe-reset  (got: $sub)" -ForegroundColor Yellow
         _windo_set_exit 2
         return
     }

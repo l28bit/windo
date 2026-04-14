@@ -4,6 +4,27 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.2.1] - 2026-04-13
+
+### Added
+
+- **`windo config` / `--json`:** documents **`WINDO_EXTRAS_INDEX_URL`** and surfaces the resolved extras index URL (**`extrasIndexUrl`** in JSON).
+- **Operator doc:** [`docs/modules-and-extras.md`](docs/modules-and-extras.md) describes modules, extras, and the Oh My Posh bridge; linked from the README.
+- **`windo keybindings doctor`:** advisory pass that inspects PSReadLine handlers for the effective prefix chord and **`Shift+Enter`** / **`Alt+Enter`** run chords (heuristic only).
+- **`windo dev init-module`:** writes a short **`README.md`** next to **`module.json`** / **`Load.ps1`**.
+- **`windo session`:** includes **`lastAudit`** and a short **`recentAudit`** tail from the decrypted log for dashboards.
+
+## [3.2.0] - 2026-04-13
+
+### Added
+
+- **Composable shell companion (optional):** **`windo modules`** discovers local folders under **`%USERPROFILE%\Documents\windo\modules`** with **`module.json`** + entry script; **`enable` / `disable`** persist **`enabledModules`** in **`windo_prefs.json`**; **`doctor`** and **`verify`** assist with manifests and optional per-file SHA256 in **`integrity`**. The installer appends a small profile stub that loads enabled modules after the WINDO block (failures are warnings only).
+- **Recipes:** bundled named templates via **`windo recipes`**, **`windo recipes run`**, and **`windo run --recipe`** (same elevation path as normal **`windo <cmd>`**).
+- **Prompt bridge:** **`windo prompt`** documents Oh My Posh integration; after each successful elevation WINDO sets **`WINDO_LAST_REQUEST_ID`** and **`WINDO_VERSION`** for themes and tooling.
+- **Curated extras:** repo **`extras/index.json`** plus **`windo extras search`** / **`windo extras fetch`** (fetch **refused while elevated**; SHA256 enforced when published). Override index URL with **`WINDO_EXTRAS_INDEX_URL`**.
+- **Developer scaffold:** **`windo dev init-module`** creates a starter module folder.
+- **Session summary:** **`windo session`** combines task presence, integrity levels, and last stored command / **`RequestId`**.
+
 ## [3.1.2] - 2026-04-13
 
 ### Fixed

@@ -84,9 +84,9 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo !!` / `windo replay` | Re-run the last stored elevated command (`replay` is the explicit name). |
 | `windo last` | Show the last stored command text and optional metadata (no execution). |
 | `windo context [--json]` | One-screen environment summary (version, paths, tasks, last `RequestId` when known). |
-| `windo config [--json]` | **v3.0+** Effective optional env (`WINDO_*`, `CI`) and runner-related semantics (timeouts, caps). |
+| `windo config [--json]` | **v3.0+** Effective optional env (`WINDO_*`, `CI`) and runner-related semantics (timeouts, caps). **v3.2.1+** includes **`WINDO_EXTRAS_INDEX_URL`** and JSON field **`extrasIndexUrl`**. |
 | `windo backups [--json]` | **v3.0+** List encrypted log backups (`windo_history*.enc.bak`); **`--prune --keep N --force`** removes older files. |
-| `windo keybindings [status|set --chord <chord>|disable|enable|reset|safe-reset]` | Inspect and control `windo` PSReadLine prefixing behavior (no install required, applies to current session when possible). |
+| `windo keybindings [status|doctor|set --chord <chord>|disable|enable|reset|safe-reset]` | Inspect and control `windo` PSReadLine prefixing behavior (no install required, applies to current session when possible). **`doctor`** runs advisory heuristics for chord conflicts. |
 | `windo trace <RequestId>` / `windo trace --id <id>` | Find a decrypted audit entry by `RequestId`. |
 | `windo stats` | Summarize the encrypted audit log (counts, categories, optional avg duration). |
 | `windo history [-n N]` | Compact recent commands (default last 50). |
@@ -104,6 +104,12 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo install-latest [--force] [--non-interactive] [--timeout <seconds|ms>] [--preserve-env [ALL\|name1,name2]]` | **v3.1.0+** Download and run the latest `windo_install.ps1` from **`Genisis`**. **v3.1.1+:** download only in a **non-elevated** shell; **confirm** after verify, then run installer ( **`--force`** / env for CI). |
 | `windo upgrade` | Alias of **`install-latest`**. |
 | `windo theme [classic \| modern \| auto]` | **v3.1.0+** Choose **CLI JSON** “look” only: **`classic`** = `schemaVersion` **2.6** without **`meta`**; **`modern`** = **3.0** + **`meta`**; **`auto`** = follow the embedded profile. Runner, tasks, and audit **do not** change—see [`docs/json-schema.md`](docs/json-schema.md). |
+| `windo modules list \| enable \| disable \| doctor \| verify` | **v3.2.0+** Optional modules under **`Documents\windo\modules`** (see **`windo help modules`**); enabled ids persist in **`windo_prefs.json`**. |
+| `windo recipes [list] \| show \| run` / `windo run --recipe <name>` | **v3.2.0+** Built-in elevated **recipe** templates (bundled data, not arbitrary script). |
+| `windo prompt [--export <path>]` | **v3.2.0+** Oh My Posh bridge: env hints + sample segment JSON (**`WINDO_VERSION`**, **`WINDO_LAST_REQUEST_ID`** after each elevation). |
+| `windo extras search [query]` / `windo extras fetch <id>` | **v3.2.0+** Search the published extras index; **fetch** is **non-elevated only**, with optional SHA256 verification (see **`SECURITY.md`**). |
+| `windo dev init-module [name]` | **v3.2.0+** Scaffold **`module.json`** + **`Load.ps1`** under **`Documents\windo\modules`**. |
+| `windo session [--json]` | **v3.2.0+** Compact summary: tasks, integrity levels, last stored command / `RequestId`. **v3.2.1+** adds **`lastAudit`** / **`recentAudit`** from the decrypted log tail. |
 | `windo uninstall` | Download and run the elevated uninstaller (removes tasks, profile block, WINDO files under `.pwsh_secure`, optional `Documents\windo`). |
 
 Append **`--json`** or **`-Json`** to supported commands for structured output. On v3.0.0+ profiles the default envelope uses **`schemaVersion`** **`3.0`** and **`meta`**. You can still get a **2.6-style** envelope (no **`meta`**) via **`windo theme classic`** or **`WINDO_JSON_ENVELOPE`**—without downgrading WINDO itself. See [`docs/json-schema.md`](docs/json-schema.md).
@@ -192,6 +198,8 @@ If you **start the line with `windo`**, the installer registers **`Register-Wind
 - **Integrity:** `windo_manifest.json` stores expected SHA256 for runner and self-update; **`windo integrity`** compares disk to manifest and reports **OK**, **DRIFT**, **TAMPERED**, or **UNKNOWN** per component and overall.
 
 See [`SECURITY.md`](SECURITY.md) for expectations and reporting.
+
+Optional **modules** and **extras** (v3.2+): [`docs/modules-and-extras.md`](docs/modules-and-extras.md).
 
 ### Optional environment variables
 
