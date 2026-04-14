@@ -82,6 +82,8 @@ $modsDoc = Join-Path $root "docs\modules-and-extras.md"
 Assert-Equal (Test-Path -LiteralPath $modsDoc) $true "docs/modules-and-extras.md exists"
 $jsonSchemaDoc = Join-Path $root "docs\json-schema.md"
 $jsonSchemaRaw = Get-Content -Path $jsonSchemaDoc -Raw
+$buildDoc = Join-Path $root "docs\build.md"
+$buildRaw = Get-Content -Path $buildDoc -Raw
 Assert-Equal ($jsonSchemaRaw.Contains('## `session` payload') -eq $true) $true "json-schema documents session payload"
 Assert-Equal ($jsonSchemaRaw.Contains("extrasIndexUrl") -eq $true) $true "json-schema documents config extrasIndexUrl"
 Assert-Equal ($jsonSchemaRaw.Contains("keybindings doctor") -eq $true) $true "json-schema documents keybindings doctor"
@@ -93,6 +95,7 @@ Assert-Equal ($jsonSchemaRaw.Contains('## `prompt` payload') -eq $true) $true "j
 Assert-Equal ($jsonSchemaRaw.Contains('## `help` payload') -eq $true) $true "json-schema documents help payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `export` payload') -eq $true) $true "json-schema documents export payload"
 Assert-Equal ($installerSource.Contains("auditIncludedInExcerpt") -eq $true) $true "installer export json includes auditIncludedInExcerpt"
+Assert-Equal ($buildRaw.Contains("Sync-VersionSnapshot.ps1") -eq $true) $true "build.md documents Sync-VersionSnapshot.ps1"
 
 if ($failed -gt 0) {
     Write-Host "Test-WindoLogic: $failed failure(s)." -ForegroundColor Red
