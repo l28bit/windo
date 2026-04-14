@@ -16,6 +16,16 @@ The default GitHub branch for raw URLs is named **`Genisis`** (historical spelli
 
 ---
 
+## What's new in v3.2.2
+
+- **`windo export --json`** — after a successful bundle zip, the CLI emits an envelope with **`zipPath`**, **`sizeBytes`**, redaction flag, and audit excerpt counts (**`auditTotalEntries`**, **`auditIncludedInExcerpt`**). See [`docs/json-schema.md`](docs/json-schema.md).
+- **Schema documentation** — **`help`** and **`export`** payload tables (and matching **`exitCode`** rows) in the same doc.
+- **Runner** — preserve-environment restore uses a valid **`try`/`finally`** so **`windo_runner.ps1`** and the embedded runner block pass syntax validation.
+
+Full list: [`CHANGELOG.md`](CHANGELOG.md).
+
+---
+
 ## What WINDO does
 
 - Run `windo <command…>` to send work through a **scheduled task** configured with **RunLevel Highest**.
@@ -91,7 +101,7 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo stats` | Summarize the encrypted audit log (counts, categories, optional avg duration). |
 | `windo history [-n N]` | Compact recent commands (default last 50). |
 | `windo report [-o path]` | Write a local HTML audit report with summary, categories, and integrity levels. |
-| `windo export [-o zip] [-n N] [--redact]` | Zip bundle: manifest copy, `doctor.json` / `integrity.json` (envelope JSON), last N audit entries. Optional **`--redact`** masks path-like strings in JSON. |
+| `windo export [-o zip] [-n N] [--redact] [--json]` | Zip bundle: manifest copy, `doctor.json` / `integrity.json` (envelope JSON), last N audit entries. Optional **`--redact`** masks path-like strings in JSON. **`--json`** (**v3.2.2+**) adds a CLI envelope after the zip is written (`zipPath`, sizes, audit excerpt stats). |
 | `windo self-update` | Trigger the self-update scheduled task (repairs task actions). |
 | `windo version` | Version, paths, hashes, task presence, integrity levels. |
 | `windo doctor` | Paths, tasks, logs, quick health, last `RequestId` when known. |
@@ -160,7 +170,7 @@ Bindings are **skipped** with a warning if PSReadLine is missing; your profile s
 
 ### Quick verification checklist
 
-- **Normal shell (pwsh/Windows PowerShell):** open a fresh shell and run `windo keybindings status --json`; confirm `policy.enabled` and `effectiveChord`.
+- **Normal shell (pwsh/Windows PowerShell):** open a fresh shell and run `windo keybindings status --json`; confirm `policy.enabled` and `effectiveChord`; optionally run **`windo keybindings doctor`** (advisory heuristics for chord conflicts with other PSReadLine handlers).
 - **Plain typing check:** in a fresh prompt, type `w` and `hello`; it should appear as expected (single-character typing works).
 - **Prefix shortcut check:** type `g` + `it` (or any text), then press your reported chord (for example `Alt+w`) and ensure `windo ` is prepended.
 - **Terminal profile reload check:** run:

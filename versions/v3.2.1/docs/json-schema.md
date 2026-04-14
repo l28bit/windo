@@ -98,8 +98,6 @@ Several commands mirror **`$global:WINDO_EXIT_CODE`** inside **`payload.exitCode
 | `extras` | 0, 2 | **2** = elevated fetch, index/network/hash errors, missing id |
 | `dev` | 0, 2 | **2** = bad name, directory exists, or wrong subcommand |
 | `prompt` | 0, 2 | **2** = **`--export`** path write failure |
-| `help` | 0, 2 | **2** = topic not found (suggestions may be present) |
-| `export` | 0, 2 | **v3.2.2+** CLI summary after zip write; **2** = archive failure or missing output |
 | `backups` | 0, 2 | **2** = bad args, prune without `--force`, prune failure |
 | `theme` | 0, 2 | **2** = invalid subcommand or prefs write failure |
 
@@ -277,34 +275,6 @@ Envelope **`command`** is **`modules`**. Subcommands share error shapes: **`erro
 | `ohMyPoshSegmentExample` | object | Sample Oh My Posh segment (template uses **`{{ .Env.* }}`**) |
 | `exportedTo` | string | Present when **`--export <path>`** succeeds |
 | `error` | string | Export/write failure (**`exitCode`** **2**) |
-| `exitCode` | number | **0** on success |
-
-## `help` payload (v3.1.2+)
-
-| Field | Type | Description |
-|--------|------|-------------|
-| `topic` | string \| null | Normalized topic when provided; **null** for full index |
-| `available` | array | (index mode) Topic rows: `Name`, `Category`, `Aliases`, `Summary`, `Syntax`, `Description`, `Notes` |
-| `usage` | string | (index mode) Short usage line |
-| `query` | string | Topic query string |
-| `found` | bool | **false** when topic unknown (**`exitCode`** **2**) |
-| `suggestions` | array | (not found) Up to **3** topic objects: `Name`, `Category`, `Summary` |
-| `command` | object | (found) Selected topic: `Name`, `Aliases`, `Category`, `Summary`, `Description`, `Syntax`, `Notes`, `Examples` |
-| `exitCode` | number | **0** when found or index; **2** when not found |
-
-## `export` payload (v3.2.2+)
-
-**`windo export`** always writes a **zip** on disk. **`--json`** (global flag) adds a **CLI envelope** after a successful bundle so automation can capture path and size without parsing human output. The zip itself still contains **`doctor.json`**, **`integrity.json`**, and **`audit_excerpt.json`** — each file uses the usual envelope internally (**`command`** may be **`doctor`**, **`integrity`**, or **`export`** for the audit slice).
-
-| Field | Type | Description |
-|--------|------|-------------|
-| `zipPath` | string | Absolute path to the created **`.zip`** |
-| `sizeBytes` | number | File size in bytes |
-| `redacted` | bool | **`true`** if **`--redact`** was used |
-| `auditExcerptLimit` | number | **`-n`** value (default **30**) — max decrypted entries packed |
-| `auditTotalEntries` | number | Total decrypted audit rows scanned |
-| `auditIncludedInExcerpt` | number | Entries included in **`audit_excerpt.json`** (last **N**) |
-| `error` | string | When **`exitCode`** **2** (archive failure, missing zip) |
 | `exitCode` | number | **0** on success |
 
 ## `backups` payload (v3.0.0+)

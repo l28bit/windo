@@ -4,12 +4,29 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.2.2] - 2026-04-13
+
+### Added
+
+- **`windo export --json`:** after a successful zip write, emits a **CLI envelope** with **`zipPath`**, **`sizeBytes`**, **`redacted`**, **`auditExcerptLimit`**, **`auditTotalEntries`**, **`auditIncludedInExcerpt`**, and **`exitCode`**; archive failures return **`error`** + **`exitCode` 2**.
+- **Docs:** [`docs/json-schema.md`](docs/json-schema.md) now documents **`help`** and **`export`** payloads and extends the automation **`exitCode`** table; help topic examples include **`windo help --json`**. [`docs/modules-and-extras.md`](docs/modules-and-extras.md) cross-links those commands in the JSON schema overview.
+
+### Fixed
+
+- **Runner:** invalid nested **`try`** around preserve-environment restore prevented **`windo_runner.ps1`** (and the embedded runner block) from parsing; restore now runs in a single **`finally`** so AST validation passes.
+
+### Changed
+
+- **CI / local lint:** [`tools/Invoke-PSScriptAnalyzer.ps1`](tools/Invoke-PSScriptAnalyzer.ps1) now includes [`tools/Encode-ChildExec.ps1`](tools/Encode-ChildExec.ps1) in the Error-severity pass (maintainer helper for regenerating embedded **`ChildExec`** base64). [`docs/build.md`](docs/build.md) mentions this in the validation list.
+
 ## [3.2.1] - 2026-04-13
 
 ### Added
 
 - **`windo config` / `--json`:** documents **`WINDO_EXTRAS_INDEX_URL`** and surfaces the resolved extras index URL (**`extrasIndexUrl`** in JSON).
 - **Operator doc:** [`docs/modules-and-extras.md`](docs/modules-and-extras.md) describes modules, extras, and the Oh My Posh bridge; linked from the README.
+- **JSON schema doc:** [`docs/json-schema.md`](docs/json-schema.md) updated for **`config`** (including **`keybindingPolicy`** / **`extrasIndexUrl`**), **`session`** (**`lastAudit`** / **`recentAudit`**), **`keybindings`** (**`status`** vs **`doctor`**), and **`modules`** / **`recipes`** / **`extras`** / **`dev`** / **`prompt`** payloads; automation **`exitCode`** table extended accordingly.
+- **Build doc:** [`docs/build.md`](docs/build.md) adds a **JSON CLI schema** maintainer checklist (code → docs → tests → PR note).
 - **`windo keybindings doctor`:** advisory pass that inspects PSReadLine handlers for the effective prefix chord and **`Shift+Enter`** / **`Alt+Enter`** run chords (heuristic only).
 - **`windo dev init-module`:** writes a short **`README.md`** next to **`module.json`** / **`Load.ps1`**.
 - **`windo session`:** includes **`lastAudit`** and a short **`recentAudit`** tail from the decrypted log for dashboards.

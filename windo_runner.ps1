@@ -289,9 +289,9 @@ try {
             $exitCode = 1
             $timedOut = $false
             $truncated = $false
-        } finally {
-            Restore-WindoPreserveEnvironment -State $envState
         }
+    } finally {
+        Restore-WindoPreserveEnvironment -State $envState
     }
 
     if ($null -eq $stdout) { $stdout = "" }

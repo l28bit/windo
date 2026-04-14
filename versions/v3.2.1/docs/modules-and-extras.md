@@ -25,3 +25,7 @@ See **[`SECURITY.md`](../SECURITY.md)** for the full rules on optional remote ex
 ## Oh My Posh bridge (`windo prompt`)
 
 WINDO does not ship a full theme. After each successful elevation, the CLI sets **`WINDO_LAST_REQUEST_ID`** and **`WINDO_VERSION`** for prompts and tooling. Use **`windo prompt`** / **`windo prompt --export <path>`** for a sample Oh My Posh segment and documentation.
+
+## JSON (`--json`) shapes
+
+Structured payloads for **`windo modules`**, **`windo recipes`**, **`windo extras`**, **`windo prompt`**, **`windo dev`**, plus **`windo config`**, **`windo session`**, and **`windo keybindings`** (including **`doctor`**) are documented in **[`json-schema.md`](json-schema.md)** (per-command **`payload`** tables and **`exitCode`** semantics).

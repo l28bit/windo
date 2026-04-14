@@ -14,6 +14,7 @@ $files = @(
     (Join-Path $root "tools\Validate-Windo.ps1"),
     (Join-Path $root "tools\build.ps1"),
     (Join-Path $root "tools\Test-WindoLogic.ps1"),
+    (Join-Path $root "tools\Encode-ChildExec.ps1"),
     (Join-Path $root "tools\Invoke-PSScriptAnalyzer.ps1")
 )
 # Severity Error only: WINDO scripts intentionally use Write-Host, empty catch in hot paths, and UTF-8 no BOM.

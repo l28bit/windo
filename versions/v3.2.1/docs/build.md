@@ -20,7 +20,7 @@ This runs `tools/Validate-Windo.ps1` (AST parse of `bootstrap.ps1`, `windo_insta
 CI also runs:
 
 - `tools/Test-WindoLogic.ps1` — integrity-level logic (`src/windo/snippets/IntegrityLevels.ps1`), stats time filter (`src/windo/snippets/StatsTimeFilter.ps1`), and effective env helpers (`src/windo/snippets/WindoConfigEffective.ps1`)
-- `tools/Invoke-PSScriptAnalyzer.ps1` — **Error**-severity rules on shipping scripts plus `tools/Encode-ChildExec.ps1` (requires `PSScriptAnalyzer` module)
+- `tools/Invoke-PSScriptAnalyzer.ps1` — **Error**-severity rules on shipping scripts (requires `PSScriptAnalyzer` module)
 
 ## Optional `src/` fragments
 
@@ -52,4 +52,4 @@ Structured command output uses a shared envelope (`schemaVersion` **3.0** on cur
 3. **Extend** **[`tools/Test-WindoLogic.ps1`](../tools/Test-WindoLogic.ps1)** with cheap static markers if the change is easy to regress (string presence of critical fields or section headings).
 4. **Release / PR:** include a short note in the PR or release checklist that **`docs/json-schema.md`** was updated (or explicitly “no JSON shape change”) so reviewers can diff the doc alongside **`windo_install.ps1`**.
 
-Optional: grep **`_emit_json`** in **`windo_install.ps1`** when auditing which commands emit JSON (including **`export`** after **`Compress-Archive`** when **`--json`** is set).
+Optional: grep **`_emit_json`** in **`windo_install.ps1`** when auditing which commands emit JSON.
