@@ -4,14 +4,18 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [3.1.2] - TBD
+## [3.1.2] - 2026-04-13
 
 ### Fixed
 
+- **Embedded profile template:** balanced the nested `if` in the `windo keybindings status` “Effective” line so generated `$PROFILE` blocks parse correctly; keybinding policy objects now declare `appliedChord` so PSReadLine setup does not warn at profile load.
 - **Keybinding policy:** the default interactive prefix no longer uses `w,w` by default. A plain `w`-key prefix could make commands that start with `w` (for example `w`, `where`, `winget`, `wsl`, etc.) feel untypeable.
   - Default prefix is now `Alt+w` on all hosts.
   - Auto-detection fallback remains available and now defaults to a non-typing chord (`Alt+;`) to avoid reintroducing `w` capture.
+- **Profile repair and legacy cleanup:** installer/profile refresh now removes legacy single-key and historical WINDO key chords (`w`, `w,w`, `Alt+w`, `Shift+Enter`, `Alt+Enter`) before applying current policy, which prevents older profile blocks from re-breaking the `w` key after upgrade.
 - **`windo keybindings status`/`set` robustness:** keybinding policy is now normalized consistently for both active session state and persisted profile block.
+- **Installer ACL fallback:** same-user installs no longer fail early when Windows refuses ACL tightening on `.pwsh_secure`; WINDO now warns and continues so profile repair and snapshot refresh can still complete.
+- **Installer repair mode:** if scheduled-task registration is denied in a non-elevated repair run, WINDO now warns and still refreshes the profile/snapshots so local shell recovery is not blocked behind task registration.
 
 ### Added
 

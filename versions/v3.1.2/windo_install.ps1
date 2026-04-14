@@ -46,21 +46,24 @@ function Ensure-DirLockedToCurrentUser {
     param([Parameter(Mandatory=$true)][string]$Path)
 
     if (!(Test-Path $Path)) { New-Item -ItemType Directory -Path $Path | Out-Null }
+    try {
+        $acl = Get-Acl $Path
+        $acl.SetAccessRuleProtection($true, $false) | Out-Null
+        foreach ($r in @($acl.Access)) { $null = $acl.RemoveAccessRule($r) }
 
-    $acl = Get-Acl $Path
-    $acl.SetAccessRuleProtection($true, $false) | Out-Null
-    foreach ($r in @($acl.Access)) { $null = $acl.RemoveAccessRule($r) }
-
-    $user = New-Object System.Security.Principal.NTAccount("$env:USERDOMAIN\$env:USERNAME")
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-        $user,
-        "FullControl",
-        "ContainerInherit,ObjectInherit",
-        "None",
-        "Allow"
-    )
-    $acl.AddAccessRule($rule) | Out-Null
-    Set-Acl -Path $Path -AclObject $acl
+        $user = New-Object System.Security.Principal.NTAccount("$env:USERDOMAIN\$env:USERNAME")
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $user,
+            "FullControl",
+            "ContainerInherit,ObjectInherit",
+            "None",
+            "Allow"
+        )
+        $acl.AddAccessRule($rule) | Out-Null
+        Set-Acl -Path $Path -AclObject $acl
+    } catch {
+        Write-Warning ("WINDO: Could not tighten ACLs on " + $Path + "; continuing with existing permissions. Re-run installer elevated once if you want strict per-user directory locking. " + $_.Exception.Message)
+    }
 }
 
 function Write-Utf8NoBomFile {
@@ -503,22 +506,29 @@ Write-Utf8NoBomFile -Path $UpdateScript -Content $SelfUpdateContent
 $MainActionArgs   = Get-NoWindowActionArgs -ScriptPath $RunnerPath
 $UpdateActionArgs = Get-NoWindowActionArgs -ScriptPath $UpdateScript
 
-try { Unregister-ScheduledTask -TaskName $TaskMain -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
-try { Unregister-ScheduledTask -TaskName $TaskUpdate -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+$taskRegistrationSucceeded = $true
+try {
+    try { Unregister-ScheduledTask -TaskName $TaskMain -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+    try { Unregister-ScheduledTask -TaskName $TaskUpdate -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
 
-$Principal = New-ScheduledTaskPrincipal -UserId $UserId -LogonType Interactive -RunLevel Highest
-$Settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    $Principal = New-ScheduledTaskPrincipal -UserId $UserId -LogonType Interactive -RunLevel Highest
+    $Settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
-Register-ScheduledTask -TaskName $TaskMain `
-    -Action (New-ScheduledTaskAction -Execute $MainActionArgs.Execute -Argument $MainActionArgs.Argument) `
-    -Principal $Principal -Settings $Settings -Force | Out-Null
+    Register-ScheduledTask -TaskName $TaskMain `
+        -Action (New-ScheduledTaskAction -Execute $MainActionArgs.Execute -Argument $MainActionArgs.Argument) `
+        -Principal $Principal -Settings $Settings -Force | Out-Null
 
-Register-ScheduledTask -TaskName $TaskUpdate `
-    -Action (New-ScheduledTaskAction -Execute $UpdateActionArgs.Execute -Argument $UpdateActionArgs.Argument) `
-    -Principal $Principal -Settings $Settings -Force | Out-Null
+    Register-ScheduledTask -TaskName $TaskUpdate `
+        -Action (New-ScheduledTaskAction -Execute $UpdateActionArgs.Execute -Argument $UpdateActionArgs.Argument) `
+        -Principal $Principal -Settings $Settings -Force | Out-Null
+} catch {
+    $taskRegistrationSucceeded = $false
+    Write-Warning ("WINDO: Could not register scheduled tasks; continuing with profile and snapshot refresh. Re-run installer elevated once to restore task automation. " + $_.Exception.Message)
+}
 
 $Manifest = [ordered]@{
     version = $WindoVersion
+    taskRegistrationSucceeded = [bool]$taskRegistrationSucceeded
     files = [ordered]@{
         runner = [ordered]@{
             path = $RunnerPath
@@ -1085,6 +1095,7 @@ function windo {
             envChord = $(if ([string]::IsNullOrWhiteSpace($envChord)) { $null } else { $envChord.Trim() })
             autoDetected = $false
             autoDetectedReason = $null
+            appliedChord = $null
         }
     }
 
@@ -1098,7 +1109,7 @@ function windo {
         } catch { return $false }
 
         $policy = _windo_resolve_keybinding_policy
-        $legacyChords = @('w,w', 'Alt+w', 'Shift+Enter', 'Alt+Enter')
+        $legacyChords = @('w', 'w,w', 'Alt+w', 'Shift+Enter', 'Alt+Enter')
         foreach ($legacyChord in $legacyChords) {
             try { Remove-PSReadLineKeyHandler -Chord $legacyChord -ErrorAction SilentlyContinue } catch { }
         }
@@ -2309,7 +2320,7 @@ function windo {
 
         if ($sub -eq "status") {
             $policy = _windo_resolve_keybinding_policy
-            $chords = @('w,w', 'Alt+w', 'Shift+Enter', 'Alt+Enter')
+            $chords = @('w', 'w,w', 'Alt+w', 'Shift+Enter', 'Alt+Enter')
             if ($policy.enabled -and ($null -ne $policy.chord) -and ($chords -notcontains $policy.chord)) {
                 $chords = @($policy.chord) + $chords
             }
@@ -2348,7 +2359,7 @@ function windo {
             } else {
                 Write-Host "[windo] PSReadLine keybindings policy" -ForegroundColor Cyan
                 Write-Host "  Policy enabled : $($policy.enabled)" -ForegroundColor DarkGray
-                Write-Host "  Effective      : $(if ($policy.enabled) { if ($effectiveChord) { $effectiveChord } else { '(none)' }) else { '(disabled)' })" -ForegroundColor DarkGray
+                Write-Host "  Effective      : $(if ($policy.enabled) { if ($effectiveChord) { $effectiveChord } else { '(none)' } } else { '(disabled)' })" -ForegroundColor DarkGray
                 if ($policy.enabled) {
                     Write-Host "  Source         : chord=$($policy.chordSource), prefs=$($PrefsFile)" -ForegroundColor DarkGray
                     if ($policy.autoDetected) { Write-Host "  Auto-detect    : $($policy.autoDetectedReason)" -ForegroundColor DarkGray }
@@ -3389,10 +3400,11 @@ try {
             requestedSource = $(if ([string]::IsNullOrWhiteSpace($envChord)) { if (-not [string]::IsNullOrWhiteSpace($prefChord)) { "prefs" } else { "auto" } } else { "env" })
             autoDetected = $false
             autoDetectedReason = $null
+            appliedChord = $null
         }
     }
 
-    $legacyChords = @('w,w', 'Alt+w', 'Shift+Enter', 'Alt+Enter')
+    $legacyChords = @('w', 'w,w', 'Alt+w', 'Shift+Enter', 'Alt+Enter')
     foreach ($legacyChord in $legacyChords) {
         try { Remove-PSReadLineKeyHandler -Chord $legacyChord -ErrorAction SilentlyContinue } catch { }
     }
@@ -3408,12 +3420,10 @@ try {
         if ([string]::IsNullOrWhiteSpace($line)) { return }
         $m = [regex]::Match($line, '^(\s*)(.*)$')
         $rest = $m.Groups[2].Value
-        if ($rest -notmatch '^(?i)windo(\s|$)') {
-            $indent = $m.Groups[1].Value
-            $newLine = $indent + 'windo ' + $rest
-            [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $newLine)
-        }
-        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+        if ($rest -match '^(?i)windo(\s|$)') { return }
+        $indent = $m.Groups[1].Value
+        $newLine = $indent + 'windo ' + $rest
+        [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $newLine)
     }
 
     $windoPrefixRun = {

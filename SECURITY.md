@@ -30,6 +30,8 @@ The elevated **runner** (`windo_runner.ps1`) executes `cmd.exe /c <command>` wit
 
 Request JSON files under `.pwsh_secure` are writable by the same user as WINDO. The checks above limit accidental or malicious misuse of the runner entrypoint; they are **not** a substitute for endpoint protection or least-privilege policy elsewhere on the system.
 
+During installation, WINDO attempts to tighten `.pwsh_secure` ACLs to the current user. If Windows denies that ACL rewrite on a same-user install, the installer now warns and continues so profile repair and snapshot refresh can still complete. Re-run the installer elevated once if you need the strict per-user ACL reset applied automatically.
+
 ## Bootstrap and upgrade integrity
 
 `bootstrap.ps1`, **`windo install-latest`**, and **`windo upgrade`** (same as install-latest) download `windo_install.ps1` from the **`Genisis`** branch. **v3.1.1+:** that download is **refused while the shell is elevated** (Administrator), so remote content is not fetched under high privilege; run from a normal user PowerShell, confirm after verification, then the installer may prompt **UAC** for task registration. Unattended flows may set **`WINDO_BOOTSTRAP_FORCE_INSTALL`**, **`WINDO_INSTALL_NONINTERACTIVE`**, or **`CI`** as documented in the README. If [`checksums/installer.sha256`](checksums/installer.sha256) is present on that branch, the downloaded file’s SHA256 must match unless **`WINDO_SKIP_INSTALLER_SHA256`** is set. If the checksum file is missing (older branches) or the URL fails, the check is skipped.
