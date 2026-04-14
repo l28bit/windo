@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0",
+  "items": [
+    {
+      "id": "sample-hello",
+      "description": "Tiny sample script for extras fetch / checksum verification (Load.ps1 only).",
+      "maintainer": "WINDO",
+      "sourceUrl": "https://raw.githubusercontent.com/l28bit/windo/Genisis/extras/samples/hello/Load.ps1",
+      "sha256": "1301B78032465A0C61A389532DBECC6E86E3C4D90C475D28A0FD9BCED6259DCB"
+    }
+  ]
+}

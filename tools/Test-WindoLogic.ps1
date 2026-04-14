@@ -85,6 +85,9 @@ Assert-Equal (Test-Path -LiteralPath $fwDoc) $true "docs/framework-wave.md exist
 $fwRaw = Get-Content -Path $fwDoc -Raw
 Assert-Equal ($fwRaw.Contains("Tier 1") -eq $true) $true "framework-wave documents Tier 1"
 Assert-Equal ($fwRaw.Contains("windo modules") -eq $true) $true "framework-wave documents windo modules"
+$aiDoc = Join-Path $root "docs\ai-bridge.md"
+Assert-Equal (Test-Path -LiteralPath $aiDoc) $true "docs/ai-bridge.md exists"
+Assert-Equal ($installerSource.Contains("_windo_ai_credential_env_snapshot") -eq $true) $true "installer defines AI env snapshot helper"
 $jsonSchemaDoc = Join-Path $root "docs\json-schema.md"
 $jsonSchemaRaw = Get-Content -Path $jsonSchemaDoc -Raw
 $buildDoc = Join-Path $root "docs\build.md"
