@@ -88,6 +88,8 @@ Assert-Equal ($fwRaw.Contains("windo modules") -eq $true) $true "framework-wave 
 $aiDoc = Join-Path $root "docs\ai-bridge.md"
 Assert-Equal (Test-Path -LiteralPath $aiDoc) $true "docs/ai-bridge.md exists"
 Assert-Equal ($installerSource.Contains("_windo_ai_credential_env_snapshot") -eq $true) $true "installer defines AI env snapshot helper"
+Assert-Equal ($installerSource.Contains("_windo_ai_ollama_host_advisory") -eq $true) $true "installer defines Ollama host advisory helper"
+Assert-Equal ($installerSource.Contains("'ollama-list'") -eq $true) $true "installer bundles ollama-list recipe"
 $jsonSchemaDoc = Join-Path $root "docs\json-schema.md"
 $jsonSchemaRaw = Get-Content -Path $jsonSchemaDoc -Raw
 $buildDoc = Join-Path $root "docs\build.md"
