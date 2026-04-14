@@ -80,6 +80,11 @@ if (Test-Path -LiteralPath $extrasIndex) {
 
 $modsDoc = Join-Path $root "docs\modules-and-extras.md"
 Assert-Equal (Test-Path -LiteralPath $modsDoc) $true "docs/modules-and-extras.md exists"
+$fwDoc = Join-Path $root "docs\framework-wave.md"
+Assert-Equal (Test-Path -LiteralPath $fwDoc) $true "docs/framework-wave.md exists"
+$fwRaw = Get-Content -Path $fwDoc -Raw
+Assert-Equal ($fwRaw.Contains("Tier 1") -eq $true) $true "framework-wave documents Tier 1"
+Assert-Equal ($fwRaw.Contains("windo modules") -eq $true) $true "framework-wave documents windo modules"
 $jsonSchemaDoc = Join-Path $root "docs\json-schema.md"
 $jsonSchemaRaw = Get-Content -Path $jsonSchemaDoc -Raw
 $buildDoc = Join-Path $root "docs\build.md"
