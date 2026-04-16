@@ -18,7 +18,7 @@ function Invoke-WindoFilterAuditEntriesByTime {
         $Entries,
         [Nullable[datetime]]$CutoffDate
     )
-    if ($null -eq $CutoffDate) { return @($Entries) }
+    if ($null -eq $CutoffDate) { return ,@($Entries) }
     $out = [System.Collections.ArrayList]@()
     foreach ($e in $Entries) {
         try {
@@ -26,5 +26,5 @@ function Invoke-WindoFilterAuditEntriesByTime {
             if ($ts -ge $CutoffDate) { [void]$out.Add($e) }
         } catch { }
     }
-    return @($out)
+    return ,@($out)
 }

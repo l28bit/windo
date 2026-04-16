@@ -109,10 +109,15 @@ try {
     if (-not $env:WINDO_SKIP_INSTALLER_SHA256) {
         $sumUrl = "https://raw.githubusercontent.com/l28bit/windo/Genisis/checksums/installer.sha256"
         try {
-            $expect = ([string](Invoke-RestMethod -Uri $sumUrl -TimeoutSec 25)).Trim()
-            if ($expect -match '^[A-Fa-f0-9]{64}$') {
-                $got = (Get-FileHash -Path $Temp -Algorithm SHA256).Hash
-                if ($got.ToUpperInvariant() -cne $expect.ToUpperInvariant()) {
+            $wr = Invoke-WebRequest -Uri $sumUrl -UseBasicParsing -TimeoutSec 25
+            $expect = $null
+            if ($null -ne $wr.Content) {
+                $m = [regex]::Match([string]$wr.Content, '[A-Fa-f0-9]{64}')
+                if ($m.Success) { $expect = $m.Value.ToUpperInvariant() }
+            }
+            if ($null -ne $expect) {
+                $got = (Get-FileHash -Path $Temp -Algorithm SHA256).Hash.ToUpperInvariant()
+                if ($got -cne $expect) {
                     throw "Installer SHA256 does not match published checksum. Set WINDO_SKIP_INSTALLER_SHA256=1 to skip. Expected=$expect Got=$got"
                 }
             }

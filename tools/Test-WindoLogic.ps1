@@ -6,6 +6,12 @@ $root = Split-Path $PSScriptRoot -Parent
 . (Join-Path $root "src\windo\snippets\WindoConfigEffective.ps1")
 
 $failed = 0
+function Test-WindoNormalizePublishedInstallerSha256([string]$Text) {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    $m = [regex]::Match($Text, '[A-Fa-f0-9]{64}')
+    if (-not $m.Success) { return $null }
+    return $m.Value.ToUpperInvariant()
+}
 function Assert-Equal($a, $b, $msg) {
     if ($a -ne $b) {
         Write-Host "FAIL: $msg  (expected '$b', got '$a')" -ForegroundColor Red
@@ -40,9 +46,20 @@ Assert-Equal (Get-WindoEffectiveRunnerTimeoutMs "86400001") 86400000 "timeout ca
 Assert-Equal (Get-WindoEffectiveMaxCommandChars "100") 100 "max cmd respects small"
 Assert-Equal (Get-WindoEffectiveMaxCommandChars "999999") 8191 "max cmd cap 8191"
 
+$h64 = "0123456789ABCDEF" * 4
+Assert-Equal (Test-WindoNormalizePublishedInstallerSha256 $h64) $h64 "normalize bare 64 hex"
+Assert-Equal (Test-WindoNormalizePublishedInstallerSha256 ([string][char]0xFEFF + $h64)) $h64 "normalize skips BOM before hex"
+Assert-Equal (Test-WindoNormalizePublishedInstallerSha256 ("$h64  windo_install.ps1")) $h64 "normalize sha256sum-style line"
+Assert-Equal ($null -eq (Test-WindoNormalizePublishedInstallerSha256 "nope")) $true "normalize rejects non-hex"
+Assert-Equal ($null -eq (Test-WindoNormalizePublishedInstallerSha256 "")) $true "normalize empty"
+
 $installerSource = Get-Content -Path (Join-Path $root "windo_install.ps1") -Raw
 $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
+$bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 
+Assert-Equal (($installerSource -match "function _windo_normalize_published_installer_sha256") -eq $true) $true "installer normalizes published installer sha256"
+Assert-Equal (($bootstrapSource -match '\[A-Fa-f0-9\]\{64\}') -eq $true) $true "bootstrap uses 64-hex regex for published checksum"
+Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "repair")') -eq $true) $true "installer handles repair command"
 Assert-Equal (($installerSource -match "function _windo_parse_timeout_override_ms") -eq $true) $true "installer parses timeout override"
 Assert-Equal (($installerSource -match "PreserveEnvironment") -eq $true) $true "installer captures preserve-env payload"
 Assert-Equal (($installerSource -match "TimeoutOverrideMs") -eq $true) $true "installer stores timeout override in request"
