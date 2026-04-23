@@ -1490,6 +1490,30 @@ Use: windo prompt --json   (machine-readable bundle)
         (_json_envelope $commandName $payload) | ConvertTo-Json -Depth 14 | Write-Host
     }
 
+    function _windo_start_downloaded_installer([string]$ScriptPath) {
+        $runnerExe = "powershell.exe"
+        $pwshExe = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+        if ($pwshExe -and $pwshExe.Source) { $runnerExe = $pwshExe.Source }
+        $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath)
+        $shouldElevate = [Environment]::UserInteractive -and -not $env:CI
+
+        if ($shouldElevate) {
+            Write-Host "[windo] Requesting elevation for installer..." -ForegroundColor Yellow
+            try {
+                Start-Process -FilePath $runnerExe -Verb RunAs -ArgumentList $argList -Wait | Out-Null
+                return
+            } catch [System.ComponentModel.Win32Exception] {
+                if ($_.Exception.NativeErrorCode -eq 1223) {
+                    throw "Installer elevation was canceled. Re-run install-latest and approve the UAC prompt, or run the installer from an elevated PowerShell session."
+                }
+                throw
+            }
+        }
+
+        Write-Host "[windo] Running installer without elevation (non-interactive or CI session)." -ForegroundColor DarkYellow
+        & $runnerExe @argList
+    }
+
     function _windo_run_genisis_installer {
         param(
             [switch]$ForceContinue,
@@ -1541,11 +1565,8 @@ Use: windo prompt --json   (machine-readable bundle)
                 _windo_set_exit 0
                 return
             }
-            $runnerExe = "powershell.exe"
-            $pwshExe = Get-Command pwsh.exe -ErrorAction SilentlyContinue
-            if ($pwshExe) { $runnerExe = $pwshExe.Source }
-            Write-Host "[windo] Starting installer ($runnerExe). When it finishes, reload: . `$PROFILE" -ForegroundColor Yellow
-            & $runnerExe -NoProfile -ExecutionPolicy Bypass -File $TempInst
+            Write-Host "[windo] Starting installer. When it finishes, reload: . `$PROFILE" -ForegroundColor Yellow
+            _windo_start_downloaded_installer -ScriptPath $TempInst
         } catch {
             Write-Host "[windo] Could not install from Genisis: $($_.Exception.Message)" -ForegroundColor Red
             _windo_set_exit 1

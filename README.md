@@ -39,7 +39,7 @@ WINDO does **not** bypass Windows security boundaries; it uses a controlled elev
 
 ## Install / Update
 
-**Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/Genisis/bootstrap.ps1), saves `windo_install.ps1` to a **temp file**, runs it with `powershell.exe -File`, then removes the temp file. The **full installer is not** piped through `Invoke-Expression`.
+**Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/Genisis/bootstrap.ps1), saves `windo_install.ps1` to a **temp file**, verifies its checksum, then starts it from the temp file. In interactive sessions WINDO requests **UAC elevation** for the installer so scheduled tasks and secure-dir ACL work can complete; the temp file is removed afterward. The **full installer is not** piped through `Invoke-Expression`.
 
 ```powershell
 iex (irm https://raw.githubusercontent.com/l28bit/windo/Genisis/bootstrap.ps1)
@@ -47,7 +47,7 @@ iex (irm https://raw.githubusercontent.com/l28bit/windo/Genisis/bootstrap.ps1)
 
 Run the **installer** from an **elevated** session when you want scheduled tasks registered and `%USERPROFILE%\.pwsh_secure\` updated without permission issues—**after** you have downloaded and confirmed.
 
-**Upgrade from any installed v2.x / v3.x:** with WINDO loaded in your profile, run **`windo install-latest`** from a **normal (non-elevated)** window. The installer is **not** downloaded while Administrator (avoids high-privilege fetch). After checksum verification you get a **prompt** before the installer runs (UAC may appear when tasks are registered). Use **`windo install-latest --force`** or **`WINDO_INSTALL_NONINTERACTIVE=1`** in CI/automation.
+**Upgrade from any installed v2.x / v3.x:** with WINDO loaded in your profile, run **`windo install-latest`** from a **normal (non-elevated)** window. The installer is **not** downloaded while Administrator (avoids high-privilege fetch). After checksum verification you get a **prompt** before the installer runs; in interactive sessions WINDO then requests **UAC elevation** so scheduled tasks and secure-dir ACL work can complete. Use **`windo install-latest --force`** or **`WINDO_INSTALL_NONINTERACTIVE=1`** in CI/automation.
 
 ```powershell
 windo install-latest

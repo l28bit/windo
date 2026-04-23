@@ -86,6 +86,37 @@ function Invoke-WindoBootstrapDownload {
     Remove-Job $job -Force -ErrorAction SilentlyContinue
 }
 
+function Start-WindoBootstrapInstaller {
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath
+    )
+
+    $runnerExe = "powershell.exe"
+    try {
+        $pwshExe = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+        if ($pwshExe -and $pwshExe.Source) { $runnerExe = $pwshExe.Source }
+    } catch {}
+
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath)
+    $shouldElevate = [Environment]::UserInteractive -and -not $env:CI
+
+    if ($shouldElevate) {
+        Write-Host "[windo] Requesting elevation for installer..." -ForegroundColor DarkCyan
+        try {
+            Start-Process -FilePath $runnerExe -Verb RunAs -ArgumentList $argList -Wait | Out-Null
+            return
+        } catch [System.ComponentModel.Win32Exception] {
+            if ($_.Exception.NativeErrorCode -eq 1223) {
+                throw "Installer elevation was canceled. Re-run bootstrap and approve the UAC prompt, or run the installer from an elevated PowerShell session."
+            }
+            throw
+        }
+    }
+
+    Write-Host "[windo] Running installer without elevation (non-interactive or CI session)." -ForegroundColor DarkYellow
+    & $runnerExe @argList
+}
+
 Write-Host ""
 Write-Host "WINDO bootstrap starting..." -ForegroundColor Cyan
 
@@ -150,8 +181,7 @@ try {
         exit 0
     }
 
-    Write-Host "[windo] Launching installer..." -ForegroundColor DarkCyan
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Temp
+    Start-WindoBootstrapInstaller -ScriptPath $Temp
 
 }
 catch {
