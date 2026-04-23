@@ -59,7 +59,7 @@ windo install-latest
 
 Or use the bootstrap one-liner above, or run `.\windo_install.ps1` from a clone. There is no version gate: the installer replaces the WINDO profile block and refreshes secure-dir artifacts.
 
-**Remove WINDO completely:** run **`windo uninstall`** (downloads the uninstaller from `Genisis`, then starts an **elevated** session—approve UAC). Or run [`windo_uninstall.ps1`](windo_uninstall.ps1) elevated; optional **`-KeepSnapshots`** keeps `%USERPROFILE%\Documents\windo\`. Only the **current** host’s `$PROFILE` is edited; if you use both **pwsh** and **Windows PowerShell**, run uninstall once per shell or strip the second profile manually.
+**Remove WINDO completely:** run **`windo uninstall`** (or **`windo remove`**) from a normal shell. WINDO prefers the bundled local **`%USERPROFILE%\.pwsh_secure\windo_uninstall.ps1`** and starts it elevated with UAC; if the local copy is missing it falls back to the published raw uninstaller from `Genisis`. After your profile is loaded you can also run **`windo-uninstall`** (alias: **`windoremove`**) directly. Optional **`-KeepSnapshots`** / **`--keep-snapshots`** keeps `%USERPROFILE%\Documents\windo\`. The uninstaller removes WINDO marker blocks from the known **current-user** PowerShell profiles for **pwsh** and **Windows PowerShell**.
 
 **Offline / clone:** run the installer from disk:
 
@@ -123,7 +123,7 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo session [--json]` | **v3.2.0+** Compact summary: tasks, integrity levels, last stored command / `RequestId`. **v3.2.1+** adds **`lastAudit`** / **`recentAudit`** from the decrypted log tail. |
 | `windo ai [status] \| doctor` | **v3.2.5+** Read-only checks for common AI API key **env names** (Process/User/Machine); **never** prints secrets. Use with OpenAI/agents/IDE CLIs—see [`docs/ai-bridge.md`](docs/ai-bridge.md). |
 | `windo repair [all \| keybindings]` | **v3.2.7+** Quick recovery: same as **`windo keybindings safe-reset`** with hints (reload profile, **`install-latest`**). Use when **`w`** / prefix feels stuck or after upgrading from an older WINDO. |
-| `windo uninstall` | Download and run the elevated uninstaller (removes tasks, profile block, WINDO files under `.pwsh_secure`, optional `Documents\windo`). |
+| `windo uninstall` / `windo remove` | Run the elevated uninstaller, preferring the bundled local copy under `.pwsh_secure`; removes tasks, current-user WINDO profile blocks, WINDO files under `.pwsh_secure`, optional `Documents\windo`. |
 
 Append **`--json`** or **`-Json`** to supported commands for structured output. On v3.0.0+ profiles the default envelope uses **`schemaVersion`** **`3.0`** and **`meta`**. You can still get a **2.6-style** envelope (no **`meta`**) via **`windo theme classic`** or **`WINDO_JSON_ENVELOPE`**—without downgrading WINDO itself. See [`docs/json-schema.md`](docs/json-schema.md).
 

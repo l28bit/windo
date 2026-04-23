@@ -9,11 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **`windo repair`** / **`windo repair keybindings`** — runs the same **keybindings safe-reset** as **`windo keybindings safe-reset`** (Alt+w, legacy WINDO PSReadLine chords removed in-session) and prints recovery hints (**`. $PROFILE`**, non-elevated **`windo install-latest`**). JSON payload **`command`:** **`repair`**.
+- **Bundled local uninstaller:** installer now writes **`%USERPROFILE%\.pwsh_secure\windo_uninstall.ps1`** and snapshots it under **`Documents\windo\`**. **`windo uninstall`** prefers the local copy, **`windo remove`** is an explicit alias, and the profile adds **`windo-uninstall`** / **`windoremove`** helpers for direct removal.
 
 ### Fixed
 
 - **Installer SHA256 verification:** [`bootstrap.ps1`](bootstrap.ps1) and **`windo install-latest`** (via **`_windo_verify_installer_sha256_optional`**) now fetch [`checksums/installer.sha256`](checksums/installer.sha256) with **`Invoke-WebRequest`** and extract the **first 64 hex** characters from the response. This matches one-line files, optional BOM/whitespace, and `sha256sum`-style lines, avoiding false **checksum mismatch** failures when the published file differs slightly in format from a bare 64-character line. **[`checksums/installer.sha256`](checksums/installer.sha256)** is updated to match the current **`windo_install.ps1`** bytes so verification succeeds after release edits.
 - **Stats time filter (tests + parity):** [`Invoke-WindoFilterAuditEntriesByTime`](src/windo/snippets/StatsTimeFilter.ps1) and **`_windo_filter_entries_by_time`** in the installer now return a **single-element array** correctly (PowerShell no longer unwraps a one-entry result to a bare object), so **`windo stats`** filtering matches the intended entry list.
+- **Profile cleanup during uninstall:** [`windo_uninstall.ps1`](windo_uninstall.ps1) no longer creates empty profile files during removal and now strips WINDO marker blocks from the known **current-user** PowerShell profiles, not just the active host profile.
 
 ## [3.2.6] - 2026-04-13
 

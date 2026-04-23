@@ -7,8 +7,8 @@ Run elevated (recommended) so scheduled tasks unregister reliably:
 Or interactively (script will prompt):
   .\windo_uninstall.ps1
 
-Only the current host's $PROFILE is edited (same scope as windo_install.ps1).
-If you use both Windows PowerShell 5.1 and pwsh, run this once per profile.
+Removes WINDO marker blocks from known current-user PowerShell profiles
+(pwsh and Windows PowerShell) without touching all-users profiles.
 ===================================================================== #>
 
 param(
@@ -31,32 +31,85 @@ function Write-Utf8NoBomFile {
     [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
 }
 
-function Ensure-ProfileExists {
-    if (!(Test-Path $PROFILE)) {
-        $dir = Split-Path $PROFILE -Parent
-        if (!(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
-        New-Item -ItemType File -Path $PROFILE | Out-Null
+function Get-WindoProfilePathList {
+    $set = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $addOne = {
+        param([string]$Path)
+        if ([string]::IsNullOrWhiteSpace($Path)) { return }
+        try {
+            $full = [System.IO.Path]::GetFullPath($Path)
+            [void]$set.Add($full)
+        } catch { }
     }
+
+    try {
+        if ($PROFILE) {
+            & $addOne $PROFILE.CurrentUserCurrentHost
+            & $addOne $PROFILE.CurrentUserAllHosts
+        }
+    } catch {
+        & $addOne ([string]$PROFILE)
+    }
+
+    foreach ($candidate in @(
+        (Join-Path $HOME 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'),
+        (Join-Path $HOME 'Documents\PowerShell\Profile.ps1'),
+        (Join-Path $HOME 'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1'),
+        (Join-Path $HOME 'Documents\WindowsPowerShell\Profile.ps1')
+    )) {
+        & $addOne $candidate
+    }
+
+    return @($set)
 }
 
-function Remove-WindoProfileBlock {
-    Ensure-ProfileExists
-    $text = Get-Content -Raw $PROFILE
-    $pattern = [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker)
-    if ($text -match $pattern) {
-        $text = [regex]::Replace($text, $pattern, "", [System.Text.RegularExpressions.RegexOptions]::Singleline)
-        $text = $text -replace "(\r?\n){3,}", "`r`n`r`n"
-        Write-Utf8NoBomFile -Path $PROFILE -Content ($text.TrimEnd() + "`r`n")
-        Write-Host "[windo uninstall] Removed WINDO block from profile: $PROFILE" -ForegroundColor Green
-    } else {
-        Write-Host "[windo uninstall] No WINDO block found in profile: $PROFILE" -ForegroundColor DarkYellow
+function Remove-WindoProfileBlockFromPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (!(Test-Path -LiteralPath $Path)) {
+        Write-Host "[windo uninstall] Profile not present: $Path" -ForegroundColor DarkGray
+        return $false
     }
+
+    try {
+        $text = Get-Content -Raw -LiteralPath $Path -ErrorAction Stop
+    } catch {
+        Write-Warning ("Could not read profile " + $Path + ": " + $_.Exception.Message)
+        return $false
+    }
+
+    $pattern = "(?ms)" + [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker) + "\r?\n?"
+    if ($text -notmatch $pattern) {
+        Write-Host "[windo uninstall] No WINDO block found in profile: $Path" -ForegroundColor DarkYellow
+        return $false
+    }
+
+    $updated = [regex]::Replace($text, $pattern, "")
+    $updated = $updated -replace "(\r?\n){3,}", "`r`n`r`n"
+    if ([string]::IsNullOrWhiteSpace($updated)) {
+        Write-Utf8NoBomFile -Path $Path -Content ""
+    } else {
+        Write-Utf8NoBomFile -Path $Path -Content ($updated.TrimEnd() + "`r`n")
+    }
+    Write-Host "[windo uninstall] Removed WINDO block from profile: $Path" -ForegroundColor Green
+    return $true
+}
+
+function Remove-WindoProfileBlocks {
+    $removed = 0
+    foreach ($path in @(Get-WindoProfilePathList)) {
+        if (Remove-WindoProfileBlockFromPath -Path $path) { $removed++ }
+    }
+    return $removed
 }
 
 Write-Host ""
 Write-Host "WINDO uninstall" -ForegroundColor Cyan
 Write-Host "  Tasks: $TaskMain, $TaskUpdate"
-Write-Host "  Profile (this host): $PROFILE"
+Write-Host "  Profiles (current user):"
+foreach ($profilePath in @(Get-WindoProfilePathList)) {
+    Write-Host "    $profilePath"
+}
 Write-Host "  Secure dir: $SecureDir"
 Write-Host "  Documents snapshot: $SnapshotDir $(if ($KeepSnapshots) { '(keeping)' } else { '(removing)' })"
 Write-Host ""
@@ -83,7 +136,8 @@ foreach ($tn in @($TaskMain, $TaskUpdate)) {
     }
 }
 
-Remove-WindoProfileBlock
+$removedProfiles = Remove-WindoProfileBlocks
+Write-Host "[windo uninstall] Profile cleanup complete. Removed WINDO blocks from $removedProfiles file(s)." -ForegroundColor Cyan
 
 if (Test-Path $SecureDir) {
     Get-ChildItem -Path $SecureDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "windo*" } | ForEach-Object {
