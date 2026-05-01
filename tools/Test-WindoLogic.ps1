@@ -90,6 +90,7 @@ Assert-Equal ($installerSource.Contains("keybindings doctor") -eq $true) $true "
 Assert-Equal ($installerSource.Contains("lastAudit") -eq $true) $true "installer session payload includes lastAudit"
 Assert-Equal ($installerSource.Contains("function Repair-WindoProfileText") -eq $true) $true "installer repairs corrupted orphan WINDO profile blocks"
 Assert-Equal ($installerSource.Contains('$profileText = Repair-WindoProfileText -Text $profileText') -eq $true) $true "installer normalizes profile text before writing profile block"
+Assert-Equal ($installerSource.Contains('$repaired = Repair-WindoProfileText -Text $text') -eq $true) $true "installer removes existing profile blocks through the repair path"
 $BeginMarker = "# >>> WINDO-BEGIN >>>"
 $EndMarker = "# <<< WINDO-END <<<"
 $repairStart = $installerSource.IndexOf("function Repair-WindoProfileText", [StringComparison]::Ordinal)
@@ -97,7 +98,7 @@ $repairEnd = $installerSource.IndexOf("function Get-NoWindowActionArgs", $repair
 Assert-Equal (($repairStart -ge 0 -and $repairEnd -gt $repairStart) -eq $true) $true "installer repair function can be extracted"
 if ($repairStart -ge 0 -and $repairEnd -gt $repairStart) {
     Invoke-Expression $installerSource.Substring($repairStart, $repairEnd - $repairStart)
-    $brokenProfile = "pre`r`n`"`r`n    if (!(Test-Path `$SecureDir)) { }`r`n    Write-Host `"[windo] orphan`"`r`n$BeginMarker`r`nfunction windo { }`r`n$EndMarker`r`npost`r`n"
+    $brokenProfile = "pre`r`n`"`r`n    if (!(Test-Path `$SecureDir)) { }`r`n    `$ProfileBlockBegin = `"$BeginMarker`"`r`n    `$ProfileBlockEnd = `"$EndMarker`"`r`n    Write-Host `"[windo] orphan`"`r`n$BeginMarker`r`nfunction windo { }`r`n$EndMarker`r`npost`r`n"
     Assert-Equal (Repair-WindoProfileText -Text $brokenProfile) "pre`r`npost`r`n" "profile repair removes orphan payload before valid block"
 }
 Assert-Equal ($installerSource.Contains("function _windo_verify_log_state") -eq $true) $true "installer has shared audit-chain verifier"

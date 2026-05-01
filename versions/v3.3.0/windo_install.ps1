@@ -125,11 +125,9 @@ function Ensure-ProfileExists {
 function Remove-ExistingWindoBlockFromProfile {
     Ensure-ProfileExists
     $text = Get-Content -Raw $PROFILE
-    $pattern = [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker)
-    if ($text -match $pattern) {
-        $text = [regex]::Replace($text, $pattern, "", [System.Text.RegularExpressions.RegexOptions]::Singleline)
-        $text = $text -replace "(\r?\n){3,}", "`r`n`r`n"
-        Write-Utf8NoBomFile -Path $PROFILE -Content ($text.TrimEnd() + "`r`n")
+    $repaired = Repair-WindoProfileText -Text $text
+    if ($repaired -ne $text) {
+        Write-Utf8NoBomFile -Path $PROFILE -Content ($repaired.TrimEnd() + "`r`n")
     }
 }
 
@@ -139,10 +137,12 @@ function Repair-WindoProfileText {
     )
 
     $anchorPattern = '(?ms)(?:^|\r?\n)(?:"\s*\r?\n|function\s+Invoke-WindoBundledUninstall\b|function\s+windo\b|\s*\$WindoVersion\s*=|\s*if\s*\(\!\(Test-Path\s+\$SecureDir\)\))'
+    $beginLinePattern = '(?m)^[ \t]*' + [regex]::Escape($BeginMarker) + '[ \t]*\r?$'
+    $endLinePattern = '(?m)^[ \t]*' + [regex]::Escape($EndMarker) + '[ \t]*\r?$'
 
-    $firstBegin = $Text.IndexOf($BeginMarker, [StringComparison]::Ordinal)
-    while ($firstBegin -ge 0) {
-        $prefix = $Text.Substring(0, $firstBegin)
+    $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
+    while ($firstBeginMatch.Success) {
+        $prefix = $Text.Substring(0, $firstBeginMatch.Index)
         $matches = [regex]::Matches($prefix, $anchorPattern)
         if ($matches.Count -eq 0) { break }
 
@@ -153,17 +153,17 @@ function Repair-WindoProfileText {
         } elseif ($Text[$start] -eq "`n") {
             $start++
         }
-        $Text = $Text.Remove($start, $firstBegin - $start)
-        $firstBegin = $Text.IndexOf($BeginMarker, [StringComparison]::Ordinal)
+        $Text = $Text.Remove($start, $firstBeginMatch.Index - $start)
+        $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
     }
 
-    $wellFormedBlockPattern = "(?ms)" + [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker) + "\r?\n?"
+    $wellFormedBlockPattern = '(?ms)^[ \t]*' + [regex]::Escape($BeginMarker) + '[ \t]*\r?\n.*?^[ \t]*' + [regex]::Escape($EndMarker) + '[ \t]*\r?\n?'
     $Text = [regex]::Replace($Text, $wellFormedBlockPattern, '')
 
-    $firstBegin = $Text.IndexOf($BeginMarker, [StringComparison]::Ordinal)
-    $firstEnd = $Text.IndexOf($EndMarker, [StringComparison]::Ordinal)
-    while ($firstEnd -ge 0 -and ($firstBegin -lt 0 -or $firstEnd -lt $firstBegin)) {
-        $prefix = $Text.Substring(0, $firstEnd)
+    $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
+    $firstEndMatch = [regex]::Match($Text, $endLinePattern)
+    while ($firstEndMatch.Success -and (-not $firstBeginMatch.Success -or $firstEndMatch.Index -lt $firstBeginMatch.Index)) {
+        $prefix = $Text.Substring(0, $firstEndMatch.Index)
         $matches = [regex]::Matches($prefix, $anchorPattern)
         if ($matches.Count -eq 0) { break }
 
@@ -174,13 +174,13 @@ function Repair-WindoProfileText {
         } elseif ($Text[$start] -eq "`n") {
             $start++
         }
-        $end = $firstEnd + $EndMarker.Length
+        $end = $firstEndMatch.Index + $firstEndMatch.Length
         if ($end -lt $Text.Length -and $Text[$end] -eq "`r") { $end++ }
         if ($end -lt $Text.Length -and $Text[$end] -eq "`n") { $end++ }
         $Text = $Text.Remove($start, $end - $start)
 
-        $firstBegin = $Text.IndexOf($BeginMarker, [StringComparison]::Ordinal)
-        $firstEnd = $Text.IndexOf($EndMarker, [StringComparison]::Ordinal)
+        $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
+        $firstEndMatch = [regex]::Match($Text, $endLinePattern)
     }
 
     return ($Text -replace "(\r?\n){3,}", "`r`n`r`n")
