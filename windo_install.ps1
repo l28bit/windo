@@ -2486,8 +2486,8 @@ Use: windo prompt --json   (machine-readable bundle)
         $trayIconPath = $null
         $candidateIconPaths = @(
             [string]$env:WINDO_TRAY_ICON,
-            (Join-Path $HOME "Documents\GitHub\windo\brand\final\assets\ico\windo-tray-ready.ico"),
-            (Join-Path $HOME "Documents\windo\brand\final\assets\ico\windo-tray-ready.ico"),
+            (Join-Path $HOME "Documents\GitHub\windo\brand\Enterprise\assets\ico\windo-tray-ready.ico"),
+            (Join-Path $HOME "Documents\windo\brand\Enterprise\assets\ico\windo-tray-ready.ico"),
             (Join-Path $HOME "Documents\windo\assets\ico\windo-tray-ready.ico")
         )
         foreach ($candidateIconPath in $candidateIconPaths) {
@@ -4019,8 +4019,8 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
         $brandLogoPath = $null
         foreach ($candidateLogoPath in @(
             [string]$env:WINDO_LOGO_PATH,
-            (Join-Path $HOME "Documents\GitHub\windo\brand\final\assets\logo\windo-logo-full-dark-512.png"),
-            (Join-Path $HOME "Documents\windo\brand\final\assets\logo\windo-logo-full-dark-512.png")
+            (Join-Path $HOME "Documents\GitHub\windo\brand\Enterprise\assets\logo\windo-logo-full-dark-512.png"),
+            (Join-Path $HOME "Documents\windo\brand\Enterprise\assets\logo\windo-logo-full-dark-512.png")
         )) {
             if (-not [string]::IsNullOrWhiteSpace($candidateLogoPath) -and (Test-Path -LiteralPath $candidateLogoPath)) {
                 $brandLogoPath = $candidateLogoPath

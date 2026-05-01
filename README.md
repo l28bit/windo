@@ -1,6 +1,6 @@
 # WINDO
 
-![WINDO logo](brand/final/assets/logo/windo-logo-full-dark-512.png)
+![WINDO logo](brand/Enterprise/assets/logo/windo-logo-full-dark-512.png)
 
 **Choose elevation before execution.**
 

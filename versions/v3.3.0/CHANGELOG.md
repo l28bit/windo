@@ -13,13 +13,13 @@ Release notes: [`docs/releases/RELEASE_NOTES_v3.3.0.md`](docs/releases/RELEASE_N
 - **Special Edition install/update visuals:** `bootstrap.ps1`, **`windo install-latest`**, and the installer now show a WINDO banner plus step-by-step status cards for download, checksum, UAC handoff, secure-dir hardening, task registration, manifest write, profile refresh, and snapshot write.
 - **`windo preflight`** — read-only readiness scan with fix commands for non-elevated update posture, PowerShell runtime, scheduled tasks, runner integrity, audit-chain verification, profile block, and keybinding policy. Supports **`--json`**.
 - **`windo launchpad`** — Special Edition operator command center with terminal, **`--json`**, **`--html`**, **`--open`**, and **`--tray`** modes.
-- **Native tray launchpad:** **`windo launchpad --tray`** writes a local tray-agent script under **`.pwsh_secure`**, starts it hidden with Windows Forms, shows the WINDO tray icon when **`brand/final`** assets are present (or a Windows shield fallback), and exposes menu/window actions that open visible PowerShell command windows.
-- **Final brand pack:** **`brand/final/`** now carries clean transparent PNG/SVG/ICO assets, a manifest, and a contact sheet for docs, tray icons, badges, and future UI surfaces.
+- **Native tray launchpad:** **`windo launchpad --tray`** writes a local tray-agent script under **`.pwsh_secure`**, starts it hidden with Windows Forms, shows the WINDO tray icon when **`brand/Enterprise`** assets are present (or a Windows shield fallback), and exposes menu/window actions that open visible PowerShell command windows.
+- **Enterprise brand pack:** **`brand/Enterprise/`** now carries clean transparent PNG/SVG/ICO assets, a manifest, and a contact sheet for docs, tray icons, badges, and future UI surfaces.
 
 ### Changed
 
 - **Release identity:** bumped to **v3.3.0** for the Special Edition surface area.
-- **Version snapshots:** **`tools/Sync-VersionSnapshot.ps1`** now copies **`brand/final/`** so release markdown images and tray assets stay with the frozen release tree.
+- **Version snapshots:** **`tools/Sync-VersionSnapshot.ps1`** now copies **`brand/Enterprise/`** so release markdown images and tray assets stay with the frozen release tree.
 
 ## [3.2.8] - 2026-05-01
 

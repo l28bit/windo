@@ -57,13 +57,17 @@ foreach ($p in $copyPairs) {
     Copy-Item -LiteralPath $from -Destination $to -Force
 }
 
-$brandFinalSource = Join-Path $root "brand\final"
-if (Test-Path -LiteralPath $brandFinalSource) {
-    $brandFinalDest = Join-Path $destRoot "brand\final"
-    if (Test-Path -LiteralPath $brandFinalDest) {
-        Remove-Item -LiteralPath $brandFinalDest -Recurse -Force
+$brandEnterpriseSource = Join-Path $root "brand\Enterprise"
+if (Test-Path -LiteralPath $brandEnterpriseSource) {
+    $obsoleteBrandFinalDest = Join-Path $destRoot "brand\final"
+    if (Test-Path -LiteralPath $obsoleteBrandFinalDest) {
+        Remove-Item -LiteralPath $obsoleteBrandFinalDest -Recurse -Force
     }
-    Copy-Item -LiteralPath $brandFinalSource -Destination $brandFinalDest -Recurse -Force
+    $brandEnterpriseDest = Join-Path $destRoot "brand\Enterprise"
+    if (Test-Path -LiteralPath $brandEnterpriseDest) {
+        Remove-Item -LiteralPath $brandEnterpriseDest -Recurse -Force
+    }
+    Copy-Item -LiteralPath $brandEnterpriseSource -Destination $brandEnterpriseDest -Recurse -Force
 }
 
 Write-Host "Sync-VersionSnapshot: wrote $destRoot ($($copyPairs.Count) files)." -ForegroundColor Cyan
