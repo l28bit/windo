@@ -56,6 +56,7 @@ Assert-Equal ($null -eq (Test-WindoNormalizePublishedInstallerSha256 "")) $true 
 $installerSource = Get-Content -Path (Join-Path $root "windo_install.ps1") -Raw
 $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
 $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
+$readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
 
 Assert-Equal (($installerSource -match "function _windo_normalize_published_installer_sha256") -eq $true) $true "installer normalizes published installer sha256"
 Assert-Equal (($bootstrapSource -match '\[A-Fa-f0-9\]\{64\}') -eq $true) $true "bootstrap uses 64-hex regex for published checksum"
@@ -93,6 +94,16 @@ Assert-Equal ($installerSource.Contains("function _windo_verify_log_state") -eq 
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "dashboard")') -eq $true) $true "installer handles dashboard command"
 Assert-Equal ($installerSource.Contains("windo dashboard --html") -eq $true) $true "installer help documents dashboard html output"
 Assert-Equal ($installerSource.Contains("windo_dashboard_") -eq $true) $true "installer writes dashboard html artifact"
+Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "preflight")') -eq $true) $true "installer handles preflight command"
+Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "launchpad")') -eq $true) $true "installer handles launchpad command"
+Assert-Equal ($installerSource.Contains("windo launchpad --tray") -eq $true) $true "installer help documents tray launchpad"
+Assert-Equal ($installerSource.Contains("return @(`$rows.ToArray())") -eq $true) $true "preflight returns flat check rows"
+Assert-Equal ($installerSource.Contains("`$recipeMap.GetEnumerator()") -eq $true) $true "launchpad enumerates built-in recipes"
+Assert-Equal ($installerSource.Contains("windo_launchpad_tray.ps1") -eq $true) $true "installer can write native tray launchpad script"
+Assert-Equal ($installerSource.Contains("Special Edition Installer") -eq $true) $true "installer is branded as special edition"
+Assert-Equal ($bootstrapSource.Contains("Special Edition bootstrap") -eq $true) $true "bootstrap has special edition visuals"
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.3.0.md")) -eq $true) $true "v3.3.0 release notes exist"
+Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.3.0.md") -eq $true) $true "README links v3.3.0 release notes"
 
 $extrasIndex = Join-Path $root "extras\index.json"
 if (Test-Path -LiteralPath $extrasIndex) {

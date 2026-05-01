@@ -13,6 +13,38 @@ function Test-WindoBootstrapProcessElevated {
 $Repo = "https://raw.githubusercontent.com/l28bit/windo/Genisis/windo_install.ps1"
 $Temp = Join-Path $env:TEMP ("windo_install_" + [Guid]::NewGuid().ToString("n") + ".ps1")
 
+function Write-WindoBootstrapBanner {
+    Write-Host ""
+    Write-Host "  __        _____ _   _ ____   ___" -ForegroundColor Cyan
+    Write-Host "  \ \      / /_ _| \ | |  _ \ / _ \" -ForegroundColor Cyan
+    Write-Host "   \ \ /\ / / | ||  \| | | | | | | |" -ForegroundColor Cyan
+    Write-Host "    \ V  V /  | || |\  | |_| | |_| |" -ForegroundColor Cyan
+    Write-Host "     \_/\_/  |___|_| \_|____/ \___/" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  WINDO 3.3.0 Special Edition bootstrap" -ForegroundColor White
+    Write-Host "  verified download | UAC handoff | operator launchpad" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+function Write-WindoBootstrapStep {
+    param(
+        [Parameter(Mandatory)][string]$Status,
+        [Parameter(Mandatory)][string]$Label,
+        [string]$Detail = "",
+        [ConsoleColor]$Color = [ConsoleColor]::Cyan
+    )
+    $mark = switch ($Status.ToLowerInvariant()) {
+        "ok" { "[OK]" }
+        "warn" { "[!!]" }
+        "run" { "[..]" }
+        default { "[**]" }
+    }
+    Write-Host ("  {0} {1}" -f $mark, $Label) -ForegroundColor $Color
+    if (-not [string]::IsNullOrWhiteSpace($Detail)) {
+        Write-Host ("       {0}" -f $Detail) -ForegroundColor DarkGray
+    }
+}
+
 function Test-WindoBootstrapSpinnerEnabled {
     if ($env:WINDO_NO_SPINNER) { return $false }
     if ($env:CI) { return $false }
@@ -117,8 +149,7 @@ function Start-WindoBootstrapInstaller {
     & $runnerExe @argList
 }
 
-Write-Host ""
-Write-Host "WINDO bootstrap starting..." -ForegroundColor Cyan
+Write-WindoBootstrapBanner
 
 if (Test-WindoBootstrapProcessElevated) {
     Write-Host ""
@@ -131,6 +162,7 @@ if (Test-WindoBootstrapProcessElevated) {
 
 try {
 
+    Write-WindoBootstrapStep -Status run -Label "Downloading installer" -Detail "non-elevated fetch from Genisis"
     Invoke-WindoBootstrapDownload -Uri $Repo -OutFile $Temp -Label "Downloading installer (non-elevated)..."
 
     if (!(Test-Path $Temp)) {
@@ -138,6 +170,7 @@ try {
     }
 
     if (-not $env:WINDO_SKIP_INSTALLER_SHA256) {
+        Write-WindoBootstrapStep -Status run -Label "Verifying installer checksum" -Detail "published checksums/installer.sha256"
         $sumUrl = "https://raw.githubusercontent.com/l28bit/windo/Genisis/checksums/installer.sha256"
         try {
             $wr = Invoke-WebRequest -Uri $sumUrl -UseBasicParsing -TimeoutSec 25
@@ -155,6 +188,9 @@ try {
         } catch {
             if ($_.Exception.Message -match 'does not match') { throw }
         }
+        Write-WindoBootstrapStep -Status ok -Label "Checksum accepted" -Color Green
+    } else {
+        Write-WindoBootstrapStep -Status warn -Label "Checksum verification skipped" -Detail "WINDO_SKIP_INSTALLER_SHA256 is set" -Color Yellow
     }
 
     $size = (Get-Item $Temp).Length
@@ -162,7 +198,7 @@ try {
         throw "Installer file size looks invalid."
     }
 
-    Write-Host "[windo] Download verified. Temporary file: $Temp" -ForegroundColor Green
+    Write-WindoBootstrapStep -Status ok -Label "Installer ready" -Detail $Temp -Color Green
     $doLaunch = $false
     if ($env:WINDO_BOOTSTRAP_FORCE_INSTALL -or $env:CI) {
         $doLaunch = $true
@@ -181,6 +217,7 @@ try {
         exit 0
     }
 
+    Write-WindoBootstrapStep -Status run -Label "Launching installer" -Detail "UAC may prompt for elevation"
     Start-WindoBootstrapInstaller -ScriptPath $Temp
 
 }

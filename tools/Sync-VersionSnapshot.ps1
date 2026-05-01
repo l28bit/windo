@@ -25,6 +25,11 @@ $copyPairs = @(
     @{ Src = "extras\samples\hello\Load.ps1"; Dst = "extras\samples\hello\Load.ps1" }
 )
 
+$releaseNotes = "docs\releases\RELEASE_NOTES_v$Version.md"
+if (Test-Path -LiteralPath (Join-Path $root $releaseNotes)) {
+    $copyPairs += @{ Src = $releaseNotes; Dst = $releaseNotes }
+}
+
 foreach ($p in $copyPairs) {
     $from = Join-Path $root $p.Src
     if (!(Test-Path -LiteralPath $from)) {
@@ -36,6 +41,7 @@ $dirs = @(
     $destRoot
     (Join-Path $destRoot "checksums")
     (Join-Path $destRoot "docs")
+    (Join-Path $destRoot "docs\releases")
     (Join-Path $destRoot "extras\samples\hello")
 )
 foreach ($d in $dirs) {
