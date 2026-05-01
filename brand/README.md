@@ -4,6 +4,7 @@ Source files:
 
 - `winDO.png` - full square logo artwork.
 - `WINDO_icon_banners_trayicon_avatar.png` - flattened contact sheet containing logos, icons, tray states, badges, and banners.
+- `individual_and_Transparent.png` - alpha-capable transparent pack used for production-friendly tray/app assets.
 
 Generated files:
 
@@ -13,6 +14,8 @@ Generated files:
 - `assets/badges/` - status badge crops.
 - `assets/banners/` - header/banner crops.
 - `assets/brand-elements/` - small reusable shield, chevrons, and progress elements.
+- `assets/transparent/` - preferred transparent crops from `individual_and_Transparent.png`.
+- `assets/transparent/ico/` - generated multi-size Windows `.ico` files for tray/app use.
 
 Regenerate:
 
@@ -22,7 +25,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\Split-BrandAssets.ps1
 
 ## Source quality note
 
-The current contact sheet is a flattened 24-bit PNG without transparency or separate layers. The generated crops are usable for docs, local HTML dashboards, installer visuals, and dark-background UI. They are not ideal as production tray icons because the dark background is baked into the pixels.
+The original contact sheet is a flattened 24-bit PNG without transparency or separate layers. Those crops are still useful for docs, local HTML dashboards, installer visuals, and dark-background UI.
+
+For production tray/app visuals, prefer `assets/transparent/` and `assets/transparent/ico/`, generated from `individual_and_Transparent.png`.
 
 ## Best handoff format for future artwork
 
@@ -45,4 +50,3 @@ Recommended naming:
 - `windo-tray-denied.ico`
 - `icon-elevate.svg`
 - `badge-elevated.png`
-
