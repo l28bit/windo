@@ -1,0 +1,182 @@
+[
+  {
+    "filename": "assets/tray/windo-tray-ready.png",
+    "row": 1,
+    "column": 1,
+    "x": 90,
+    "y": 80,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/tray/windo-tray-warning.png",
+    "row": 1,
+    "column": 2,
+    "x": 404,
+    "y": 80,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/tray/windo-tray-ok.png",
+    "row": 1,
+    "column": 3,
+    "x": 718,
+    "y": 80,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/tray/windo-tray-denied.png",
+    "row": 1,
+    "column": 4,
+    "x": 1032,
+    "y": 80,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/ui-icons/icon-elevate-256.png",
+    "row": 1,
+    "column": 5,
+    "x": 1346,
+    "y": 80,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/ui-icons/icon-execute-256.png",
+    "row": 1,
+    "column": 6,
+    "x": 1660,
+    "y": 80,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/ui-icons/icon-audit-256.png",
+    "row": 2,
+    "column": 1,
+    "x": 90,
+    "y": 334,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/ui-icons/icon-approve-256.png",
+    "row": 2,
+    "column": 2,
+    "x": 404,
+    "y": 334,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/ui-icons/icon-deny-256.png",
+    "row": 2,
+    "column": 3,
+    "x": 718,
+    "y": 334,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/ui-icons/icon-warning-256.png",
+    "row": 2,
+    "column": 4,
+    "x": 1032,
+    "y": 334,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/ui-icons/icon-history-256.png",
+    "row": 2,
+    "column": 5,
+    "x": 1346,
+    "y": 334,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/ui-icons/icon-settings-256.png",
+    "row": 2,
+    "column": 6,
+    "x": 1660,
+    "y": 334,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/ui-icons/icon-secure-256.png",
+    "row": 3,
+    "column": 1,
+    "x": 90,
+    "y": 588,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/ui-icons/icon-powershell-256.png",
+    "row": 3,
+    "column": 2,
+    "x": 404,
+    "y": 588,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/ui-icons/icon-windows-256.png",
+    "row": 3,
+    "column": 3,
+    "x": 718,
+    "y": 588,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/badges/badge-ready.png",
+    "row": 3,
+    "column": 4,
+    "x": 1032,
+    "y": 588,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/badges/badge-elevated.png",
+    "row": 3,
+    "column": 5,
+    "x": 1346,
+    "y": 588,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/badges/badge-allowed.png",
+    "row": 3,
+    "column": 6,
+    "x": 1660,
+    "y": 588,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/badges/badge-warning.png",
+    "row": 4,
+    "column": 1,
+    "x": 90,
+    "y": 842,
+    "width": 280,
+    "height": 220
+  },
+  {
+    "filename": "assets/badges/badge-denied.png",
+    "row": 4,
+    "column": 2,
+    "x": 404,
+    "y": 842,
+    "width": 280,
+    "height": 220
+  }
+]

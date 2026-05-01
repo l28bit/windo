@@ -1,52 +1,29 @@
 # WINDO brand assets
 
-Source files:
+![WINDO logo](final/assets/logo/windo-logo-full-dark-512.png)
 
-- `winDO.png` - full square logo artwork.
-- `WINDO_icon_banners_trayicon_avatar.png` - flattened contact sheet containing logos, icons, tray states, badges, and banners.
-- `individual_and_Transparent.png` - alpha-capable transparent pack used for production-friendly tray/app assets.
+## Canonical Pack
 
-Generated files:
+Use `brand/final/` as the production asset pack.
 
-- `assets/logos/` - logo crops and avatar panel.
-- `assets/icons/` - individual command/action icon crops.
-- `assets/tray/` - tray-state crops plus 32px PNG variants.
-- `assets/badges/` - status badge crops.
-- `assets/banners/` - header/banner crops.
-- `assets/brand-elements/` - small reusable shield, chevrons, and progress elements.
-- `assets/transparent/` - preferred transparent crops from `individual_and_Transparent.png`.
-- `assets/transparent/ico/` - generated multi-size Windows `.ico` files for tray/app use.
+- `brand/final/assets/logo/` - full logo PNG/SVG exports.
+- `brand/final/assets/png/` - brand marks, status icons, and tray PNGs.
+- `brand/final/assets/svg/` - scalable brand marks and status icons.
+- `brand/final/assets/tray/` - tray state PNG/SVG assets.
+- `brand/final/assets/ico/` - Windows tray/app ICO files with 16, 24, 32, 48, 64, 128, and 256 px entries.
+- `brand/final/assets/ui-icons/` - UI action icons in PNG/SVG form.
+- `brand/final/assets/badges/` - pill-style status badges.
+- `brand/final/assets/manifest.json` - asset inventory and intended use.
 
-Regenerate:
+The older `assets/` tree and `tools/Split-BrandAssets.ps1` are retained for historical source-sheet slicing, but new WINDO UI and docs should prefer `brand/final/`.
 
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\Split-BrandAssets.ps1
-```
+## Runtime Use
 
-## Source quality note
+`windo launchpad --tray` resolves the clean ready-state icon from:
 
-The original contact sheet is a flattened 24-bit PNG without transparency or separate layers. Those crops are still useful for docs, local HTML dashboards, installer visuals, and dark-background UI.
+1. `WINDO_TRAY_ICON`
+2. `Documents\GitHub\windo\brand\final\assets\ico\windo-tray-ready.ico`
+3. `Documents\windo\brand\final\assets\ico\windo-tray-ready.ico`
+4. `Documents\windo\assets\ico\windo-tray-ready.ico`
 
-For production tray/app visuals, prefer `assets/transparent/` and `assets/transparent/ico/`, generated from `individual_and_Transparent.png`.
-
-## Best handoff format for future artwork
-
-Ask the creator to provide:
-
-- Individual transparent PNG files for every logo, icon, tray state, badge, and banner.
-- SVG source for vector-safe logos and icons when possible.
-- A multi-size `.ico` for Windows tray/app use with at least 16x16, 24x24, 32x32, 48x48, and 256x256 entries.
-- Light and dark variants where an asset is expected to sit on both backgrounds.
-- No labels baked into icon-only assets; provide labels as text in the app/docs.
-- A source design file or export manifest with asset names, intended use, dimensions, and safe padding.
-
-Recommended naming:
-
-- `windo-logo-full-dark.png`
-- `windo-logo-full-light.png`
-- `windo-logo-mark-transparent.png`
-- `windo-tray-ready.ico`
-- `windo-tray-warning.ico`
-- `windo-tray-denied.ico`
-- `icon-elevate.svg`
-- `badge-elevated.png`
+If none are present, WINDO falls back to the Windows shield icon.

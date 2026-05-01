@@ -2369,6 +2369,7 @@ Use: windo prompt --json   (machine-readable bundle)
             'Add-Type -AssemblyName System.Drawing',
             '[System.Windows.Forms.Application]::EnableVisualStyles()',
             '$version = "__WINDO_VERSION__"',
+            '$iconPath = "__WINDO_ICON_PATH__"',
             '$actions = @(',
             '    @{ Text = "Preflight"; Command = "windo preflight" },',
             '    @{ Text = "Dashboard"; Command = "windo dashboard" },',
@@ -2437,7 +2438,11 @@ Use: windo prompt --json   (machine-readable bundle)
             '}',
             '$notify = New-Object System.Windows.Forms.NotifyIcon',
             '$notify.Text = "WINDO Launchpad v$version"',
-            '$notify.Icon = [System.Drawing.SystemIcons]::Shield',
+            'if (-not [string]::IsNullOrWhiteSpace($iconPath) -and (Test-Path -LiteralPath $iconPath)) {',
+            '    $notify.Icon = New-Object System.Drawing.Icon($iconPath)',
+            '} else {',
+            '    $notify.Icon = [System.Drawing.SystemIcons]::Shield',
+            '}',
             '$notify.Visible = $true',
             '$menu = New-Object System.Windows.Forms.ContextMenuStrip',
             '$openItem = $menu.Items.Add("Open Launchpad")',
@@ -2478,13 +2483,27 @@ Use: windo prompt --json   (machine-readable bundle)
             return @{ ok = $false; error = "tray launchpad requires Windows desktop APIs" }
         }
         if (!(Test-Path $SecureDir)) { New-Item -ItemType Directory -Path $SecureDir -Force | Out-Null }
+        $trayIconPath = $null
+        $candidateIconPaths = @(
+            [string]$env:WINDO_TRAY_ICON,
+            (Join-Path $HOME "Documents\GitHub\windo\brand\final\assets\ico\windo-tray-ready.ico"),
+            (Join-Path $HOME "Documents\windo\brand\final\assets\ico\windo-tray-ready.ico"),
+            (Join-Path $HOME "Documents\windo\assets\ico\windo-tray-ready.ico")
+        )
+        foreach ($candidateIconPath in $candidateIconPaths) {
+            if (-not [string]::IsNullOrWhiteSpace($candidateIconPath) -and (Test-Path -LiteralPath $candidateIconPath)) {
+                $trayIconPath = $candidateIconPath
+                break
+            }
+        }
         $trayPath = Join-Path $SecureDir "windo_launchpad_tray.ps1"
-        [System.IO.File]::WriteAllText($trayPath, (_windo_launchpad_tray_script_text), [System.Text.UTF8Encoding]::new($false))
+        $trayScript = (_windo_launchpad_tray_script_text).Replace("__WINDO_ICON_PATH__", (($trayIconPath -replace '\\', '\\') -replace "'", "''"))
+        [System.IO.File]::WriteAllText($trayPath, $trayScript, [System.Text.UTF8Encoding]::new($false))
         $exe = "powershell.exe"
         $pwsh = Get-Command pwsh.exe -ErrorAction SilentlyContinue
         if ($pwsh -and $pwsh.Source) { $exe = $pwsh.Source }
         Start-Process -FilePath $exe -WindowStyle Hidden -ArgumentList @("-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File", $trayPath) | Out-Null
-        return @{ ok = $true; path = $trayPath }
+        return @{ ok = $true; path = $trayPath; iconPath = $trayIconPath }
     }
 
     function _windo_profile_path_list {
@@ -3997,6 +4016,17 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
         $score = 100 - ($critical.Count * 25) - (($failed.Count - $critical.Count) * 10)
         if ($score -lt 0) { $score = 0 }
         $status = if ($score -ge 90) { "READY" } elseif ($score -ge 70) { "ATTENTION" } else { "REPAIR" }
+        $brandLogoPath = $null
+        foreach ($candidateLogoPath in @(
+            [string]$env:WINDO_LOGO_PATH,
+            (Join-Path $HOME "Documents\GitHub\windo\brand\final\assets\logo\windo-logo-full-dark-512.png"),
+            (Join-Path $HOME "Documents\windo\brand\final\assets\logo\windo-logo-full-dark-512.png")
+        )) {
+            if (-not [string]::IsNullOrWhiteSpace($candidateLogoPath) -and (Test-Path -LiteralPath $candidateLogoPath)) {
+                $brandLogoPath = $candidateLogoPath
+                break
+            }
+        }
         $payload = [ordered]@{
             windoVersion = $WindoVersion
             generatedAt = (Get-Date).ToString("o")
@@ -4006,9 +4036,9 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             actions = $actions
             recipes = $recipes
             modules = $modules
-            paths = @{ secureDir = $SecureDir; snapshotDir = (Join-Path (Join-Path $HOME "Documents") "windo"); profile = [string]$PROFILE }
+            paths = @{ secureDir = $SecureDir; snapshotDir = (Join-Path (Join-Path $HOME "Documents") "windo"); profile = [string]$PROFILE; brandLogo = $brandLogoPath }
             htmlPath = $(if ($writeHtml) { $outPath } else { $null })
-            tray = @{ requested = $startTray; started = $false; scriptPath = $null; error = $null }
+            tray = @{ requested = $startTray; started = $false; scriptPath = $null; iconPath = $null; error = $null }
             exitCode = $(if ($status -eq "READY") { 0 } elseif ($status -eq "ATTENTION") { 3 } else { 4 })
         }
 
@@ -4017,6 +4047,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             $payload.tray.started = [bool]$trayResult.ok
             if ($trayResult.ok) {
                 $payload.tray.scriptPath = [string]$trayResult.path
+                $payload.tray.iconPath = [string]$trayResult.iconPath
             } else {
                 $payload.tray.error = [string]$trayResult.error
                 if ([int]$payload.exitCode -eq 0) { $payload.exitCode = 3 }
@@ -4027,8 +4058,12 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             $json = ($payload | ConvertTo-Json -Depth 14)
             $sb = [System.Text.StringBuilder]::new()
             $null = $sb.AppendLine('<!DOCTYPE html><html><head><meta charset="utf-8"><title>WINDO Launchpad</title>')
-            $null = $sb.AppendLine('<style>body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#0f172a;color:#e5e7eb}.wrap{max-width:1220px;margin:0 auto;padding:28px}.hero{border-bottom:1px solid #334155;padding-bottom:18px}.title{font-size:38px;font-weight:800}.sub{color:#94a3b8}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:18px 0}.card{background:#111827;border:1px solid #334155;border-radius:8px;padding:14px}.k{font-size:12px;text-transform:uppercase;color:#94a3b8}.v{font-size:30px;font-weight:800}.ready{color:#22c55e}.attention{color:#f59e0b}.repair{color:#ef4444}button{background:#2563eb;color:white;border:0;border-radius:6px;padding:7px 10px;cursor:pointer}code{background:#020617;border:1px solid #334155;border-radius:5px;padding:3px 5px;color:#bfdbfe}.row{display:flex;gap:8px;align-items:center;justify-content:space-between;border-top:1px solid #1f2937;padding:10px 0}.muted{color:#94a3b8}table{width:100%;border-collapse:collapse;background:#111827;border:1px solid #334155}th,td{padding:8px;border-bottom:1px solid #1f2937;text-align:left}th{background:#1f2937}</style></head><body><div class="wrap">')
-            $null = $sb.AppendLine(("<div class='hero'><div class='title'>WINDO Launchpad</div><div class='sub'>Special Edition command center generated {0}. Local-only; command text may be sensitive.</div></div>" -f (_html_escape (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))))
+            $null = $sb.AppendLine('<style>body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#0f172a;color:#e5e7eb}.wrap{max-width:1220px;margin:0 auto;padding:28px}.hero{border-bottom:1px solid #334155;padding-bottom:18px}.brand{max-width:360px;width:100%;height:auto;margin-bottom:8px}.title{font-size:38px;font-weight:800}.sub{color:#94a3b8}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:18px 0}.card{background:#111827;border:1px solid #334155;border-radius:8px;padding:14px}.k{font-size:12px;text-transform:uppercase;color:#94a3b8}.v{font-size:30px;font-weight:800}.ready{color:#22c55e}.attention{color:#f59e0b}.repair{color:#ef4444}button{background:#2563eb;color:white;border:0;border-radius:6px;padding:7px 10px;cursor:pointer}code{background:#020617;border:1px solid #334155;border-radius:5px;padding:3px 5px;color:#bfdbfe}.row{display:flex;gap:8px;align-items:center;justify-content:space-between;border-top:1px solid #1f2937;padding:10px 0}.muted{color:#94a3b8}table{width:100%;border-collapse:collapse;background:#111827;border:1px solid #334155}th,td{padding:8px;border-bottom:1px solid #1f2937;text-align:left}th{background:#1f2937}</style></head><body><div class="wrap">')
+            $brandImg = ""
+            if (-not [string]::IsNullOrWhiteSpace($brandLogoPath)) {
+                $brandImg = "<img class='brand' alt='WINDO' src='$(_html_escape ([uri]$brandLogoPath).AbsoluteUri)'>"
+            }
+            $null = $sb.AppendLine(("<div class='hero'>{0}<div class='title'>WINDO Launchpad</div><div class='sub'>Special Edition command center generated {1}. Local-only; command text may be sensitive.</div></div>" -f $brandImg, (_html_escape (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))))
             $cls = $status.ToLowerInvariant()
             $null = $sb.AppendLine(("<div class='grid'><div class='card'><div class='k'>Status</div><div class='v {0}'>{1}</div></div><div class='card'><div class='k'>Score</div><div class='v'>{2}/100</div></div><div class='card'><div class='k'>Checks</div><div class='v'>{3}</div><div class='muted'>{4} need attention</div></div></div>" -f $cls, $status, [int]$score, $checks.Count, $failed.Count))
             $null = $sb.AppendLine("<h2>Quick actions</h2><div class='card'>")

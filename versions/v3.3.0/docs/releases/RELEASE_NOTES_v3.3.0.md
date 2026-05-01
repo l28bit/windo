@@ -1,5 +1,7 @@
 # Release notes - WINDO v3.3.0 Special Edition
 
+![WINDO logo](../../brand/final/assets/logo/windo-logo-full-dark-512.png)
+
 **Theme:** Faster install confidence, native operator visuals, and a command center that does not require a browser.
 
 ## Summary
@@ -20,7 +22,7 @@ v3.3.0 Special Edition adds a new visual install/update experience plus two oper
 
 `windo launchpad --tray` creates a local tray-agent script under `%USERPROFILE%\.pwsh_secure\windo_launchpad_tray.ps1`, starts it hidden with Windows Forms, and exposes a shield tray icon, balloon notification, popup action window, and menu actions.
 
-The tray path is local-only and browser-independent. Actions open visible PowerShell windows so command output remains available to the operator.
+The tray path is local-only and browser-independent. Actions open visible PowerShell windows so command output remains available to the operator. When `brand/final` assets are present, tray mode uses the clean WINDO ICO instead of the generic Windows shield.
 
 ### Launchpad command center
 
@@ -82,4 +84,3 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-PSScriptAnalyzer.ps
 ```
 
 The frozen release tree is stored under `versions/v3.3.0/`.
-

@@ -199,9 +199,9 @@ Special Edition command center from `windo launchpad --json`; `--tray` starts a 
 | `actions` | array | Copy/run suggestions: `title`, `command`, `note` |
 | `recipes` | array | Built-in recipe ids, descriptions, and command templates |
 | `modules` | array | Discovered module rows |
-| `paths` | object | `secureDir`, `snapshotDir`, `profile` |
+| `paths` | object | `secureDir`, `snapshotDir`, `profile`, `brandLogo` |
 | `htmlPath` | string \| null | Set when `--html`, `--open`, or `--output` writes local HTML |
-| `tray` | object | `requested`, `started`, `scriptPath`, `error`; populated by `--tray` |
+| `tray` | object | `requested`, `started`, `scriptPath`, `iconPath`, `error`; populated by `--tray` |
 | `exitCode` | number | **0**, **3**, or **4** |
 
 ## `keybindings` payload (v3.x)

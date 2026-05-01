@@ -100,10 +100,14 @@ Assert-Equal ($installerSource.Contains("windo launchpad --tray") -eq $true) $tr
 Assert-Equal ($installerSource.Contains("return @(`$rows.ToArray())") -eq $true) $true "preflight returns flat check rows"
 Assert-Equal ($installerSource.Contains("`$recipeMap.GetEnumerator()") -eq $true) $true "launchpad enumerates built-in recipes"
 Assert-Equal ($installerSource.Contains("windo_launchpad_tray.ps1") -eq $true) $true "installer can write native tray launchpad script"
+Assert-Equal ($installerSource.Contains("WINDO_TRAY_ICON") -eq $true) $true "tray launchpad can use branded icon override"
+Assert-Equal ($installerSource.Contains("windo-tray-ready.ico") -eq $true) $true "tray launchpad resolves final brand icon"
 Assert-Equal ($installerSource.Contains("Special Edition Installer") -eq $true) $true "installer is branded as special edition"
 Assert-Equal ($bootstrapSource.Contains("Special Edition bootstrap") -eq $true) $true "bootstrap has special edition visuals"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.3.0.md")) -eq $true) $true "v3.3.0 release notes exist"
 Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.3.0.md") -eq $true) $true "README links v3.3.0 release notes"
+Assert-Equal ((Test-Path (Join-Path $Root "brand\final\assets\ico\windo-tray-ready.ico")) -eq $true) $true "final branded tray ico exists"
+Assert-Equal ($readmeSource.Contains("brand/final/assets/logo/windo-logo-full-dark-512.png") -eq $true) $true "README uses final brand logo"
 
 $extrasIndex = Join-Path $root "extras\index.json"
 if (Test-Path -LiteralPath $extrasIndex) {

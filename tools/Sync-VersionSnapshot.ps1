@@ -42,6 +42,7 @@ $dirs = @(
     (Join-Path $destRoot "checksums")
     (Join-Path $destRoot "docs")
     (Join-Path $destRoot "docs\releases")
+    (Join-Path $destRoot "brand")
     (Join-Path $destRoot "extras\samples\hello")
 )
 foreach ($d in $dirs) {
@@ -54,6 +55,15 @@ foreach ($p in $copyPairs) {
     $from = Join-Path $root $p.Src
     $to = Join-Path $destRoot $p.Dst
     Copy-Item -LiteralPath $from -Destination $to -Force
+}
+
+$brandFinalSource = Join-Path $root "brand\final"
+if (Test-Path -LiteralPath $brandFinalSource) {
+    $brandFinalDest = Join-Path $destRoot "brand\final"
+    if (Test-Path -LiteralPath $brandFinalDest) {
+        Remove-Item -LiteralPath $brandFinalDest -Recurse -Force
+    }
+    Copy-Item -LiteralPath $brandFinalSource -Destination $brandFinalDest -Recurse -Force
 }
 
 Write-Host "Sync-VersionSnapshot: wrote $destRoot ($($copyPairs.Count) files)." -ForegroundColor Cyan

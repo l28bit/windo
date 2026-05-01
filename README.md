@@ -1,5 +1,7 @@
 # WINDO
 
+![WINDO logo](brand/final/assets/logo/windo-logo-full-dark-512.png)
+
 **Choose elevation before execution.**
 
 WINDO is a PowerShell-first elevation helper for Windows. It gives administrators a **deliberate, auditable** way to request elevation **before** a command runs—instead of improvising after the fact.
@@ -19,7 +21,7 @@ The default GitHub branch for raw URLs is named **`Genisis`** (historical spelli
 ## What's new in v3.3.0 Special Edition
 
 - **Install/update visuals** — bootstrap, `install-latest`, and installer output now use a Special Edition banner and step-by-step status cards.
-- **`windo launchpad --tray`** — native Windows task-tray command center with a shield icon, balloon notification, popup action window, and menu actions for preflight, dashboard, integrity, verify, repair, and update. No browser required.
+- **`windo launchpad --tray`** — native Windows task-tray command center with the WINDO tray icon when brand assets are present, balloon notification, popup action window, and menu actions for preflight, dashboard, integrity, verify, repair, and update. No browser required.
 - **`windo launchpad`** — terminal / JSON / HTML command center with health checks, copy-ready recovery/update commands, built-in recipes, modules, and local paths.
 - **`windo preflight`** — read-only readiness scan with fix commands for install/update posture, tasks, integrity, audit chain, profile, and keybindings.
 
