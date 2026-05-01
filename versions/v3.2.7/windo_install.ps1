@@ -95,6 +95,35 @@ function Remove-ExistingWindoBlockFromProfile {
     }
 }
 
+function Repair-WindoProfileText {
+    param(
+        [Parameter(Mandatory=$true)][string]$Text
+    )
+
+    $wellFormedBlockPattern = "(?ms)" + [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker) + "\r?\n?"
+    $Text = [regex]::Replace($Text, $wellFormedBlockPattern, '')
+
+    $firstBegin = $Text.IndexOf($BeginMarker, [StringComparison]::Ordinal)
+    $firstEnd = $Text.IndexOf($EndMarker, [StringComparison]::Ordinal)
+    while ($firstEnd -ge 0 -and ($firstBegin -lt 0 -or $firstEnd -lt $firstBegin)) {
+        $prefix = $Text.Substring(0, $firstEnd)
+        $anchorPattern = '(?ms)(?:^|\r?\n)(?:"\s*\r?\n|function\s+Invoke-WindoBundledUninstall\b|function\s+windo\b|\s*\$WindoVersion\s*=|\s*if\s*\(\!\(Test-Path\s+\$SecureDir\)\))'
+        $matches = [regex]::Matches($prefix, $anchorPattern)
+        if ($matches.Count -eq 0) { break }
+
+        $start = $matches[$matches.Count - 1].Index
+        $end = $firstEnd + $EndMarker.Length
+        if ($end -lt $Text.Length -and $Text[$end] -eq "`r") { $end++ }
+        if ($end -lt $Text.Length -and $Text[$end] -eq "`n") { $end++ }
+        $Text = $Text.Remove($start, $end - $start)
+
+        $firstBegin = $Text.IndexOf($BeginMarker, [StringComparison]::Ordinal)
+        $firstEnd = $Text.IndexOf($EndMarker, [StringComparison]::Ordinal)
+    }
+
+    return ($Text -replace "(\r?\n){3,}", "`r`n`r`n")
+}
+
 function Get-NoWindowActionArgs {
     param([Parameter(Mandatory=$true)][string]$ScriptPath)
 
@@ -4653,10 +4682,7 @@ $profileText = ''
 if (Test-Path -LiteralPath $PROFILE) {
     try {
         $profileText = Get-Content -Raw -LiteralPath $PROFILE
-        if ($profileText -match [regex]::Escape($BeginMarker)) {
-            $legacyBlockPattern = "(?ms)" + [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker) + "\r?\n?"
-            $profileText = [regex]::Replace($profileText, $legacyBlockPattern, '')
-        }
+        $profileText = Repair-WindoProfileText -Text $profileText
     } catch {
         $profileText = ''
     }

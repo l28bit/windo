@@ -87,6 +87,8 @@ Assert-Equal ($installerSource.Contains("WINDO_EXTRAS_INDEX_URL") -eq $true) $tr
 Assert-Equal ($installerSource.Contains("function _windo_keybinding_inspect_chord_for_doctor") -eq $true) $true "installer defines keybindings doctor inspector"
 Assert-Equal ($installerSource.Contains("keybindings doctor") -eq $true) $true "installer handles keybindings doctor subcommand"
 Assert-Equal ($installerSource.Contains("lastAudit") -eq $true) $true "installer session payload includes lastAudit"
+Assert-Equal ($installerSource.Contains("function Repair-WindoProfileText") -eq $true) $true "installer repairs corrupted orphan WINDO profile blocks"
+Assert-Equal ($installerSource.Contains('$profileText = Repair-WindoProfileText -Text $profileText') -eq $true) $true "installer normalizes profile text before writing profile block"
 
 $extrasIndex = Join-Path $root "extras\index.json"
 if (Test-Path -LiteralPath $extrasIndex) {
