@@ -138,6 +138,25 @@ function Repair-WindoProfileText {
         [Parameter(Mandatory=$true)][string]$Text
     )
 
+    $anchorPattern = '(?ms)(?:^|\r?\n)(?:"\s*\r?\n|function\s+Invoke-WindoBundledUninstall\b|function\s+windo\b|\s*\$WindoVersion\s*=|\s*if\s*\(\!\(Test-Path\s+\$SecureDir\)\))'
+
+    $firstBegin = $Text.IndexOf($BeginMarker, [StringComparison]::Ordinal)
+    while ($firstBegin -ge 0) {
+        $prefix = $Text.Substring(0, $firstBegin)
+        $matches = [regex]::Matches($prefix, $anchorPattern)
+        if ($matches.Count -eq 0) { break }
+
+        $start = $matches[$matches.Count - 1].Index
+        if ($Text[$start] -eq "`r") {
+            $start++
+            if ($start -lt $Text.Length -and $Text[$start] -eq "`n") { $start++ }
+        } elseif ($Text[$start] -eq "`n") {
+            $start++
+        }
+        $Text = $Text.Remove($start, $firstBegin - $start)
+        $firstBegin = $Text.IndexOf($BeginMarker, [StringComparison]::Ordinal)
+    }
+
     $wellFormedBlockPattern = "(?ms)" + [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker) + "\r?\n?"
     $Text = [regex]::Replace($Text, $wellFormedBlockPattern, '')
 
@@ -145,11 +164,16 @@ function Repair-WindoProfileText {
     $firstEnd = $Text.IndexOf($EndMarker, [StringComparison]::Ordinal)
     while ($firstEnd -ge 0 -and ($firstBegin -lt 0 -or $firstEnd -lt $firstBegin)) {
         $prefix = $Text.Substring(0, $firstEnd)
-        $anchorPattern = '(?ms)(?:^|\r?\n)(?:"\s*\r?\n|function\s+Invoke-WindoBundledUninstall\b|function\s+windo\b|\s*\$WindoVersion\s*=|\s*if\s*\(\!\(Test-Path\s+\$SecureDir\)\))'
         $matches = [regex]::Matches($prefix, $anchorPattern)
         if ($matches.Count -eq 0) { break }
 
         $start = $matches[$matches.Count - 1].Index
+        if ($Text[$start] -eq "`r") {
+            $start++
+            if ($start -lt $Text.Length -and $Text[$start] -eq "`n") { $start++ }
+        } elseif ($Text[$start] -eq "`n") {
+            $start++
+        }
         $end = $firstEnd + $EndMarker.Length
         if ($end -lt $Text.Length -and $Text[$end] -eq "`r") { $end++ }
         if ($end -lt $Text.Length -and $Text[$end] -eq "`n") { $end++ }
