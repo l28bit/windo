@@ -76,5 +76,40 @@ try {
     Write-Host $_.Exception.Message
     $ok = $false
 }
+
+try {
+    $versionMatch = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $root "windo_install.ps1")), '\$WindoVersion\s*=\s*"(?<v>\d+\.\d+\.\d+)"')
+    if ($versionMatch.Success) {
+        $version = $versionMatch.Groups['v'].Value
+        $snapshotInstaller = Join-Path $root ("versions\v{0}\windo_install.ps1" -f $version)
+        $snapshotChecksum = Join-Path $root ("versions\v{0}\checksums\installer.sha256" -f $version)
+        if ((Test-Path -LiteralPath $snapshotInstaller) -and (Test-Path -LiteralPath $snapshotChecksum)) {
+            $snapshotExpectedMatch = [regex]::Match(([string](Get-Content -LiteralPath $snapshotChecksum -Raw)), '[A-Fa-f0-9]{64}')
+            if (-not $snapshotExpectedMatch.Success) {
+                Write-Host "FAIL versions/v$version/checksums/installer.sha256" -ForegroundColor Red
+                Write-Host "Snapshot installer checksum does not contain a valid SHA256."
+                $ok = $false
+            } else {
+                $snapshotActual = Get-WindoPublishedTextFileSha256 -Path $snapshotInstaller
+                $snapshotExpected = $snapshotExpectedMatch.Value.ToUpperInvariant()
+                if ($snapshotActual -cne $snapshotExpected) {
+                    Write-Host "FAIL versions/v$version/checksums/installer.sha256" -ForegroundColor Red
+                    Write-Host "Snapshot installer checksum is stale."
+                    Write-Host "Expected: $snapshotActual"
+                    Write-Host "Found   : $snapshotExpected"
+                    $ok = $false
+                } else {
+                    Write-Host "OK   versions/v$version/checksums/installer.sha256" -ForegroundColor Green
+                }
+            }
+        } else {
+            Write-Warning "No version snapshot found for v$version; skipping snapshot checksum validation."
+        }
+    }
+} catch {
+    Write-Host "FAIL version snapshot checksum validation" -ForegroundColor Red
+    Write-Host $_.Exception.Message
+    $ok = $false
+}
 if (-not $ok) { exit 1 }
 Write-Host "Validate-Windo: all checks passed." -ForegroundColor Cyan

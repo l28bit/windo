@@ -89,6 +89,10 @@ Assert-Equal ($installerSource.Contains("keybindings doctor") -eq $true) $true "
 Assert-Equal ($installerSource.Contains("lastAudit") -eq $true) $true "installer session payload includes lastAudit"
 Assert-Equal ($installerSource.Contains("function Repair-WindoProfileText") -eq $true) $true "installer repairs corrupted orphan WINDO profile blocks"
 Assert-Equal ($installerSource.Contains('$profileText = Repair-WindoProfileText -Text $profileText') -eq $true) $true "installer normalizes profile text before writing profile block"
+Assert-Equal ($installerSource.Contains("function _windo_verify_log_state") -eq $true) $true "installer has shared audit-chain verifier"
+Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "dashboard")') -eq $true) $true "installer handles dashboard command"
+Assert-Equal ($installerSource.Contains("windo dashboard --html") -eq $true) $true "installer help documents dashboard html output"
+Assert-Equal ($installerSource.Contains("windo_dashboard_") -eq $true) $true "installer writes dashboard html artifact"
 
 $extrasIndex = Join-Path $root "extras\index.json"
 if (Test-Path -LiteralPath $extrasIndex) {
