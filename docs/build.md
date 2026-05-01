@@ -36,8 +36,8 @@ No build step is required for end users.
 ## Branch `Genisis`, checksums, and embedded runner
 
 - **Canonical raw URLs** for bootstrap and `windo upgrade` use the repository branch named **`Genisis`** (historical spelling).
-- After changing **`windo_install.ps1`**, update **[`checksums/installer.sha256`](../checksums/installer.sha256)** with the file’s SHA256 (uppercase hex, one line). CI or local:  
-  `(Get-FileHash -Path .\windo_install.ps1 -Algorithm SHA256).Hash | Set-Content .\checksums\installer.sha256 -NoNewline`
+- After changing **`windo_install.ps1`**, update **[`checksums/installer.sha256`](../checksums/installer.sha256)** with the **published** installer SHA256 (uppercase hex, one line). Use the helper so Windows checkout line endings do not produce a stale hash:  
+  `./tools/Sync-InstallerChecksum.ps1`
 - **v3.2.7+:** **`bootstrap.ps1`** and **`_windo_verify_installer_sha256_optional`** compare the downloaded installer’s hash to the **first 64 hex** characters found in the fetched checksum file (so BOM, extra whitespace, or `sha256sum`-style lines still verify). The canonical file remains a single 64-character uppercase line.
 - **`windo_runner.ps1`** embeds **`WindoRunner.ChildExec`** C# via base64. Source: [`src/windo/snippets/ChildExec.cs`](../src/windo/snippets/ChildExec.cs). Regenerate the base64 string with [`tools/Encode-ChildExec.ps1`](../tools/Encode-ChildExec.ps1), paste into **`windo_runner.ps1`**, then re-sync the **`$RunnerContent`** block in **`windo_install.ps1`** (same file content as `windo_runner.ps1`).
 - **`bootstrap.ps1`** cannot dot-source repo helpers; keep it self-contained or duplicate small logic intentionally.

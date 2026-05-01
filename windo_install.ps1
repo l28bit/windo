@@ -6,6 +6,7 @@ Installs:
 - $HOME\.pwsh_secure\
 - windo_runner.ps1
 - windo_self_update.ps1
+- windo_uninstall.ps1
 - windo_manifest.json
 - Scheduled tasks:
     - WindoElevatedRunner
@@ -24,7 +25,7 @@ $WindoVersion = "3.2.7"
 $WindoBuiltinVerbs = @(
     'help', 'last', 'stats', 'history', 'report', 'export', 'self-update', 'version',
     'doctor', 'integrity', 'verify', 'log', 'cleanup', 'config', 'backups', 'context', 'trace', 'replay',
-    'theme', 'upgrade', 'install-latest', 'uninstall', 'profile', 'keybindings',
+    'theme', 'upgrade', 'install-latest', 'uninstall', 'remove', 'profile', 'keybindings',
     'modules', 'recipes', 'prompt', 'extras', 'dev', 'session', 'ai', 'repair', 'run'
 )
 $WindoBuiltinVerbsArrayLiteral = ($WindoBuiltinVerbs | ForEach-Object { "'$_'" }) -join ','
@@ -34,6 +35,7 @@ $TaskUpdate   = "WindoSelfUpdate"
 $SecureDir    = Join-Path $HOME ".pwsh_secure"
 $RunnerPath   = Join-Path $SecureDir "windo_runner.ps1"
 $UpdateScript = Join-Path $SecureDir "windo_self_update.ps1"
+$UninstallPath = Join-Path $SecureDir "windo_uninstall.ps1"
 $RunnerLast   = Join-Path $SecureDir "windo_runner_last.txt"
 $UpdateLast   = Join-Path $SecureDir "windo_self_update_last.txt"
 $LogFile      = Join-Path $SecureDir "windo_history.enc"
@@ -533,6 +535,190 @@ $SelfUpdateContent = $SelfUpdateContent.Replace("__STAMP_FILE__", $UpdateLast)
 $SelfUpdateContent = $SelfUpdateContent.Replace("__USER_ID__", $UserId)
 Write-Utf8NoBomFile -Path $UpdateScript -Content $SelfUpdateContent
 
+$UninstallContent = @'
+<# =====================================================================
+WINDO uninstall — removes scheduled tasks, profile block, and WINDO data.
+
+Run elevated (recommended) so scheduled tasks unregister reliably:
+  powershell.exe -ExecutionPolicy Bypass -File .\windo_uninstall.ps1 -Confirm
+
+Or interactively (script will prompt):
+  .\windo_uninstall.ps1
+
+Removes WINDO marker blocks from known current-user PowerShell profiles
+(pwsh and Windows PowerShell) without touching all-users profiles.
+===================================================================== #>
+
+param(
+    [switch]$Confirm,
+    [switch]$KeepSnapshots
+)
+
+$ErrorActionPreference = "Stop"
+
+$BeginMarker = "# >>> WINDO-BEGIN >>>"
+$EndMarker   = "# <<< WINDO-END <<<"
+$TaskMain    = "WindoElevatedRunner"
+$TaskUpdate  = "WindoSelfUpdate"
+$SecureDir   = Join-Path $HOME ".pwsh_secure"
+$SnapshotDir = Join-Path (Join-Path $HOME "Documents") "windo"
+
+function Write-Utf8NoBomFile {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Content)
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+}
+
+function Get-WindoProfilePathList {
+    $set = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $addOne = {
+        param([string]$Path)
+        if ([string]::IsNullOrWhiteSpace($Path)) { return }
+        try {
+            $full = [System.IO.Path]::GetFullPath($Path)
+            [void]$set.Add($full)
+        } catch { }
+    }
+
+    try {
+        if ($PROFILE) {
+            & $addOne $PROFILE.CurrentUserCurrentHost
+            & $addOne $PROFILE.CurrentUserAllHosts
+        }
+    } catch {
+        & $addOne ([string]$PROFILE)
+    }
+
+    foreach ($candidate in @(
+        (Join-Path $HOME 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'),
+        (Join-Path $HOME 'Documents\PowerShell\Profile.ps1'),
+        (Join-Path $HOME 'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1'),
+        (Join-Path $HOME 'Documents\WindowsPowerShell\Profile.ps1')
+    )) {
+        & $addOne $candidate
+    }
+
+    return @($set)
+}
+
+function Remove-WindoProfileBlockFromPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (!(Test-Path -LiteralPath $Path)) {
+        Write-Host "[windo uninstall] Profile not present: $Path" -ForegroundColor DarkGray
+        return $false
+    }
+
+    try {
+        $text = Get-Content -Raw -LiteralPath $Path -ErrorAction Stop
+    } catch {
+        Write-Warning ("Could not read profile " + $Path + ": " + $_.Exception.Message)
+        return $false
+    }
+
+    $pattern = "(?ms)" + [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker) + "\r?\n?"
+    if ($text -notmatch $pattern) {
+        Write-Host "[windo uninstall] No WINDO block found in profile: $Path" -ForegroundColor DarkYellow
+        return $false
+    }
+
+    $updated = [regex]::Replace($text, $pattern, "")
+    $updated = $updated -replace "(\r?\n){3,}", "`r`n`r`n"
+    if ([string]::IsNullOrWhiteSpace($updated)) {
+        Write-Utf8NoBomFile -Path $Path -Content ""
+    } else {
+        Write-Utf8NoBomFile -Path $Path -Content ($updated.TrimEnd() + "`r`n")
+    }
+    Write-Host "[windo uninstall] Removed WINDO block from profile: $Path" -ForegroundColor Green
+    return $true
+}
+
+function Remove-WindoProfileBlocks {
+    $removed = 0
+    foreach ($path in @(Get-WindoProfilePathList)) {
+        if (Remove-WindoProfileBlockFromPath -Path $path) { $removed++ }
+    }
+    return $removed
+}
+
+Write-Host ""
+Write-Host "WINDO uninstall" -ForegroundColor Cyan
+Write-Host "  Tasks: $TaskMain, $TaskUpdate"
+Write-Host "  Profiles (current user):"
+foreach ($profilePath in @(Get-WindoProfilePathList)) {
+    Write-Host "    $profilePath"
+}
+Write-Host "  Secure dir: $SecureDir"
+Write-Host "  Documents snapshot: $SnapshotDir $(if ($KeepSnapshots) { '(keeping)' } else { '(removing)' })"
+Write-Host ""
+
+if (-not $Confirm) {
+    $choice = $Host.UI.PromptForChoice(
+        "",
+        "Remove WINDO tasks, profile blocks, and data from this user?",
+        @("&Yes", "&No"),
+        1
+    )
+    if ($choice -ne 0) {
+        Write-Host "Cancelled." -ForegroundColor Yellow
+        exit 0
+    }
+}
+
+foreach ($tn in @($TaskMain, $TaskUpdate)) {
+    try {
+        Unregister-ScheduledTask -TaskName $tn -Confirm:$false -ErrorAction Stop | Out-Null
+        Write-Host "[windo uninstall] Unregistered task: $tn" -ForegroundColor Green
+    } catch {
+        Write-Host "[windo uninstall] Task not present or could not remove: $tn" -ForegroundColor DarkYellow
+    }
+}
+
+$removedProfiles = Remove-WindoProfileBlocks
+Write-Host "[windo uninstall] Profile cleanup complete. Removed WINDO blocks from $removedProfiles file(s)." -ForegroundColor Cyan
+
+if (Test-Path $SecureDir) {
+    Get-ChildItem -Path $SecureDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "windo*" } | ForEach-Object {
+        try {
+            Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop
+            Write-Host "[windo uninstall] Removed: $($_.Name)" -ForegroundColor DarkGray
+        } catch {
+            Write-Warning "Could not remove $($_.FullName): $($_.Exception.Message)"
+        }
+    }
+    $remaining = @(Get-ChildItem -Path $SecureDir -Force -ErrorAction SilentlyContinue)
+    if ($remaining.Count -eq 0) {
+        try {
+            Remove-Item -Path $SecureDir -Force -ErrorAction Stop
+            Write-Host "[windo uninstall] Removed empty directory: $SecureDir" -ForegroundColor Green
+        } catch {
+            Write-Warning "Could not remove directory $SecureDir : $($_.Exception.Message)"
+        }
+    } else {
+        $nonWindo = $remaining | Where-Object { $_.Name -notlike "windo*" }
+        if ($nonWindo.Count -gt 0) {
+            Write-Host "[windo uninstall] Secure dir still contains non-WINDO items; left in place: $SecureDir" -ForegroundColor Yellow
+        }
+    }
+}
+
+if (-not $KeepSnapshots -and (Test-Path $SnapshotDir)) {
+    try {
+        Remove-Item -Path $SnapshotDir -Recurse -Force -ErrorAction Stop
+        Write-Host "[windo uninstall] Removed: $SnapshotDir" -ForegroundColor Green
+    } catch {
+        Write-Warning "Could not remove snapshot dir: $($_.Exception.Message)"
+    }
+} elseif ($KeepSnapshots) {
+    Write-Host "[windo uninstall] Kept Documents snapshot folder (--KeepSnapshots)." -ForegroundColor DarkGray
+}
+
+Write-Host ""
+Write-Host "WINDO uninstall finished. Open a new shell; 'windo' should be undefined until reinstalled." -ForegroundColor Cyan
+exit 0
+'@
+Write-Utf8NoBomFile -Path $UninstallPath -Content $UninstallContent
+
 $MainActionArgs   = Get-NoWindowActionArgs -ScriptPath $RunnerPath
 $UpdateActionArgs = Get-NoWindowActionArgs -ScriptPath $UpdateScript
 
@@ -568,6 +754,10 @@ $Manifest = [ordered]@{
             path = $UpdateScript
             sha256 = Get-FileHashString -Path $UpdateScript
         }
+        uninstall = [ordered]@{
+            path = $UninstallPath
+            sha256 = Get-FileHashString -Path $UninstallPath
+        }
     }
     generated = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 }
@@ -577,6 +767,68 @@ Remove-ExistingWindoBlockFromProfile
 Ensure-ProfileExists
 
 $WindoFunctionBody = @'
+function Invoke-WindoBundledUninstall {
+    [CmdletBinding()]
+    param(
+        [switch]$Confirm,
+        [switch]$KeepSnapshots,
+        [switch]$DownloadFresh
+    )
+
+    $SecureDir = Join-Path $HOME ".pwsh_secure"
+    $BundledUninstallPath = Join-Path $SecureDir "windo_uninstall.ps1"
+    $SnapshotUninstallPath = Join-Path (Join-Path $HOME "Documents") "windo\windo_uninstall.ps1"
+    $UnUrl = "https://raw.githubusercontent.com/l28bit/windo/Genisis/windo_uninstall.ps1"
+    $TempUn = $null
+    $ScriptPath = $null
+
+    try {
+        if (-not $DownloadFresh) {
+            if (Test-Path -LiteralPath $BundledUninstallPath) {
+                $ScriptPath = $BundledUninstallPath
+            } elseif (Test-Path -LiteralPath $SnapshotUninstallPath) {
+                $ScriptPath = $SnapshotUninstallPath
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($ScriptPath)) {
+            $TempUn = Join-Path $env:TEMP ("windo_uninstall_" + [Guid]::NewGuid().ToString("n") + ".ps1")
+            Write-Host "[windo] Downloading uninstaller..." -ForegroundColor Cyan
+            Invoke-RestMethod -Uri $UnUrl -OutFile $TempUn
+            if (!(Test-Path -LiteralPath $TempUn)) { throw "Download failed." }
+            if ((Get-Item -LiteralPath $TempUn).Length -lt 400) { throw "Uninstaller file size looks invalid." }
+            $ScriptPath = $TempUn
+        }
+
+        $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath)
+        if ($Confirm) { $argList += '-Confirm' }
+        if ($KeepSnapshots) { $argList += '-KeepSnapshots' }
+
+        Write-Host "[windo] Starting elevated uninstall (UAC). Approve the prompt to remove tasks, profile blocks, and WINDO data." -ForegroundColor Yellow
+        Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $argList -Wait
+    } catch {
+        Write-Host "[windo] uninstall: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  Run manually (elevated): powershell -ExecutionPolicy Bypass -File path\to\windo_uninstall.ps1" -ForegroundColor DarkGray
+    } finally {
+        if ($TempUn -and (Test-Path -LiteralPath $TempUn)) {
+            Remove-Item -LiteralPath $TempUn -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function windo-uninstall {
+    [CmdletBinding()]
+    param(
+        [switch]$Confirm,
+        [switch]$KeepSnapshots,
+        [switch]$DownloadFresh
+    )
+
+    Invoke-WindoBundledUninstall -Confirm:$Confirm -KeepSnapshots:$KeepSnapshots -DownloadFresh:$DownloadFresh
+}
+
+Set-Alias -Name windoremove -Value windo-uninstall -Scope Global -ErrorAction SilentlyContinue
+
 function windo {
     param(
         [Parameter(ValueFromRemainingArguments = $true)]
@@ -1519,6 +1771,30 @@ Use: windo prompt --json   (machine-readable bundle)
         (_json_envelope $commandName $payload) | ConvertTo-Json -Depth 14 | Write-Host
     }
 
+    function _windo_start_downloaded_installer([string]$ScriptPath) {
+        $runnerExe = "powershell.exe"
+        $pwshExe = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+        if ($pwshExe -and $pwshExe.Source) { $runnerExe = $pwshExe.Source }
+        $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath)
+        $shouldElevate = [Environment]::UserInteractive -and -not $env:CI
+
+        if ($shouldElevate) {
+            Write-Host "[windo] Requesting elevation for installer..." -ForegroundColor Yellow
+            try {
+                Start-Process -FilePath $runnerExe -Verb RunAs -ArgumentList $argList -Wait | Out-Null
+                return
+            } catch [System.ComponentModel.Win32Exception] {
+                if ($_.Exception.NativeErrorCode -eq 1223) {
+                    throw "Installer elevation was canceled. Re-run install-latest and approve the UAC prompt, or run the installer from an elevated PowerShell session."
+                }
+                throw
+            }
+        }
+
+        Write-Host "[windo] Running installer without elevation (non-interactive or CI session)." -ForegroundColor DarkYellow
+        & $runnerExe @argList
+    }
+
     function _windo_run_genisis_installer {
         param(
             [switch]$ForceContinue,
@@ -1570,11 +1846,8 @@ Use: windo prompt --json   (machine-readable bundle)
                 _windo_set_exit 0
                 return
             }
-            $runnerExe = "powershell.exe"
-            $pwshExe = Get-Command pwsh.exe -ErrorAction SilentlyContinue
-            if ($pwshExe) { $runnerExe = $pwshExe.Source }
-            Write-Host "[windo] Starting installer ($runnerExe). When it finishes, reload: . `$PROFILE" -ForegroundColor Yellow
-            & $runnerExe -NoProfile -ExecutionPolicy Bypass -File $TempInst
+            Write-Host "[windo] Starting installer. When it finishes, reload: . `$PROFILE" -ForegroundColor Yellow
+            _windo_start_downloaded_installer -ScriptPath $TempInst
         } catch {
             Write-Host "[windo] Could not install from Genisis: $($_.Exception.Message)" -ForegroundColor Red
             _windo_set_exit 1
@@ -2012,12 +2285,13 @@ Use: windo prompt --json   (machine-readable bundle)
             },
             [pscustomobject]@{
                 Name        = "uninstall"
+                Aliases     = @("remove")
                 Category    = "Core"
                 Summary     = "Run elevated uninstaller (tasks, profile block, WINDO secure files)."
-                Syntax      = @("windo uninstall")
-                Description = "Downloads and executes elevated uninstaller; removes scheduled tasks and secure artifacts."
-                Notes       = "You may still manually remove files under $env:USERPROFILE\Documents\windo\ after run."
-                Examples    = @("windo uninstall")
+                Syntax      = @("windo uninstall [--keep-snapshots] [--confirm] [--download-fresh]", "windo remove [same options]")
+                Description = "Uses the bundled local uninstaller when present, otherwise downloads it from Genisis, then starts an elevated uninstall."
+                Notes       = "Profile helper after load: windo-uninstall [-KeepSnapshots] [-Confirm] (alias: windoremove)."
+                Examples    = @("windo uninstall", "windo uninstall --keep-snapshots", "windo remove --download-fresh", "windo-uninstall -KeepSnapshots")
             },
             [pscustomobject]@{
                 Name        = "self-update"
@@ -2428,21 +2702,24 @@ Use: windo prompt --json   (machine-readable bundle)
         return
     }
 
-    if ($Command.Count -ge 1 -and $Command[0] -eq "uninstall") {
-        $UnUrl = "https://raw.githubusercontent.com/l28bit/windo/Genisis/windo_uninstall.ps1"
-        $TempUn = Join-Path $env:TEMP ("windo_uninstall_" + [Guid]::NewGuid().ToString("n") + ".ps1")
-        try {
-            _windo_invoke_rest_with_spinner -Uri $UnUrl -OutFile $TempUn -Label "Downloading uninstaller..."
-            if (!(Test-Path $TempUn)) { throw "Download failed." }
-            if ((Get-Item $TempUn).Length -lt 400) { throw "Uninstaller file size looks invalid." }
-            Write-Host "[windo] Starting elevated uninstall (UAC). Approve the prompt to remove tasks and WINDO data." -ForegroundColor Yellow
-            Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $TempUn) -Wait
-        } catch {
-            Write-Host "[windo] uninstall: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "  Run manually (elevated): powershell -ExecutionPolicy Bypass -File path\to\windo_uninstall.ps1" -ForegroundColor DarkGray
-        } finally {
-            if (Test-Path $TempUn) { Remove-Item $TempUn -Force -ErrorAction SilentlyContinue }
+    if ($Command.Count -ge 1 -and ($Command[0] -eq "uninstall" -or $Command[0] -eq "remove")) {
+        $uninstallConfirm = $false
+        $uninstallKeepSnapshots = $false
+        $uninstallDownloadFresh = $false
+        foreach ($ua in @($Command | Select-Object -Skip 1)) {
+            switch -Regex ([string]$ua) {
+                '^(--confirm|-confirm)$' { $uninstallConfirm = $true; continue }
+                '^(--keep-snapshots|-KeepSnapshots)$' { $uninstallKeepSnapshots = $true; continue }
+                '^(--download-fresh|--download)$' { $uninstallDownloadFresh = $true; continue }
+                default {
+                    Write-Host "[windo] uninstall: unknown argument '$ua'" -ForegroundColor Yellow
+                    Write-Host "  Supported: --confirm, --keep-snapshots, --download-fresh" -ForegroundColor DarkGray
+                    _windo_set_exit 2
+                    return
+                }
+            }
         }
+        Invoke-WindoBundledUninstall -Confirm:$uninstallConfirm -KeepSnapshots:$uninstallKeepSnapshots -DownloadFresh:$uninstallDownloadFresh
         return
     }
 
@@ -4693,6 +4970,7 @@ Write-Utf8NoBomFile -Path $PROFILE -Content ($profileText.TrimEnd() + "`r`n`r`n"
 if (!(Test-Path $SnapshotDir)) { New-Item -ItemType Directory -Path $SnapshotDir | Out-Null }
 Copy-Item $RunnerPath (Join-Path $SnapshotDir "windo_runner.ps1") -Force
 Copy-Item $UpdateScript (Join-Path $SnapshotDir "windo_self_update.ps1") -Force
+Copy-Item $UninstallPath (Join-Path $SnapshotDir "windo_uninstall.ps1") -Force
 Copy-Item $ManifestFile (Join-Path $SnapshotDir "windo_manifest.json") -Force
 
 $SnapshotInstaller = Join-Path $SnapshotDir "windo_install.ps1"
