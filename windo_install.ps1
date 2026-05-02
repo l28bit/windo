@@ -25,7 +25,7 @@ $WindoVersion = "3.3.0"
 $WindoBuiltinVerbs = @(
     'help', 'last', 'stats', 'history', 'report', 'dashboard', 'preflight', 'launchpad', 'export', 'self-update', 'version',
     'doctor', 'integrity', 'verify', 'log', 'cleanup', 'config', 'backups', 'context', 'trace', 'replay',
-    'theme', 'upgrade', 'install-latest', 'uninstall', 'remove', 'profile', 'keybindings',
+    'theme', 'upgrade', 'install-latest', 'uninstall', 'remove', 'profile', 'keybindings', 'completion',
     'modules', 'recipes', 'prompt', 'extras', 'dev', 'session', 'ai', 'repair', 'run'
 )
 $WindoBuiltinVerbsArrayLiteral = ($WindoBuiltinVerbs | ForEach-Object { "'$_'" }) -join ','
@@ -1671,6 +1671,55 @@ Use: windo prompt --json   (machine-readable bundle)
         }
     }
 
+    function _windo_normalize_completion_mode([string]$Mode) {
+        if ([string]::IsNullOrWhiteSpace($Mode)) { return "native-first" }
+        switch ($Mode.Trim().ToLowerInvariant()) {
+            "native" { return "native-first" }
+            "stealth" { return "native-first" }
+            "native-first" { return "native-first" }
+            "hybrid" { return "hybrid" }
+            "windo" { return "windo" }
+            "builtin" { return "windo" }
+            "builtins" { return "windo" }
+            "off" { return "off" }
+            "disabled" { return "off" }
+            default { return "native-first" }
+        }
+    }
+
+    function _windo_resolve_completion_policy {
+        $pref = _read_windo_prefs
+        $prefMode = $null
+        if ($pref -and $pref.PSObject.Properties.Name -contains 'completionMode') { $prefMode = [string]$pref.completionMode }
+
+        $envMode = [string]$env:WINDO_COMPLETION_MODE
+        $source = "default"
+        $raw = "native-first"
+        if (-not [string]::IsNullOrWhiteSpace($prefMode)) {
+            $raw = $prefMode
+            $source = "prefs"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($envMode)) {
+            $raw = $envMode
+            $source = "env"
+        }
+
+        $mode = _windo_normalize_completion_mode $raw
+        [pscustomobject]@{
+            mode = $mode
+            source = $source
+            environmentValue = $(if ([string]::IsNullOrWhiteSpace($envMode)) { $null } else { $envMode.Trim() })
+            preferenceValue = $(if ([string]::IsNullOrWhiteSpace($prefMode)) { $null } else { $prefMode.Trim() })
+            prefsFile = $PrefsFile
+            description = $(switch ($mode) {
+                "native-first" { "Delegate non-WINDO arguments to native PowerShell completion; WINDO built-ins still complete by name." }
+                "hybrid" { "Offer WINDO built-ins and native PowerShell command names at command start, then delegate non-builtins." }
+                "windo" { "Only complete WINDO built-ins; do not delegate to native command completion." }
+                "off" { "Disable WINDO argument completer registration." }
+            })
+        }
+    }
+
     function _windo_apply_runtime_keybindings {
         if (!(Get-Command Get-PSReadLineKeyHandler -ErrorAction SilentlyContinue)) { return $false }
         if (!(Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue)) { return $false }
@@ -2649,6 +2698,15 @@ Use: windo prompt --json   (machine-readable bundle)
                 Examples    = @("windo keybindings status --json", "windo keybindings doctor", "windo keybindings disable", "windo keybindings safe-reset")
             },
             [pscustomobject]@{
+                Name        = "completion"
+                Category    = "Shell Experience"
+                Summary     = "Control WINDO tab completion delegation."
+                Syntax      = @("windo completion [status]", "windo completion native-first|hybrid|windo|off|reset [--json]")
+                Description = "Controls whether the WINDO argument completer behaves like the native shell after the windo prefix, offers WINDO built-ins, or disables completion registration."
+                Notes       = "Default is native-first: non-WINDO input after 'windo ' delegates to PowerShell completion so WINDO feels transparent at command start. WINDO_COMPLETION_MODE overrides prefs for the current process."
+                Examples    = @("windo completion", "windo completion native-first", "windo completion hybrid --json", "windo completion reset")
+            },
+            [pscustomobject]@{
                 Name        = "profile"
                 Category    = "Shell Experience"
                 Summary     = "Show known profile paths and WINDO block presence."
@@ -3112,6 +3170,7 @@ Use: windo prompt --json   (machine-readable bundle)
         $mcc = _windo_max_command_chars
         $effJson = _windo_resolve_json_envelope
         $kbPolicy = _windo_resolve_keybinding_policy
+        $completionPolicy = _windo_resolve_completion_policy
         $jsonEnvNote = "CLI JSON shape: schemaVersion=$($effJson.schemaLabel), meta=$(if ($effJson.includeMeta) { 'on' } else { 'off' }); env wins over $($PrefsFile); see windo theme"
         $keybindingNote = if ($kbPolicy.enabled) { "enabled: chord=$($kbPolicy.chord) (source=$($kbPolicy.chordSource))" } else { "disabled" + $(if ($kbPolicy.disabledSource) { " by $($kbPolicy.disabledSource)" } else { "" }) }
         $rows = [System.Collections.ArrayList]@(
@@ -3130,6 +3189,7 @@ Use: windo prompt --json   (machine-readable bundle)
             [pscustomobject]@{ name = "WINDO_AUTO_DETECT_ALT_BINDINGS"; environmentValue = $(if ($env:WINDO_AUTO_DETECT_ALT_BINDINGS) { [string]$env:WINDO_AUTO_DETECT_ALT_BINDINGS } else { $null }); effectiveNote = $(if ($kbPolicy.autoDetectAlt) { "alt-chord auto fallback enabled" } else { "alt-chord auto fallback disabled" }) }
             [pscustomobject]@{ name = "WINDO_KEYBINDING_FALLBACK_CHORD"; environmentValue = $(if ($env:WINDO_KEYBINDING_FALLBACK_CHORD) { [string]$env:WINDO_KEYBINDING_FALLBACK_CHORD } else { $null }); effectiveNote = "fallback chord: $($kbPolicy.fallbackChord)" }
             [pscustomobject]@{ name = "WINDO_KEYBINDING_POLICY"; environmentValue = $null; effectiveNote = "effective source chord=$($kbPolicy.chordSource); enabled=$($kbPolicy.enabled)" }
+            [pscustomobject]@{ name = "WINDO_COMPLETION_MODE"; environmentValue = $(if ($env:WINDO_COMPLETION_MODE) { [string]$env:WINDO_COMPLETION_MODE } else { $null }); effectiveNote = "mode=$($completionPolicy.mode) (source=$($completionPolicy.source)); see windo completion" }
             [pscustomobject]@{ name = "WINDO_EXTRAS_INDEX_URL"; environmentValue = $(if ($env:WINDO_EXTRAS_INDEX_URL) { [string]$env:WINDO_EXTRAS_INDEX_URL } else { $null }); effectiveNote = "resolved extras index: $(_windo_extras_index_url)" }
         )
         if ($JsonOutput) {
@@ -3137,6 +3197,7 @@ Use: windo prompt --json   (machine-readable bundle)
                 settings = @($rows)
                 secureDir = $SecureDir
                 keybindingPolicy = $kbPolicy
+                completionPolicy = $completionPolicy
                 extrasIndexUrl = (_windo_extras_index_url)
                 exitCode = 0
             }
@@ -3152,6 +3213,73 @@ Use: windo prompt --json   (machine-readable bundle)
             Write-Host "    effective: $($r.effectiveNote)" -ForegroundColor DarkGray
         }
         Write-Host "  Read-only: `$global:WINDO_EXIT_CODE (doctor / integrity / verify / stats validation)" -ForegroundColor DarkGray
+        _windo_set_exit 0
+        return
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "completion") {
+        $sub = "status"
+        if ($Command.Count -ge 2) { $sub = [string]$Command[1].Trim().ToLowerInvariant() }
+        $validModes = @("native-first", "native", "stealth", "hybrid", "windo", "builtin", "builtins", "off", "disabled")
+        if ($sub -in $validModes) {
+            $mode = _windo_normalize_completion_mode $sub
+            $map = _windo_read_windo_prefs_map
+            $map['schemaVersion'] = "1.0"
+            $map['completionMode'] = $mode
+            if (-not (_windo_save_windo_prefs $map)) {
+                if ($JsonOutput) { _emit_json "completion" @{ error = "could not write prefs"; prefsFile = $PrefsFile; exitCode = 2 } }
+                else { Write-Host "[windo] completion: could not write $PrefsFile" -ForegroundColor Red }
+                _windo_set_exit 2
+                return
+            }
+            $policy = _windo_resolve_completion_policy
+            if ($JsonOutput) { _emit_json "completion" @{ saved = $true; completionPolicy = $policy; exitCode = 0 } }
+            else {
+                Write-Host "[windo] completion mode saved: $($policy.mode)" -ForegroundColor Green
+                Write-Host "  Source now : $($policy.source)" -ForegroundColor DarkGray
+                Write-Host "  Effect     : $($policy.description)" -ForegroundColor DarkGray
+            }
+            _windo_set_exit 0
+            return
+        }
+        if ($sub -eq "reset") {
+            $map = _windo_read_windo_prefs_map
+            if ($map.Contains('completionMode')) { $map.Remove('completionMode') }
+            $map['schemaVersion'] = "1.0"
+            if (-not (_windo_save_windo_prefs $map)) {
+                if ($JsonOutput) { _emit_json "completion" @{ error = "could not write prefs"; prefsFile = $PrefsFile; exitCode = 2 } }
+                else { Write-Host "[windo] completion reset: could not write $PrefsFile" -ForegroundColor Red }
+                _windo_set_exit 2
+                return
+            }
+            $policy = _windo_resolve_completion_policy
+            if ($JsonOutput) { _emit_json "completion" @{ reset = $true; completionPolicy = $policy; exitCode = 0 } }
+            else {
+                Write-Host "[windo] completion mode reset to default: $($policy.mode)" -ForegroundColor Green
+                Write-Host "  Override with env WINDO_COMPLETION_MODE or save with windo completion <mode>." -ForegroundColor DarkGray
+            }
+            _windo_set_exit 0
+            return
+        }
+        if ($sub -ne "status" -and $sub -ne "") {
+            if ($JsonOutput) { _emit_json "completion" @{ error = "expected status | native-first | hybrid | windo | off | reset"; exitCode = 2 } }
+            else {
+                Write-Host "[windo] completion: expected status | native-first | hybrid | windo | off | reset" -ForegroundColor Yellow
+                Write-Host "  Example: windo completion native-first" -ForegroundColor DarkGray
+            }
+            _windo_set_exit 2
+            return
+        }
+        $policy = _windo_resolve_completion_policy
+        if ($JsonOutput) { _emit_json "completion" @{ completionPolicy = $policy; exitCode = 0 } }
+        else {
+            Write-Host "[windo] completion" -ForegroundColor Cyan
+            Write-Host "  Mode       : $($policy.mode)" -ForegroundColor Yellow
+            Write-Host "  Source     : $($policy.source)" -ForegroundColor DarkGray
+            Write-Host "  Env        : $(if ($policy.environmentValue) { $policy.environmentValue } else { '(unset)' })" -ForegroundColor DarkGray
+            Write-Host "  Pref       : $(if ($policy.preferenceValue) { $policy.preferenceValue } else { '(none)' })" -ForegroundColor DarkGray
+            Write-Host "  Effect     : $($policy.description)" -ForegroundColor DarkGray
+        }
         _windo_set_exit 0
         return
     }
@@ -5499,28 +5627,85 @@ try {
 '@
 
 $WindoCompleterBlock = @'
+function __windo_normalize_completion_mode([string]$Mode) {
+    if ([string]::IsNullOrWhiteSpace($Mode)) { return "native-first" }
+    switch ($Mode.Trim().ToLowerInvariant()) {
+        "native" { return "native-first" }
+        "stealth" { return "native-first" }
+        "native-first" { return "native-first" }
+        "hybrid" { return "hybrid" }
+        "windo" { return "windo" }
+        "builtin" { return "windo" }
+        "builtins" { return "windo" }
+        "off" { return "off" }
+        "disabled" { return "off" }
+        default { return "native-first" }
+    }
+}
+
+function __windo_resolve_completion_mode {
+    $pref = $null
+    try { $pref = __windo_read_windo_prefs } catch { $pref = $null }
+    $prefMode = $null
+    if ($pref -and $pref.PSObject.Properties.Name -contains 'completionMode') { $prefMode = [string]$pref.completionMode }
+    $envMode = [string]$env:WINDO_COMPLETION_MODE
+    if (-not [string]::IsNullOrWhiteSpace($envMode)) { return (__windo_normalize_completion_mode $envMode) }
+    if (-not [string]::IsNullOrWhiteSpace($prefMode)) { return (__windo_normalize_completion_mode $prefMode) }
+    return "native-first"
+}
+
 function Register-WindoArgumentCompleter {
     if ($global:__WindoArgCompleterRegistered) { return }
     if (-not (Get-Command TabExpansion2 -ErrorAction SilentlyContinue)) {
         Write-Warning "WINDO: TabExpansion2 not available; delegated tab completion skipped."
         return
     }
-    Register-ArgumentCompleter -CommandName windo -ScriptBlock {
-        param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+    Register-ArgumentCompleter -CommandName windo -Native -ScriptBlock {
+        param($wordToComplete, $commandAst, $cursorPosition)
         $builtin = [string[]]@(__WINDO_BUILTIN_ARRAY__, '!!')
         try {
+            $mode = __windo_resolve_completion_mode
+            if ($mode -eq "off") { return }
             if ($null -eq $commandAst) { return }
             $line = $commandAst.Extent.Text
             if ([string]::IsNullOrWhiteSpace($line)) { return }
             $m = [regex]::Match($line, '^\s*windo\s+', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
             if (-not $m.Success) { return }
             $delegate = $line.Substring($m.Length)
-            if ([string]::IsNullOrWhiteSpace($delegate)) { return }
-            $firstTok = ($delegate.TrimStart() -split '\s+', 2)[0]
-            if ($firstTok) {
+            $trimmedDelegate = $delegate.TrimStart()
+            if ($trimmedDelegate -match '^(--json|--dry-run|--non-interactive|-n|-Json|-DryRun)\s+') {
+                $delegate = $trimmedDelegate -replace '^(--json|--dry-run|--non-interactive|-n|-Json|-DryRun)\s+', ''
+                $trimmedDelegate = $delegate.TrimStart()
+            }
+            if ($trimmedDelegate -match '^--\s+') {
+                $delegate = $trimmedDelegate -replace '^--\s+', ''
+                $trimmedDelegate = $delegate.TrimStart()
+            }
+            if ([string]::IsNullOrWhiteSpace($trimmedDelegate)) {
+                if ($mode -eq "native-first") { return }
                 foreach ($b in $builtin) {
-                    if ($firstTok -ceq $b -or $firstTok -ieq $b) { return }
+                    [System.Management.Automation.CompletionResult]::new($b, $b, [System.Management.Automation.CompletionResultType]::ParameterValue, "WINDO command: $b")
                 }
+                return
+            }
+            $firstTok = ($trimmedDelegate -split '\s+', 2)[0]
+            $builtinMatches = @($builtin | Where-Object { $_ -like "$firstTok*" } | Sort-Object -Unique)
+            $isExactBuiltin = $false
+            foreach ($b in $builtin) {
+                if ($firstTok -ceq $b -or $firstTok -ieq $b) { $isExactBuiltin = $true; break }
+            }
+            if ($isExactBuiltin) { return }
+            if ($mode -eq "native-first" -and $builtinMatches.Count -gt 0) {
+                foreach ($b in $builtinMatches) {
+                    [System.Management.Automation.CompletionResult]::new($b, $b, [System.Management.Automation.CompletionResultType]::ParameterValue, "WINDO command: $b")
+                }
+                return
+            }
+            if ($mode -ne "native-first") {
+                foreach ($b in $builtinMatches) {
+                    [System.Management.Automation.CompletionResult]::new($b, $b, [System.Management.Automation.CompletionResultType]::ParameterValue, "WINDO command: $b")
+                }
+                if ($mode -eq "windo") { return }
             }
             $cursor = $delegate.Length
             if (-not [string]::IsNullOrEmpty($wordToComplete)) {

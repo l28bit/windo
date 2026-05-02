@@ -4,6 +4,17 @@ All notable changes to WINDO are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **V5 runway: completion control surface:** `windo completion` now reports and persists the WINDO argument-completion mode. Modes are `native-first` (default), `hybrid`, `windo`, `off`, plus `reset`; `WINDO_COMPLETION_MODE` can override prefs for the current process.
+
+### Changed
+
+- **Native-first tab completion:** the profile completer now registers as a native argument completer and delegates non-WINDO input after the `windo` prefix to PowerShell completion. `windo Get-Ch<Tab>` behaves like `Get-Ch<Tab>`, while `windo key<Tab>` still completes WINDO built-ins.
+- **Configuration visibility:** `windo config --json` now includes `completionPolicy`, and text output includes the effective `WINDO_COMPLETION_MODE`.
+
 ## [3.3.0] - 2026-05-01
 
 Release notes: [`docs/releases/RELEASE_NOTES_v3.3.0.md`](docs/releases/RELEASE_NOTES_v3.3.0.md).
