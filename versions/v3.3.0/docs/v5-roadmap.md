@@ -15,7 +15,7 @@ WINDO’s major-version path should keep the product useful every step of the wa
 | Version | Codename | Theme | Status |
 |---|---|---|---|
 | 3.4.0 | Quiet Shell | Make WINDO disappear until it is useful. | In progress |
-| 3.5.0 | Trust Console | Make trust state explicit before elevation. | Planned |
+| 3.5.0 | Trust Console | Make trust state explicit before elevation. | In progress |
 | 3.6.0 | Syntax Forge | Make common elevation workflows shorter and safer. | Planned |
 | 4.0.0 | Operator Mesh | Turn modules, recipes, extras, prompt, and launchpad into one coherent platform layer. | Planned |
 | 4.5.0 | Signal Deck | Make diagnosis and audit evidence faster to consume. | Planned |
@@ -32,6 +32,7 @@ WINDO’s major-version path should keep the product useful every step of the wa
 
 ### 3.5.0 Trust Console
 
+- `windo trust` and `windo trust --online --json`.
 - Explicit install trust summary.
 - Provenance and checksum posture in one command.
 - Profile/task drift remediation guidance.
@@ -67,4 +68,4 @@ WINDO’s major-version path should keep the product useful every step of the wa
 
 ## CLI surface
 
-Use `windo roadmap` or `windo roadmap --json` to inspect this release train from the installed profile.
+Use `windo roadmap` or `windo roadmap --json` to inspect this release train from the installed profile. Use `windo trust` to inspect the first Trust Console slice.

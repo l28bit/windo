@@ -88,6 +88,7 @@ Several commands mirror **`$global:WINDO_EXIT_CODE`** inside **`payload.exitCode
 | `doctor` | 0, 2, 3, 6 | Health / tasks / integrity-style signals |
 | `integrity` | 0, 3, 6 | Overall component state |
 | `verify` | 0, 2, 4 | Log missing/empty vs chain failure |
+| `trust` | 0, 2, 3, 4 | **V5 runway** **0** = trusted, **2** = bad args, **3** = attention, **4** = repair required |
 | `stats` | 0 | Success; invalid filters exit **before** JSON is printed (host exit **2**, no envelope) |
 | `profile` | 0 | Listing only |
 | `config` | 0 | Listing only (see **`config`** payload; v3.2.1+ adds **`extrasIndexUrl`**) |
@@ -153,6 +154,26 @@ The **`settings`** array is the machine-readable source of truth for env-driven 
 | `principles` | array | Release-train guardrails. |
 | `docs` | string | Roadmap doc path. |
 | `exitCode` | number | **0** |
+
+## `trust` payload (V5 runway)
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `windoVersion` | string | Installed WINDO version. |
+| `trustLevel` | string | `TRUSTED`, `ATTENTION`, or `REPAIR`. |
+| `score` | number | Local trust score from 0 to 100. |
+| `online` | bool | Whether published checksum validation was requested. |
+| `isElevated` | bool | Whether the current shell is elevated; online checksum fetches are blocked when true. |
+| `checks` | array | Check rows with `id`, `label`, `ok`, `severity`, `detail`, and `fixCommand`. |
+| `tasks` | object | Main/update scheduled task presence and names. |
+| `integrity` | object | Same runner/updater manifest state as `windo integrity`. |
+| `audit` | object | Same audit-chain verification state as `windo verify`. |
+| `profile` | object | Current profile WINDO block status. |
+| `completionPolicy` | object | Effective tab-completion policy. |
+| `installerSnapshot` | object | Local `Documents\windo\windo_install.ps1` path, presence, and line-ending-normalized published-text SHA-256 when available. |
+| `publishedChecksum` | object | `requested`, `status`, `url`, `sha256`, `matchesSnapshot`, and `error`. |
+| `recommendations` | array | Remediation guidance strings. |
+| `exitCode` | number | **0** trusted, **3** attention, **4** repair required. |
 
 ## `session` payload (v3.2.0+ / v3.2.1+)
 

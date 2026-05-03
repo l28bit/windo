@@ -24,7 +24,7 @@ $WindoVersion = "3.3.0"
 # Single source of truth for embedded profile: completer skip-list (plus '!!') and windo last-command first-token exclusions.
 $WindoBuiltinVerbs = @(
     'help', 'last', 'stats', 'history', 'report', 'dashboard', 'preflight', 'launchpad', 'export', 'self-update', 'version',
-    'doctor', 'integrity', 'verify', 'log', 'cleanup', 'config', 'backups', 'context', 'trace', 'replay',
+    'doctor', 'integrity', 'verify', 'trust', 'log', 'cleanup', 'config', 'backups', 'context', 'trace', 'replay',
     'theme', 'upgrade', 'install-latest', 'uninstall', 'remove', 'profile', 'keybindings', 'completion', 'roadmap',
     'modules', 'recipes', 'prompt', 'extras', 'dev', 'session', 'ai', 'repair', 'run'
 )
@@ -1329,6 +1329,27 @@ function windo {
         try { (Get-FileHash -Path $Path -Algorithm SHA256).Hash } catch { "(hash-error)" }
     }
 
+    function _windo_published_text_file_sha256([string]$Path) {
+        if (!(Test-Path -LiteralPath $Path)) { return "(missing)" }
+        try {
+            $bytes = [System.IO.File]::ReadAllBytes($Path)
+            $normalized = [System.Collections.Generic.List[byte]]::new()
+            for ($i = 0; $i -lt $bytes.Length; $i++) {
+                if ($bytes[$i] -eq 13 -and ($i + 1) -lt $bytes.Length -and $bytes[$i + 1] -eq 10) { continue }
+                [void]$normalized.Add($bytes[$i])
+            }
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            try {
+                $hashBytes = $sha.ComputeHash($normalized.ToArray())
+                return (-join ($hashBytes | ForEach-Object { $_.ToString("X2") }))
+            } finally {
+                $sha.Dispose()
+            }
+        } catch {
+            return "(hash-error)"
+        }
+    }
+
     function _expected_hash([string]$Key) {
         if (!(Test-Path $ManifestFile)) { return "(manifest-missing)" }
         try {
@@ -1734,8 +1755,8 @@ Use: windo prompt --json   (machine-readable bundle)
                 version = "3.5.0"
                 codename = "Trust Console"
                 theme = "Make trust state explicit before elevation."
-                focus = @("policy summary", "installer provenance", "profile and task drift repair", "clear remediation commands")
-                status = "planned"
+                focus = @("windo trust", "policy summary", "installer provenance", "profile and task drift repair", "clear remediation commands")
+                status = "in-progress"
                 operatorValue = "Operators can see whether the local install is trusted, current, and repairable before running privileged work."
             },
             [pscustomobject]@{
@@ -2469,16 +2490,153 @@ Use: windo prompt --json   (machine-readable bundle)
         $profStatus = _windo_read_profile_windo_status ([string]$PROFILE)
         [void]$rows.Add((_windo_new_check_row "profile-block" "Current profile has WINDO block" ([bool]$profStatus.hasWindoBlock) $(if ($profStatus.hasWindoBlock) { "profile block found: $PROFILE" } else { "no WINDO block found in current profile" }) ". `$PROFILE; windo install-latest" $(if ($profStatus.hasWindoBlock) { "info" } else { "warn" })))
 
+        $trust = _windo_trust_posture $false
+        [void]$rows.Add((_windo_new_check_row "trust-posture" "Trust posture" ($trust.trustLevel -ne "REPAIR") ("level=$($trust.trustLevel), score=$($trust.score)") "windo trust" $(if ($trust.trustLevel -eq "TRUSTED") { "info" } elseif ($trust.trustLevel -eq "ATTENTION") { "warn" } else { "critical" })))
+
         $policy = _windo_resolve_keybinding_policy
         [void]$rows.Add((_windo_new_check_row "keybindings" "Keybinding policy" ([bool]$policy.enabled) $(if ($policy.enabled) { "enabled chord=$($policy.chord), fallback=$($policy.fallbackChord)" } else { "disabled" }) "windo keybindings safe-reset" $(if ($policy.enabled) { "info" } else { "warn" })))
 
         return @($rows.ToArray())
     }
 
+    function _windo_installer_checksum_url {
+        return "https://raw.githubusercontent.com/l28bit/windo/Genisis/checksums/installer.sha256"
+    }
+
+    function _windo_trust_posture([bool]$Online) {
+        $score = 100
+        $recommendations = [System.Collections.ArrayList]@()
+        $checks = [System.Collections.ArrayList]@()
+        $isElev = _windo_is_process_elevated
+
+        if ($isElev) {
+            $score -= 10
+            [void]$recommendations.Add("Use a normal non-elevated PowerShell window for install-latest and online checksum checks.")
+        }
+        [void]$checks.Add((_windo_new_check_row "shell-elevation" "Current shell is non-elevated" (-not $isElev) $(if ($isElev) { "elevated shell" } else { "non-elevated shell" }) "Start a normal PowerShell window" $(if ($isElev) { "warn" } else { "info" })))
+
+        $mt = $false; $ut = $false
+        try { Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null; $mt = $true } catch {}
+        try { Get-ScheduledTask -TaskName $TaskUpdate -ErrorAction Stop | Out-Null; $ut = $true } catch {}
+        if (-not $mt) { $score -= 25; [void]$recommendations.Add("Repair the elevated runner task by running the installer from an elevated PowerShell session.") }
+        if (-not $ut) { $score -= 10; [void]$recommendations.Add("Repair the self-update task by running the installer from an elevated PowerShell session.") }
+        [void]$checks.Add((_windo_new_check_row "task-main" "Elevated runner task" $mt $(if ($mt) { "present: $TaskName" } else { "missing: $TaskName" }) ".\windo_install.ps1" $(if ($mt) { "info" } else { "critical" })))
+        [void]$checks.Add((_windo_new_check_row "task-update" "Self-update task" $ut $(if ($ut) { "present: $TaskUpdate" } else { "missing: $TaskUpdate" }) ".\windo_install.ps1" $(if ($ut) { "info" } else { "warn" })))
+
+        $ix = _integrity_status
+        if ($ix.OverallLevel -ne "OK") {
+            if ($ix.OverallLevel -eq "TAMPERED") { $score -= 40 } else { $score -= 25 }
+            [void]$recommendations.Add("Run windo integrity and reinstall if runner/updater hashes do not match the local manifest.")
+        }
+        [void]$checks.Add((_windo_new_check_row "runner-integrity" "Runner/updater integrity" ($ix.OverallLevel -eq "OK") ("overall=$($ix.OverallLevel), runner=$($ix.RunnerLevel), updater=$($ix.UpdaterLevel)") "windo integrity" $(if ($ix.OverallLevel -eq "OK") { "info" } elseif ($ix.OverallLevel -eq "TAMPERED") { "critical" } else { "warn" })))
+
+        $vf = _windo_verify_log_state
+        if (-not [bool]$vf.verifyOk) {
+            $score -= 15
+            [void]$recommendations.Add("Run windo verify and inspect audit-chain drift before relying on historical output.")
+        }
+        [void]$checks.Add((_windo_new_check_row "audit-chain" "Audit chain" ([bool]$vf.verifyOk) $(if ($vf.verifyOk) { "chain OK, physical lines=$($vf.physicalLines)" } else { "$($vf.error), line=$($vf.failureLine)" }) "windo verify" $(if ($vf.verifyOk) { "info" } else { "warn" })))
+
+        $profStatus = _windo_read_profile_windo_status ([string]$PROFILE)
+        if (-not [bool]$profStatus.hasWindoBlock) {
+            $score -= 10
+            [void]$recommendations.Add("Reload or reinstall the profile block so this host loads the current WINDO function.")
+        }
+        [void]$checks.Add((_windo_new_check_row "profile-block" "Current profile has WINDO block" ([bool]$profStatus.hasWindoBlock) $(if ($profStatus.hasWindoBlock) { "profile block found" } else { "profile block missing" }) ". `$PROFILE" $(if ($profStatus.hasWindoBlock) { "info" } else { "warn" })))
+
+        $snapshotDir = Join-Path (Join-Path $HOME "Documents") "windo"
+        $snapshotInstaller = Join-Path $snapshotDir "windo_install.ps1"
+        $snapshotHash = $null
+        $snapshotPresent = Test-Path -LiteralPath $snapshotInstaller
+        if ($snapshotPresent) {
+            $snapshotHash = _windo_published_text_file_sha256 $snapshotInstaller
+        } else {
+            $score -= 8
+            [void]$recommendations.Add("Install or repair WINDO so Documents\windo\windo_install.ps1 exists as the local snapshot.")
+        }
+
+        $published = [pscustomobject]@{
+            requested = [bool]$Online
+            status = $(if ($Online) { "pending" } else { "not-requested" })
+            url = (_windo_installer_checksum_url)
+            sha256 = $null
+            matchesSnapshot = $null
+            error = $null
+        }
+        if ($Online) {
+            if ($isElev) {
+                $published.status = "blocked-elevated"
+                $score -= 5
+                [void]$recommendations.Add("Online checksum validation is blocked while elevated; rerun windo trust --online from a normal shell.")
+            } else {
+                try {
+                    $checksumUrl = _windo_installer_checksum_url
+                    $resp = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+                    $published.status = "available"
+                    $published.url = $checksumUrl
+                    $published.sha256 = (_windo_normalize_published_installer_sha256 ([string]$resp.Content))
+                    $published.error = $null
+                } catch {
+                    $published.status = "unavailable"
+                    $published.error = $_.Exception.Message
+                }
+                if ($published.status -eq "available" -and (_is_sha256_hex $published.sha256) -and $snapshotHash -and (_is_sha256_hex $snapshotHash)) {
+                    $published.matchesSnapshot = ($snapshotHash -eq $published.sha256)
+                    if (-not $published.matchesSnapshot) {
+                        $score -= 35
+                        [void]$recommendations.Add("Snapshot installer hash does not match the published checksum; run windo install-latest from a normal shell.")
+                    }
+                } elseif ($published.status -eq "available") {
+                    $score -= 8
+                    [void]$recommendations.Add("Published checksum was reachable but could not be normalized or compared to the local snapshot.")
+                } else {
+                    $score -= 5
+                    [void]$recommendations.Add("Published checksum was not reachable; retry when network access is available.")
+                }
+            }
+        }
+
+        [void]$checks.Add((_windo_new_check_row "installer-snapshot" "Local installer snapshot" $snapshotPresent $(if ($snapshotPresent) { "publishedTextSha256=$snapshotHash" } else { "missing: $snapshotInstaller" }) "windo install-latest" $(if ($snapshotPresent) { "info" } else { "warn" })))
+        if ($Online) {
+            $checksumOk = ($published.status -eq "available" -and $published.matchesSnapshot -eq $true)
+            [void]$checks.Add((_windo_new_check_row "published-checksum" "Published installer checksum" $checksumOk ("status=$($published.status), matchesSnapshot=$($published.matchesSnapshot)") "windo trust --online" $(if ($checksumOk) { "info" } elseif ($published.matchesSnapshot -eq $false) { "critical" } else { "warn" })))
+        }
+
+        if ($score -lt 0) { $score = 0 }
+        $trustLevel = "TRUSTED"
+        $exitCode = 0
+        if ($score -lt 70 -or $ix.OverallLevel -eq "TAMPERED" -or ($published.matchesSnapshot -eq $false)) {
+            $trustLevel = "REPAIR"
+            $exitCode = 4
+        } elseif ($score -lt 90 -or $ix.OverallLevel -ne "OK" -or (-not $mt)) {
+            $trustLevel = "ATTENTION"
+            $exitCode = 3
+        }
+
+        [pscustomobject]@{
+            windoVersion = $WindoVersion
+            trustLevel = $trustLevel
+            score = $score
+            exitCode = $exitCode
+            online = [bool]$Online
+            isElevated = $isElev
+            checks = @($checks.ToArray())
+            tasks = [pscustomobject]@{ main = $mt; update = $ut; mainName = $TaskName; updateName = $TaskUpdate }
+            integrity = $ix
+            audit = $vf
+            profile = $profStatus
+            completionPolicy = (_windo_resolve_completion_policy)
+            installerSnapshot = [pscustomobject]@{ path = $snapshotInstaller; present = $snapshotPresent; sha256 = $snapshotHash }
+            publishedChecksum = $published
+            recommendations = @($recommendations.ToArray())
+        }
+    }
+
     function _windo_operator_actions {
         return @(
             [pscustomobject]@{ title = "Refresh profile"; command = ". `$PROFILE"; note = "Load the newest WINDO function in this shell." },
             [pscustomobject]@{ title = "Preflight"; command = "windo preflight"; note = "Readiness scan with fix commands." },
+            [pscustomobject]@{ title = "Trust Console"; command = "windo trust"; note = "Local trust posture and checksum readiness." },
             [pscustomobject]@{ title = "Dashboard HTML"; command = "windo dashboard --html"; note = "Local visual health report." },
             [pscustomobject]@{ title = "Launchpad"; command = "windo launchpad --open"; note = "Open the special edition command center." },
             [pscustomobject]@{ title = "Integrity"; command = "windo integrity"; note = "Runner and updater file integrity." },
@@ -2767,6 +2925,15 @@ Use: windo prompt --json   (machine-readable bundle)
                 Description = "Displays the planned sequence from the current 3.x hardening train through 4.x platform layering and the V5 Special Edition target."
                 Notes       = "Roadmap output is local, static, and intentionally non-binding; it is a product/platform planning aid shipped with the installer."
                 Examples    = @("windo roadmap", "windo roadmap --json")
+            },
+            [pscustomobject]@{
+                Name        = "trust"
+                Category    = "Security"
+                Summary     = "Show local trust posture and optional installer checksum validation."
+                Syntax      = @("windo trust [--json]", "windo trust --online [--json]")
+                Description = "Scores local WINDO trust posture from task presence, runner/updater manifest integrity, audit-chain verification, profile block presence, completion policy, and local installer snapshot hash."
+                Notes       = "--online fetches the published installer checksum only from a non-elevated shell; elevated shells are blocked from remote checksum fetches by policy."
+                Examples    = @("windo trust", "windo trust --json", "windo trust --online --json")
             },
             [pscustomobject]@{
                 Name        = "profile"
@@ -3185,6 +3352,57 @@ Use: windo prompt --json   (machine-readable bundle)
             }
         }
         Invoke-WindoBundledUninstall -Confirm:$uninstallConfirm -KeepSnapshots:$uninstallKeepSnapshots -DownloadFresh:$uninstallDownloadFresh
+        return
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "trust") {
+        $online = $false
+        $badArgs = [System.Collections.ArrayList]@()
+        for ($ti = 1; $ti -lt $Command.Count; $ti++) {
+            $ta = [string]$Command[$ti]
+            if ($ta -eq "--online") { $online = $true; continue }
+            if ($ta -eq "--offline") { $online = $false; continue }
+            if ($ta -eq "") { continue }
+            [void]$badArgs.Add($ta)
+        }
+        if ($badArgs.Count -gt 0) {
+            if ($JsonOutput) { _emit_json "trust" @{ error = "expected --online | --offline"; invalidArgs = @($badArgs.ToArray()); exitCode = 2 } }
+            else {
+                Write-Host "[windo] trust: expected --online | --offline" -ForegroundColor Yellow
+                Write-Host "  Examples: windo trust ; windo trust --online --json" -ForegroundColor DarkGray
+            }
+            _windo_set_exit 2
+            return
+        }
+        $posture = _windo_trust_posture $online
+        if ($JsonOutput) {
+            _emit_json "trust" $posture
+            _windo_set_exit ([int]$posture.exitCode)
+            return
+        }
+        $levelColor = if ($posture.trustLevel -eq "TRUSTED") { "Green" } elseif ($posture.trustLevel -eq "ATTENTION") { "Yellow" } else { "Red" }
+        Write-Host "[windo] Trust Console" -ForegroundColor Cyan
+        Write-Host ("  Level    : {0} ({1}/100)" -f $posture.trustLevel, $posture.score) -ForegroundColor $levelColor
+        Write-Host "  Online   : $($posture.publishedChecksum.status)" -ForegroundColor DarkGray
+        Write-Host "  Integrity: overall=$($posture.integrity.OverallLevel), runner=$($posture.integrity.RunnerLevel), updater=$($posture.integrity.UpdaterLevel)" -ForegroundColor DarkGray
+        Write-Host "  Audit    : $(if ($posture.audit.verifyOk) { 'OK' } else { 'CHECK' })" -ForegroundColor DarkGray
+        Write-Host "  Tasks    : main=$(if ($posture.tasks.main) { 'present' } else { 'missing' }), update=$(if ($posture.tasks.update) { 'present' } else { 'missing' })" -ForegroundColor DarkGray
+        Write-Host "  Snapshot : $($posture.installerSnapshot.path)" -ForegroundColor DarkGray
+        if ($posture.installerSnapshot.sha256) {
+            Write-Host "             sha256=$($posture.installerSnapshot.sha256)" -ForegroundColor DarkGray
+        }
+        if ($posture.publishedChecksum.requested) {
+            Write-Host "  Published: $($posture.publishedChecksum.url)" -ForegroundColor DarkGray
+            Write-Host "             sha256=$(if ($posture.publishedChecksum.sha256) { $posture.publishedChecksum.sha256 } else { '(unavailable)' }), match=$($posture.publishedChecksum.matchesSnapshot)" -ForegroundColor DarkGray
+            if ($posture.publishedChecksum.error) { Write-Host "             error=$($posture.publishedChecksum.error)" -ForegroundColor DarkYellow }
+        } else {
+            Write-Host "  Published: not checked; run windo trust --online from a normal shell" -ForegroundColor DarkGray
+        }
+        if ($posture.recommendations.Count -gt 0) {
+            Write-Host "  Actions  :" -ForegroundColor Yellow
+            foreach ($r in $posture.recommendations) { Write-Host "    - $r" -ForegroundColor DarkGray }
+        }
+        _windo_set_exit ([int]$posture.exitCode)
         return
     }
 

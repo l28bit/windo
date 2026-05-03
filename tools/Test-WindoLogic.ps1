@@ -68,6 +68,10 @@ Assert-Equal (($installerSource -match "function _windo_resolve_completion_polic
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "completion")') -eq $true) $true "installer handles completion command"
 Assert-Equal (($installerSource -match "function _windo_roadmap_releases") -eq $true) $true "installer defines V5 roadmap release train"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "roadmap")') -eq $true) $true "installer handles roadmap command"
+Assert-Equal (($installerSource -match "function _windo_trust_posture") -eq $true) $true "installer defines trust posture helper"
+Assert-Equal (($installerSource -match "function _windo_published_text_file_sha256") -eq $true) $true "installer defines normalized published text hash helper"
+Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "trust")') -eq $true) $true "installer handles trust command"
+Assert-Equal ($installerSource.Contains("windo trust --online") -eq $true) $true "installer documents online trust checksum validation"
 Assert-Equal ($installerSource.Contains("function __windo_resolve_completion_mode") -eq $true) $true "profile completer resolves completion mode"
 Assert-Equal ($installerSource.Contains("Register-ArgumentCompleter -CommandName windo -Native") -eq $true) $true "profile completer uses native argument completion"
 Assert-Equal ($installerSource.Contains("TabExpansion2 -inputScript `$delegate") -eq $true) $true "profile completer delegates native commands"
@@ -155,6 +159,8 @@ Assert-Equal ($jsonSchemaRaw.Contains('## `session` payload') -eq $true) $true "
 Assert-Equal ($jsonSchemaRaw.Contains("extrasIndexUrl") -eq $true) $true "json-schema documents config extrasIndexUrl"
 Assert-Equal ($jsonSchemaRaw.Contains('## `completion` payload') -eq $true) $true "json-schema documents completion payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `roadmap` payload') -eq $true) $true "json-schema documents roadmap payload"
+Assert-Equal ($jsonSchemaRaw.Contains('## `trust` payload') -eq $true) $true "json-schema documents trust payload"
+Assert-Equal ($jsonSchemaRaw.Contains("publishedChecksum") -eq $true) $true "json-schema documents trust published checksum"
 Assert-Equal ($jsonSchemaRaw.Contains("keybindings doctor") -eq $true) $true "json-schema documents keybindings doctor"
 Assert-Equal ($jsonSchemaRaw.Contains('## `modules` payload') -eq $true) $true "json-schema documents modules payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `recipes` payload') -eq $true) $true "json-schema documents recipes payload"
@@ -166,6 +172,9 @@ Assert-Equal ($jsonSchemaRaw.Contains('## `export` payload') -eq $true) $true "j
 Assert-Equal ($installerSource.Contains("auditIncludedInExcerpt") -eq $true) $true "installer export json includes auditIncludedInExcerpt"
 Assert-Equal ($buildRaw.Contains("Sync-VersionSnapshot.ps1") -eq $true) $true "build.md documents Sync-VersionSnapshot.ps1"
 Assert-Equal ($buildRaw.Contains("v5-roadmap.md") -eq $true) $true "build.md documents v5 roadmap snapshot"
+$roadmapDoc = Join-Path $root "docs\v5-roadmap.md"
+$roadmapRaw = Get-Content -Path $roadmapDoc -Raw
+Assert-Equal ($roadmapRaw.Contains("windo trust") -eq $true) $true "v5 roadmap documents trust command"
 
 if ($failed -gt 0) {
     Write-Host "Test-WindoLogic: $failed failure(s)." -ForegroundColor Red
