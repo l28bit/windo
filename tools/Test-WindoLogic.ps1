@@ -66,6 +66,8 @@ Assert-Equal (($installerSource -match "PreserveEnvironment") -eq $true) $true "
 Assert-Equal (($installerSource -match "TimeoutOverrideMs") -eq $true) $true "installer stores timeout override in request"
 Assert-Equal (($installerSource -match "function _windo_resolve_completion_policy") -eq $true) $true "installer resolves completion policy"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "completion")') -eq $true) $true "installer handles completion command"
+Assert-Equal (($installerSource -match "function _windo_roadmap_releases") -eq $true) $true "installer defines V5 roadmap release train"
+Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "roadmap")') -eq $true) $true "installer handles roadmap command"
 Assert-Equal ($installerSource.Contains("function __windo_resolve_completion_mode") -eq $true) $true "profile completer resolves completion mode"
 Assert-Equal ($installerSource.Contains("Register-ArgumentCompleter -CommandName windo -Native") -eq $true) $true "profile completer uses native argument completion"
 Assert-Equal ($installerSource.Contains("TabExpansion2 -inputScript `$delegate") -eq $true) $true "profile completer delegates native commands"
@@ -121,6 +123,7 @@ Assert-Equal ($installerSource.Contains("windo-tray-ready.ico") -eq $true) $true
 Assert-Equal ($installerSource.Contains("Special Edition Installer") -eq $true) $true "installer is branded as special edition"
 Assert-Equal ($bootstrapSource.Contains("Special Edition bootstrap") -eq $true) $true "bootstrap has special edition visuals"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.3.0.md")) -eq $true) $true "v3.3.0 release notes exist"
+Assert-Equal ((Test-Path (Join-Path $Root "docs\v5-roadmap.md")) -eq $true) $true "v5 roadmap doc exists"
 Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.3.0.md") -eq $true) $true "README links v3.3.0 release notes"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\Enterprise\assets\ico\windo-tray-ready.ico")) -eq $true) $true "Enterprise branded tray ico exists"
 Assert-Equal ($readmeSource.Contains("brand/Enterprise/assets/logo/windo-logo-full-dark-512.png") -eq $true) $true "README uses Enterprise brand logo"
@@ -150,6 +153,8 @@ $buildDoc = Join-Path $root "docs\build.md"
 $buildRaw = Get-Content -Path $buildDoc -Raw
 Assert-Equal ($jsonSchemaRaw.Contains('## `session` payload') -eq $true) $true "json-schema documents session payload"
 Assert-Equal ($jsonSchemaRaw.Contains("extrasIndexUrl") -eq $true) $true "json-schema documents config extrasIndexUrl"
+Assert-Equal ($jsonSchemaRaw.Contains('## `completion` payload') -eq $true) $true "json-schema documents completion payload"
+Assert-Equal ($jsonSchemaRaw.Contains('## `roadmap` payload') -eq $true) $true "json-schema documents roadmap payload"
 Assert-Equal ($jsonSchemaRaw.Contains("keybindings doctor") -eq $true) $true "json-schema documents keybindings doctor"
 Assert-Equal ($jsonSchemaRaw.Contains('## `modules` payload') -eq $true) $true "json-schema documents modules payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `recipes` payload') -eq $true) $true "json-schema documents recipes payload"
@@ -160,6 +165,7 @@ Assert-Equal ($jsonSchemaRaw.Contains('## `help` payload') -eq $true) $true "jso
 Assert-Equal ($jsonSchemaRaw.Contains('## `export` payload') -eq $true) $true "json-schema documents export payload"
 Assert-Equal ($installerSource.Contains("auditIncludedInExcerpt") -eq $true) $true "installer export json includes auditIncludedInExcerpt"
 Assert-Equal ($buildRaw.Contains("Sync-VersionSnapshot.ps1") -eq $true) $true "build.md documents Sync-VersionSnapshot.ps1"
+Assert-Equal ($buildRaw.Contains("v5-roadmap.md") -eq $true) $true "build.md documents v5 roadmap snapshot"
 
 if ($failed -gt 0) {
     Write-Host "Test-WindoLogic: $failed failure(s)." -ForegroundColor Red

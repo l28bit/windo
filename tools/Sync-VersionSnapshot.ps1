@@ -21,6 +21,7 @@ $copyPairs = @(
     @{ Src = "docs\modules-and-extras.md"; Dst = "docs\modules-and-extras.md" }
     @{ Src = "docs\framework-wave.md"; Dst = "docs\framework-wave.md" }
     @{ Src = "docs\ai-bridge.md"; Dst = "docs\ai-bridge.md" }
+    @{ Src = "docs\v5-roadmap.md"; Dst = "docs\v5-roadmap.md" }
     @{ Src = "extras\index.json"; Dst = "extras\index.json" }
     @{ Src = "extras\samples\hello\Load.ps1"; Dst = "extras\samples\hello\Load.ps1" }
 )

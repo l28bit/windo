@@ -29,7 +29,7 @@ If you prefer the **pre-v3 JSON “look”** (no top-level **`meta`**, and **`sc
 |--------|------|-------------|
 | `schemaVersion` | string | **`"3.0"`** for WINDO **v3.0.0+** CLI JSON (v2.6.x installers emitted `"2.6"`) |
 | `windoVersion` | string | Installer profile version (e.g. `"3.0.0"`) |
-| `command` | string | Logical command name for the envelope (e.g. `doctor`, `integrity`, `config`, `session`, `dashboard`, `preflight`, `launchpad`, `keybindings`, `repair`, `modules`, `extras`, `recipes`, `ai`, `backups`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `profile`; bundle-related commands when exporting, etc.) |
+| `command` | string | Logical command name for the envelope (e.g. `doctor`, `integrity`, `config`, `session`, `dashboard`, `preflight`, `launchpad`, `keybindings`, `completion`, `roadmap`, `repair`, `modules`, `extras`, `recipes`, `ai`, `backups`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `profile`; bundle-related commands when exporting, etc.) |
 | `generatedAt` | string | ISO-8601 timestamp |
 | `meta` | object | Host context (see below). Present when the effective theme is **modern** (or **auto** on v3.0.0+ profiles). Omitted in **classic** theme. |
 | `payload` | object | Command-specific data |
@@ -128,10 +128,31 @@ Several commands mirror **`$global:WINDO_EXIT_CODE`** inside **`payload.exitCode
 | `secureDir` | string | WINDO secure directory (`.pwsh_secure`) |
 | `settings` | array | Rows: `name`, `environmentValue` (string or null), `effectiveNote` (human-readable effective behavior). Includes **`WINDO_*`**, **`SUDO_*`**, **`CI`**, and (v3.2.0+) **`WINDO_EXTRAS_INDEX_URL`** when relevant. |
 | `keybindingPolicy` | object | Effective PSReadLine policy (same shape as **`windo keybindings status --json`** `policy`: `enabled`, `chord`, `chordSource`, `fallbackChord`, `autoDetectAlt`, etc.) |
+| `completionPolicy` | object | Effective tab-completion policy: `mode`, `source`, `environmentValue`, `preferenceValue`, `prefsFile`, `description`. |
 | `extrasIndexUrl` | string | **v3.2.1+** Resolved extras catalog URL (**`WINDO_EXTRAS_INDEX_URL`** or default **`Genisis`** `extras/index.json`) |
 | `exitCode` | number | **0** |
 
 The **`settings`** array is the machine-readable source of truth for env-driven behavior; **`extrasIndexUrl`** duplicates the resolved URL for quick automation without parsing **`effectiveNote`** on the **`WINDO_EXTRAS_INDEX_URL`** row.
+
+## `completion` payload (v3.4.0 runway)
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `completionPolicy` | object | Effective completion mode and source (`native-first`, `hybrid`, `windo`, or `off`). |
+| `saved` | bool | Present when a mode was written to **`windo_prefs.json`**. |
+| `reset` | bool | Present when saved mode was removed. |
+| `exitCode` | number | **0** on success, **2** for invalid mode or prefs write failure. |
+
+## `roadmap` payload (V5 runway)
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `currentVersion` | string | Installed WINDO version. |
+| `targetMajor` | string | Target major release (`5.0.0`). |
+| `releaseTrain` | array | Planned sub-version rows: `version`, `codename`, `theme`, `focus`, `status`, `operatorValue`. |
+| `principles` | array | Release-train guardrails. |
+| `docs` | string | Roadmap doc path. |
+| `exitCode` | number | **0** |
 
 ## `session` payload (v3.2.0+ / v3.2.1+)
 

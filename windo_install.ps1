@@ -25,7 +25,7 @@ $WindoVersion = "3.3.0"
 $WindoBuiltinVerbs = @(
     'help', 'last', 'stats', 'history', 'report', 'dashboard', 'preflight', 'launchpad', 'export', 'self-update', 'version',
     'doctor', 'integrity', 'verify', 'log', 'cleanup', 'config', 'backups', 'context', 'trace', 'replay',
-    'theme', 'upgrade', 'install-latest', 'uninstall', 'remove', 'profile', 'keybindings', 'completion',
+    'theme', 'upgrade', 'install-latest', 'uninstall', 'remove', 'profile', 'keybindings', 'completion', 'roadmap',
     'modules', 'recipes', 'prompt', 'extras', 'dev', 'session', 'ai', 'repair', 'run'
 )
 $WindoBuiltinVerbsArrayLiteral = ($WindoBuiltinVerbs | ForEach-Object { "'$_'" }) -join ','
@@ -1720,6 +1720,59 @@ Use: windo prompt --json   (machine-readable bundle)
         }
     }
 
+    function _windo_roadmap_releases {
+        return @(
+            [pscustomobject]@{
+                version = "3.4.0"
+                codename = "Quiet Shell"
+                theme = "Make WINDO disappear until it is useful."
+                focus = @("native-first completion", "completion policy", "profile repair hardening", "config visibility")
+                status = "in-progress"
+                operatorValue = "The shell keeps normal PowerShell muscle memory while WINDO remains available as an escalation wrapper."
+            },
+            [pscustomobject]@{
+                version = "3.5.0"
+                codename = "Trust Console"
+                theme = "Make trust state explicit before elevation."
+                focus = @("policy summary", "installer provenance", "profile and task drift repair", "clear remediation commands")
+                status = "planned"
+                operatorValue = "Operators can see whether the local install is trusted, current, and repairable before running privileged work."
+            },
+            [pscustomobject]@{
+                version = "3.6.0"
+                codename = "Syntax Forge"
+                theme = "Make common elevation workflows shorter and safer."
+                focus = @("command aliases", "recipe parameters", "dry-run previews", "syntax doctor")
+                status = "planned"
+                operatorValue = "High-frequency commands become easier to express without loosening validation or audit trails."
+            },
+            [pscustomobject]@{
+                version = "4.0.0"
+                codename = "Operator Mesh"
+                theme = "Turn modules, recipes, extras, prompt, and launchpad into one coherent platform layer."
+                focus = @("module lifecycle", "verified extras", "launchpad workflows", "structured handoff bundles")
+                status = "planned"
+                operatorValue = "WINDO becomes a composable local operations platform, not just an elevation helper."
+            },
+            [pscustomobject]@{
+                version = "4.5.0"
+                codename = "Signal Deck"
+                theme = "Make diagnosis and audit evidence faster to consume."
+                focus = @("timeline views", "request correlation", "health scoring", "support-ready export profiles")
+                status = "planned"
+                operatorValue = "Troubleshooting shifts from raw logs to explainable, shareable operational evidence."
+            },
+            [pscustomobject]@{
+                version = "5.0.0"
+                codename = "Special Edition Extravaganza"
+                theme = "Package the runway into the next major reveal."
+                focus = @("special edition visuals", "command center polish", "trust posture", "workflow packs", "operator-grade release notes")
+                status = "target"
+                operatorValue = "A major release that feels new because the underlying platform foundations have been hardened across the 3.x and 4.x train."
+            }
+        )
+    }
+
     function _windo_apply_runtime_keybindings {
         if (!(Get-Command Get-PSReadLineKeyHandler -ErrorAction SilentlyContinue)) { return $false }
         if (!(Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue)) { return $false }
@@ -2707,6 +2760,15 @@ Use: windo prompt --json   (machine-readable bundle)
                 Examples    = @("windo completion", "windo completion native-first", "windo completion hybrid --json", "windo completion reset")
             },
             [pscustomobject]@{
+                Name        = "roadmap"
+                Category    = "Planning"
+                Summary     = "Show the V5 runway release train."
+                Syntax      = @("windo roadmap [--json]")
+                Description = "Displays the planned sequence from the current 3.x hardening train through 4.x platform layering and the V5 Special Edition target."
+                Notes       = "Roadmap output is local, static, and intentionally non-binding; it is a product/platform planning aid shipped with the installer."
+                Examples    = @("windo roadmap", "windo roadmap --json")
+            },
+            [pscustomobject]@{
                 Name        = "profile"
                 Category    = "Shell Experience"
                 Summary     = "Show known profile paths and WINDO block presence."
@@ -3213,6 +3275,37 @@ Use: windo prompt --json   (machine-readable bundle)
             Write-Host "    effective: $($r.effectiveNote)" -ForegroundColor DarkGray
         }
         Write-Host "  Read-only: `$global:WINDO_EXIT_CODE (doctor / integrity / verify / stats validation)" -ForegroundColor DarkGray
+        _windo_set_exit 0
+        return
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "roadmap") {
+        $releases = @(_windo_roadmap_releases)
+        $payload = [ordered]@{
+            currentVersion = $WindoVersion
+            targetMajor = "5.0.0"
+            releaseTrain = @($releases)
+            principles = @(
+                "Keep deliberate elevation and auditability as the core.",
+                "Ship hardening and shell ergonomics in small verified sub-versions.",
+                "Reveal V5 as a polished package after the foundations are already proven."
+            )
+            docs = "docs/v5-roadmap.md"
+            exitCode = 0
+        }
+        if ($JsonOutput) {
+            _emit_json "roadmap" $payload
+        } else {
+            Write-Host "[windo] V5 runway" -ForegroundColor Cyan
+            Write-Host "  Current : $WindoVersion" -ForegroundColor DarkGray
+            Write-Host "  Target  : 5.0.0 Special Edition Extravaganza" -ForegroundColor Yellow
+            foreach ($r in $releases) {
+                $color = if ($r.status -eq "in-progress") { "Green" } elseif ($r.status -eq "target") { "Magenta" } else { "DarkGray" }
+                Write-Host ("  {0,-7} {1,-30} {2}" -f $r.version, $r.codename, $r.status) -ForegroundColor $color
+                Write-Host ("          {0}" -f $r.theme) -ForegroundColor DarkGray
+            }
+            Write-Host "  Docs    : docs/v5-roadmap.md" -ForegroundColor DarkGray
+        }
         _windo_set_exit 0
         return
     }

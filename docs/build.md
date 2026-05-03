@@ -51,7 +51,7 @@ After you bump **`$WindoVersion`** in **`windo_install.ps1`** and refresh **[`ch
 ./tools/Sync-VersionSnapshot.ps1 -Version 3.2.3
 ```
 
-This writes **`versions/v3.2.3/`** (example) with the installer, checksum, top-level **`README.md`**, **`SECURITY.md`**, **`CHANGELOG.md`**, **`docs/*.md`** (including **`json-schema.md`**, **`build.md`**, **`modules-and-extras.md`**, **`framework-wave.md`**, **`ai-bridge.md`**), **`brand/Enterprise/`**, and **`extras/`** (including **`samples/hello`**). Use it before publishing a release so the repo carries a point-in-time copy alongside **`Genisis`** raw URLs.
+This writes **`versions/v3.2.3/`** (example) with the installer, checksum, top-level **`README.md`**, **`SECURITY.md`**, **`CHANGELOG.md`**, **`docs/*.md`** (including **`json-schema.md`**, **`build.md`**, **`modules-and-extras.md`**, **`framework-wave.md`**, **`ai-bridge.md`**, **`v5-roadmap.md`**), **`brand/Enterprise/`**, and **`extras/`** (including **`samples/hello`**). Use it before publishing a release so the repo carries a point-in-time copy alongside **`Genisis`** raw URLs.
 
 ## JSON CLI schema
 
