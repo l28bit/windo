@@ -118,6 +118,37 @@ function Invoke-WindoBootstrapDownload {
     Remove-Job $job -Force -ErrorAction SilentlyContinue
 }
 
+function Get-WindoBootstrapChecksumRawUrl {
+    "https://raw.githubusercontent.com/l28bit/windo/Genisis/checksums/installer.sha256"
+}
+
+function Get-WindoBootstrapChecksumApiUrl {
+    "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=Genisis"
+}
+
+function Get-WindoBootstrapPublishedChecksum {
+    $apiUrl = Get-WindoBootstrapChecksumApiUrl
+    try {
+        $api = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+        $obj = $api.Content | ConvertFrom-Json -ErrorAction Stop
+        if ($obj.content) {
+            $contentText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(([string]$obj.content -replace '\s', '')))
+            $m = [regex]::Match($contentText, '[A-Fa-f0-9]{64}')
+            if ($m.Success) { return $m.Value.ToUpperInvariant() }
+        }
+    } catch {}
+
+    $rawUrl = Get-WindoBootstrapChecksumRawUrl
+    try {
+        $wr = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+        if ($null -ne $wr.Content) {
+            $m = [regex]::Match([string]$wr.Content, '[A-Fa-f0-9]{64}')
+            if ($m.Success) { return $m.Value.ToUpperInvariant() }
+        }
+    } catch {}
+    return $null
+}
+
 function Start-WindoBootstrapInstaller {
     param(
         [Parameter(Mandatory)][string]$ScriptPath
@@ -170,15 +201,9 @@ try {
     }
 
     if (-not $env:WINDO_SKIP_INSTALLER_SHA256) {
-        Write-WindoBootstrapStep -Status run -Label "Verifying installer checksum" -Detail "published checksums/installer.sha256"
-        $sumUrl = "https://raw.githubusercontent.com/l28bit/windo/Genisis/checksums/installer.sha256"
+        Write-WindoBootstrapStep -Status run -Label "Verifying installer checksum" -Detail "published checksums/installer.sha256 (GitHub API, raw fallback)"
         try {
-            $wr = Invoke-WebRequest -Uri $sumUrl -UseBasicParsing -TimeoutSec 25
-            $expect = $null
-            if ($null -ne $wr.Content) {
-                $m = [regex]::Match([string]$wr.Content, '[A-Fa-f0-9]{64}')
-                if ($m.Success) { $expect = $m.Value.ToUpperInvariant() }
-            }
+            $expect = Get-WindoBootstrapPublishedChecksum
             if ($null -ne $expect) {
                 $got = (Get-FileHash -Path $Temp -Algorithm SHA256).Hash.ToUpperInvariant()
                 if ($got -cne $expect) {
