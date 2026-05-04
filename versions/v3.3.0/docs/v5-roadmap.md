@@ -42,7 +42,7 @@ WINDO’s major-version path should keep the product useful every step of the wa
 
 - `windo syntax [query]` intent-to-command planner.
 - Safer short aliases for common workflows.
-- Parameterized recipes with dry-run previews.
+- Parameterized recipes with first-class preview and dry-run payloads.
 - Syntax doctor for ambiguous commands.
 - Better help surfacing by workflow.
 

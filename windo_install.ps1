@@ -1563,6 +1563,27 @@ function windo {
         return [string]$r[$key].command
     }
 
+    function _windo_get_recipe_preview([string]$RecipeId) {
+        $r = _windo_builtin_recipes
+        if ([string]::IsNullOrWhiteSpace($RecipeId)) { return $null }
+        $key = $RecipeId.Trim()
+        if (-not $r.ContainsKey($key)) {
+            foreach ($k in @($r.Keys)) { if ($k -ieq $key) { $key = $k; break } }
+        }
+        if (-not $r.ContainsKey($key)) { return $null }
+        [pscustomobject]@{
+            name = $key
+            description = [string]$r[$key].description
+            command = [string]$r[$key].command
+            elevatedCommand = [string]$r[$key].command
+            runCommand = "windo recipes run $key"
+            previewCommand = "windo recipes preview $key"
+            dryRunCommand = "windo recipes run $key --dry-run"
+            risk = "elevated read-only recipe"
+            dryRun = $true
+        }
+    }
+
     function _windo_extras_index_url {
         $raw = [string]$env:WINDO_EXTRAS_INDEX_URL
         if (-not [string]::IsNullOrWhiteSpace($raw)) { return $raw.Trim() }
@@ -1852,9 +1873,9 @@ Use: windo prompt --json   (machine-readable bundle)
                 category = "Workflow"
                 summary = "List built-in elevated command recipes."
                 command = "windo recipes"
-                preview = "windo recipes"
+                preview = "windo recipes preview <name>"
                 risk = "read-only"
-                notes = "Run a recipe explicitly with windo recipes run <name> after reviewing it."
+                notes = "Review exact commands with windo recipes preview <name> or windo recipes run <name> --dry-run before executing."
             },
             [pscustomobject]@{
                 id = "launch"
@@ -3206,10 +3227,10 @@ Use: windo prompt --json   (machine-readable bundle)
                 Name        = "recipes"
                 Category    = "Operators"
                 Summary     = "Built-in elevated command templates (reviewed, bundled data)."
-                Syntax      = @("windo recipes [list] [--json]", "windo recipes show <name> [--json]", "windo recipes run <name> [--dry-run]", "windo run --recipe <name>")
+                Syntax      = @("windo recipes [list] [--json]", "windo recipes show <name> [--json]", "windo recipes preview <name> [--json]", "windo recipes run <name> [--dry-run]", "windo run --recipe <name> [--dry-run]")
                 Description = "Shows named templates that expand to fixed cmd.exe-friendly command lines executed via the normal WINDO elevation path."
-                Notes       = "Recipes are not arbitrary script; they are versioned with WINDO and intended for common operational peeks."
-                Examples    = @("windo recipes", "windo recipes show firewall-profiles", "windo recipes run ollama-list", "windo run --recipe os-version")
+                Notes       = "preview and --dry-run are read-only and return the exact elevated command without creating request files or appending audit entries."
+                Examples    = @("windo recipes", "windo recipes show firewall-profiles", "windo recipes preview firewall-profiles --json", "windo recipes run ollama-list --dry-run", "windo run --recipe os-version")
             },
             [pscustomobject]@{
                 Name        = "prompt"
@@ -4073,32 +4094,32 @@ Use: windo prompt --json   (machine-readable bundle)
         $sub = "list"
         if ($Command.Count -ge 2) { $sub = [string]$Command[1].Trim().ToLowerInvariant() }
         $book = _windo_builtin_recipes
-        if ($sub -eq 'show') {
+        if ($sub -eq 'show' -or $sub -eq 'preview') {
             if ($Command.Count -lt 3) {
-                if ($JsonOutput) { _emit_json "recipes" @{ error = "missing recipe name"; exitCode = 2 } } else { Write-Host "[windo] recipes show <name>" -ForegroundColor Yellow }
+                if ($JsonOutput) { _emit_json "recipes" @{ error = "missing recipe name"; subcommand = $sub; exitCode = 2 } } else { Write-Host "[windo] recipes $sub <name>" -ForegroundColor Yellow }
                 _windo_set_exit 2
                 return
             }
             $rn = [string]$Command[2].Trim()
-            $cmdL = _windo_get_recipe_command_line $rn
-            if ($null -eq $cmdL) {
+            $preview = _windo_get_recipe_preview $rn
+            if ($null -eq $preview) {
                 if ($JsonOutput) { _emit_json "recipes" @{ error = "unknown recipe"; name = $rn; exitCode = 2 } } else { Write-Host "[windo] Unknown recipe: $rn" -ForegroundColor Red }
                 _windo_set_exit 2
                 return
             }
-            $desc = ""
-            foreach ($k in @($book.Keys)) { if ($k -ieq $rn) { $rn = $k; $desc = [string]$book[$k].description; break } }
-            if ($JsonOutput) { _emit_json "recipes" @{ name = $rn; description = $desc; command = $cmdL; exitCode = 0 } }
+            if ($JsonOutput) { _emit_json "recipes" @{ subcommand = $sub; preview = $preview; exitCode = 0 } }
             else {
-                Write-Host "[windo] Recipe: $rn" -ForegroundColor Cyan
-                Write-Host "  $desc" -ForegroundColor DarkGray
-                Write-Host "  Command: $cmdL" -ForegroundColor Yellow
+                Write-Host "[windo] Recipe: $($preview.name)" -ForegroundColor Cyan
+                Write-Host "  $($preview.description)" -ForegroundColor DarkGray
+                Write-Host "  Command : $($preview.command)" -ForegroundColor Yellow
+                Write-Host "  Preview : $($preview.previewCommand)" -ForegroundColor DarkGray
+                Write-Host "  Dry-run : $($preview.dryRunCommand)" -ForegroundColor DarkGray
             }
             _windo_set_exit 0
             return
         }
         if ($sub -notin @('list', '')) {
-            if ($JsonOutput) { _emit_json "recipes" @{ error = "unknown subcommand"; sub = $sub; exitCode = 2 } } else { Write-Host "[windo] recipes: expected list | show <name>" -ForegroundColor Yellow }
+            if ($JsonOutput) { _emit_json "recipes" @{ error = "unknown subcommand"; sub = $sub; exitCode = 2 } } else { Write-Host "[windo] recipes: expected list | show <name> | preview <name>" -ForegroundColor Yellow }
             _windo_set_exit 2
             return
         }
@@ -5736,14 +5757,24 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             return
         }
         $recipeName = [string]$Command[2].Trim()
-        $rline = _windo_get_recipe_command_line $recipeName
-        if ($null -eq $rline) {
+        $preview = _windo_get_recipe_preview $recipeName
+        if ($null -eq $preview) {
             if ($JsonOutput) { _emit_json "recipes" @{ error = "unknown recipe"; name = $recipeName; exitCode = 2 } } else { Write-Host "[windo] Unknown recipe: $recipeName" -ForegroundColor Red }
             _windo_set_exit 2
             return
         }
-        Write-Host "[windo] Recipe '$recipeName' → elevated: $rline" -ForegroundColor Cyan
-        $Command = @($rline)
+        if ($DryRun) {
+            if ($JsonOutput) { _emit_json "recipes" @{ subcommand = "run"; preview = $preview; dryRun = $true; exitCode = 0 } }
+            else {
+                Write-Host "[windo] Recipe dry-run: $($preview.name)" -ForegroundColor Cyan
+                Write-Host "  Elevated command : $($preview.elevatedCommand)" -ForegroundColor Yellow
+                Write-Host "  No task, request file, result file, or audit entry will be created." -ForegroundColor DarkGray
+            }
+            _windo_set_exit 0
+            return
+        }
+        Write-Host "[windo] Recipe '$($preview.name)' -> elevated: $($preview.elevatedCommand)" -ForegroundColor Cyan
+        $Command = @($preview.elevatedCommand)
     }
 
     if ($Command.Count -eq 1 -and $Command[0] -ieq "run") {
@@ -5760,14 +5791,24 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             $recipeName = $Command[1].Substring(9).Trim()
         }
         if ($null -ne $recipeName -and -not [string]::IsNullOrWhiteSpace($recipeName)) {
-            $rline = _windo_get_recipe_command_line $recipeName
-            if ($null -eq $rline) {
+            $preview = _windo_get_recipe_preview $recipeName
+            if ($null -eq $preview) {
                 if ($JsonOutput) { _emit_json "recipes" @{ error = "unknown recipe"; name = $recipeName; exitCode = 2 } } else { Write-Host "[windo] Unknown recipe: $recipeName" -ForegroundColor Red }
                 _windo_set_exit 2
                 return
             }
-            Write-Host "[windo] Recipe '$recipeName' → elevated: $rline" -ForegroundColor Cyan
-            $Command = @($rline)
+            if ($DryRun) {
+                if ($JsonOutput) { _emit_json "recipes" @{ subcommand = "run"; preview = $preview; dryRun = $true; exitCode = 0 } }
+                else {
+                    Write-Host "[windo] Recipe dry-run: $($preview.name)" -ForegroundColor Cyan
+                    Write-Host "  Elevated command : $($preview.elevatedCommand)" -ForegroundColor Yellow
+                    Write-Host "  No task, request file, result file, or audit entry will be created." -ForegroundColor DarkGray
+                }
+                _windo_set_exit 0
+                return
+            }
+            Write-Host "[windo] Recipe '$($preview.name)' -> elevated: $($preview.elevatedCommand)" -ForegroundColor Cyan
+            $Command = @($preview.elevatedCommand)
         } else {
             if ($JsonOutput) { _emit_json "recipes" @{ error = "windo run requires --recipe <name>"; exitCode = 2 } } else { Write-Host "[windo] Usage: windo run --recipe <name>  (see: windo recipes)" -ForegroundColor Yellow }
             _windo_set_exit 2

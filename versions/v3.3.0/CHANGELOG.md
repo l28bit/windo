@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **V5 runway: release-train surface:** `windo roadmap` / `windo roadmap --json` now ships the planned sub-version sequence from 3.4.0 through 5.0.0, backed by [`docs/v5-roadmap.md`](docs/v5-roadmap.md).
 - **V5 runway: Trust Console:** `windo trust` scores local trust posture from scheduled tasks, runner/updater integrity, audit-chain verification, profile state, completion policy, and installer snapshot hash. `windo trust --online` compares the local installer snapshot against the published checksum from a non-elevated shell using the same line-ending-normalized hash as release tooling.
 - **V5 runway: Syntax Forge:** `windo syntax [query]` maps common operator intent to exact WINDO commands, preview commands, risk notes, and aliases without executing anything privileged.
+- **V5 runway: recipe previews:** `windo recipes preview <name>` and recipe `--dry-run` now return the exact elevated command, risk note, and run/preview commands without touching scheduled tasks, request files, result files, or audit logs.
 
 ### Changed
 

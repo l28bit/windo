@@ -337,13 +337,21 @@ Envelope **`command`** is **`modules`**. Subcommands share error shapes: **`erro
 |--------|------|-------------|
 | `recipes` | array | ( **`list`** ) Objects: `name`, `description`, `command` |
 | `windoVersion` | string | Bundled profile version |
-| `name` | string | ( **`show`** ) Canonical recipe id |
-| `description` | string | ( **`show`** ) |
-| `command` | string | ( **`show`** ) Elevated command line template |
+| `subcommand` | string | `show`, `preview`, or `run` when applicable |
+| `preview` | object | ( **`show`**, **`preview`**, or recipe **`--dry-run`** ) Recipe preview object |
+| `preview.name` | string | Canonical recipe id |
+| `preview.description` | string | Recipe description |
+| `preview.command` | string | Elevated command line template |
+| `preview.elevatedCommand` | string | Same exact command submitted to the audited elevation path when run |
+| `preview.runCommand` | string | `windo recipes run <name>` |
+| `preview.previewCommand` | string | `windo recipes preview <name>` |
+| `preview.dryRunCommand` | string | `windo recipes run <name> --dry-run` |
+| `preview.risk` | string | Human-readable risk class |
+| `dryRun` | bool | Present and **true** for recipe dry-run payloads |
 | `error` | string | Unknown recipe / bad usage (**`exitCode`** **2**) |
 | `exitCode` | number | **0** on success |
 
-**Note:** Errors from **`windo run --recipe`** / **`windo recipes run`** may still use **`command`: `recipes`** in the envelope when JSON is emitted for a bad recipe name.
+**Note:** **`windo recipes preview <name>`** and recipe **`--dry-run`** are read-only and return before scheduled tasks, request/result files, or audit entries are touched. Errors from **`windo run --recipe`** / **`windo recipes run`** may still use **`command`: `recipes`** in the envelope when JSON is emitted for a bad recipe name.
 
 ## `extras` payload (v3.2.0+)
 
