@@ -58,7 +58,7 @@ $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
 $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "3.6.2"') -eq $true) $true "installer version is 3.6.2"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "3.6.3"') -eq $true) $true "installer version is 3.6.3"
 Assert-Equal (($installerSource -match "function _windo_normalize_published_installer_sha256") -eq $true) $true "installer normalizes published installer sha256"
 Assert-Equal (($installerSource -match "function _windo_get_published_installer_sha256") -eq $true) $true "installer resolves published checksum with API/raw fallback"
 Assert-Equal ($installerSource.Contains("api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=Genisis") -eq $true) $true "installer uses GitHub Contents API for checksum lookup"
@@ -84,6 +84,10 @@ Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[
 Assert-Equal ($installerSource.Contains("windo explain <command...>") -eq $true) $true "installer documents explain command"
 Assert-Equal ($installerSource.Contains("checksumValidation") -eq $true) $true "explain payload includes checksum posture"
 Assert-Equal ($installerSource.Contains("function __windo_resolve_completion_mode") -eq $true) $true "profile completer resolves completion mode"
+Assert-Equal ($installerSource.Contains("function __windo_completion_specs") -eq $true) $true "profile completer has command-specific syntax specs"
+Assert-Equal ($installerSource.Contains("trust = @('--online','--offline','--json')") -eq $true) $true "profile completer knows trust syntax"
+Assert-Equal ($installerSource.Contains('if ($mode -eq "native-first") { return }') -eq $false) $true "profile completer offers WINDO verbs at empty windo prefix"
+Assert-Equal ($installerSource.Contains('^\s*windo(?:\s+|$)') -eq $true) $true "profile completer recognizes bare windo prefix"
 Assert-Equal ($installerSource.Contains("Register-ArgumentCompleter -CommandName windo -Native") -eq $true) $true "profile completer uses native argument completion"
 Assert-Equal ($installerSource.Contains("TabExpansion2 -inputScript `$delegate") -eq $true) $true "profile completer delegates native commands"
 Assert-Equal (($installerSource -match "\('w', 'w,w', 'Alt\+w', 'Shift\+Enter', 'Alt\+Enter'\)") -eq $true) $true "installer removes legacy single-key and historical windo chords"
@@ -140,13 +144,13 @@ Assert-Equal ($installerSource.Contains("WINDO_TRAY_ICON") -eq $true) $true "tra
 Assert-Equal ($installerSource.Contains("windo-tray-ready.ico") -eq $true) $true "tray launchpad resolves Enterprise brand icon"
 Assert-Equal ($installerSource.Contains("Special Edition Installer") -eq $true) $true "installer is branded as special edition"
 Assert-Equal ($bootstrapSource.Contains("Special Edition bootstrap") -eq $true) $true "bootstrap has special edition visuals"
-Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.6.2.md")) -eq $true) $true "v3.6.2 release notes exist"
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.6.3.md")) -eq $true) $true "v3.6.3 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\v5-roadmap.md")) -eq $true) $true "v5 roadmap doc exists"
-Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.6.2.md") -eq $true) $true "README links v3.6.2 release notes"
+Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.6.3.md") -eq $true) $true "README links v3.6.3 release notes"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\Enterprise\assets\ico\windo-tray-ready.ico")) -eq $true) $true "Enterprise branded tray ico exists"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\assets\banners\banner-blue-left.png")) -eq $true) $true "README banner asset exists"
 Assert-Equal ($readmeSource.Contains("brand/assets/banners/banner-blue-left.png") -eq $true) $true "README uses blue banner asset"
-Assert-Equal ((Test-Path (Join-Path $Root "versions\v3.6.2\brand\assets\banners\banner-blue-left.png")) -eq $true) $true "v3.6.2 snapshot includes README banner asset"
+Assert-Equal ((Test-Path (Join-Path $Root "versions\v3.6.3\brand\assets\banners\banner-blue-left.png")) -eq $true) $true "v3.6.3 snapshot includes README banner asset"
 
 $extrasIndex = Join-Path $root "extras\index.json"
 if (Test-Path -LiteralPath $extrasIndex) {
