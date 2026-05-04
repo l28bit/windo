@@ -58,8 +58,8 @@ $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
 $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "3.6.8"') -eq $true) $true "installer version is 3.6.8"
-Assert-Equal ($bootstrapSource.Contains("WINDO 3.6.8 Special Edition bootstrap") -eq $true) $true "bootstrap banner is current"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "3.6.9"') -eq $true) $true "installer version is 3.6.9"
+Assert-Equal ($bootstrapSource.Contains("WINDO 3.6.9 Special Edition bootstrap") -eq $true) $true "bootstrap banner is current"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
 Assert-Equal ($bootstrapSource.Contains("contents/windo_install.ps1?ref=Genisis") -eq $true) $true "bootstrap knows GitHub Contents API installer URL"
 Assert-Equal ($bootstrapSource.Contains('$Repo = "https://raw.githubusercontent.com/l28bit/windo/Genisis/windo_install.ps1"') -eq $false) $true "bootstrap no longer hardcodes raw installer as primary source"
@@ -125,6 +125,10 @@ Assert-Equal ($installerSource.Contains("_windo_get_recipe_command_line") -eq $t
 Assert-Equal ($installerSource.Contains("_windo_get_recipe_preview") -eq $true) $true "installer defines recipe preview resolver"
 Assert-Equal ($installerSource.Contains("recipes run") -eq $true) $true "installer handles recipes run rewrite"
 Assert-Equal ($installerSource.Contains("recipes preview") -eq $true) $true "installer handles recipes preview"
+Assert-Equal ($installerSource.Contains("'defender-status'") -eq $true) $true "installer bundles defender-status recipe"
+Assert-Equal ($installerSource.Contains("'network-routes'") -eq $true) $true "installer bundles network-routes recipe"
+Assert-Equal ($installerSource.Contains("'whoami-all'") -eq $true) $true "installer bundles whoami-all recipe"
+Assert-Equal ($installerSource.Contains("'windows-update-services'") -eq $true) $true "installer bundles windows-update-services recipe"
 Assert-Equal ($installerSource.Contains("No task, request file, result file, or audit entry will be created.") -eq $true) $true "recipe dry-run exits before elevation artifacts"
 Assert-Equal ($installerSource.Contains("WINDO_LAST_REQUEST_ID") -eq $true) $true "installer sets WINDO_LAST_REQUEST_ID after elevation"
 Assert-Equal ($installerSource.Contains("_windo_extras_index_url") -eq $true) $true "installer defines extras index URL helper"
@@ -160,13 +164,13 @@ Assert-Equal ($installerSource.Contains("WINDO_TRAY_ICON") -eq $true) $true "tra
 Assert-Equal ($installerSource.Contains("windo-tray-ready.ico") -eq $true) $true "tray launchpad resolves Enterprise brand icon"
 Assert-Equal ($installerSource.Contains("Special Edition Installer") -eq $true) $true "installer is branded as special edition"
 Assert-Equal ($bootstrapSource.Contains("Special Edition bootstrap") -eq $true) $true "bootstrap has special edition visuals"
-Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.6.8.md")) -eq $true) $true "v3.6.8 release notes exist"
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.6.9.md")) -eq $true) $true "v3.6.9 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\v5-roadmap.md")) -eq $true) $true "v5 roadmap doc exists"
-Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.6.8.md") -eq $true) $true "README links v3.6.8 release notes"
+Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.6.9.md") -eq $true) $true "README links v3.6.9 release notes"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\Enterprise\assets\ico\windo-tray-ready.ico")) -eq $true) $true "Enterprise branded tray ico exists"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\assets\banners\banner-blue-left.png")) -eq $true) $true "README banner asset exists"
 Assert-Equal ($readmeSource.Contains("brand/assets/banners/banner-blue-left.png") -eq $true) $true "README uses blue banner asset"
-Assert-Equal ((Test-Path (Join-Path $Root "versions\v3.6.8\brand\assets\banners\banner-blue-left.png")) -eq $true) $true "v3.6.8 snapshot includes README banner asset"
+Assert-Equal ((Test-Path (Join-Path $Root "versions\v3.6.9\brand\assets\banners\banner-blue-left.png")) -eq $true) $true "v3.6.9 snapshot includes README banner asset"
 
 $extrasIndex = Join-Path $root "extras\index.json"
 if (Test-Path -LiteralPath $extrasIndex) {
