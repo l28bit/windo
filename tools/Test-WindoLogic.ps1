@@ -58,8 +58,8 @@ $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
 $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "3.6.4"') -eq $true) $true "installer version is 3.6.4"
-Assert-Equal ($bootstrapSource.Contains("WINDO 3.6.4 Special Edition bootstrap") -eq $true) $true "bootstrap banner is current"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "3.6.5"') -eq $true) $true "installer version is 3.6.5"
+Assert-Equal ($bootstrapSource.Contains("WINDO 3.6.5 Special Edition bootstrap") -eq $true) $true "bootstrap banner is current"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
 Assert-Equal ($bootstrapSource.Contains("contents/windo_install.ps1?ref=Genisis") -eq $true) $true "bootstrap knows GitHub Contents API installer URL"
 Assert-Equal ($bootstrapSource.Contains('$Repo = "https://raw.githubusercontent.com/l28bit/windo/Genisis/windo_install.ps1"') -eq $false) $true "bootstrap no longer hardcodes raw installer as primary source"
@@ -76,15 +76,18 @@ Assert-Equal (($installerSource -match "PreserveEnvironment") -eq $true) $true "
 Assert-Equal (($installerSource -match "TimeoutOverrideMs") -eq $true) $true "installer stores timeout override in request"
 Assert-Equal (($installerSource -match "function _windo_resolve_completion_policy") -eq $true) $true "installer resolves completion policy"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "completion")') -eq $true) $true "installer handles completion command"
-Assert-Equal (($installerSource -match "function _windo_roadmap_releases") -eq $true) $true "installer defines V5 roadmap release train"
+Assert-Equal (($installerSource -match "function _windo_roadmap_releases") -eq $true) $true "installer defines release runway train"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "roadmap")') -eq $true) $true "installer handles roadmap command"
+Assert-Equal ($installerSource.Contains("Extravaganza") -eq $false) $true "installer keeps future major reveal copy reserved"
 Assert-Equal (($installerSource -match "function _windo_trust_posture") -eq $true) $true "installer defines trust posture helper"
 Assert-Equal (($installerSource -match "function _windo_published_text_file_sha256") -eq $true) $true "installer defines normalized published text hash helper"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "trust")') -eq $true) $true "installer handles trust command"
 Assert-Equal ($installerSource.Contains("windo trust --online") -eq $true) $true "installer documents online trust checksum validation"
 Assert-Equal (($installerSource -match "function _windo_syntax_shortcuts") -eq $true) $true "installer defines syntax shortcut catalog"
+Assert-Equal (($installerSource -match "function _windo_syntax_doctor") -eq $true) $true "installer defines syntax doctor"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "syntax")') -eq $true) $true "installer handles syntax command"
 Assert-Equal ($installerSource.Contains("windo syntax [query]") -eq $true) $true "installer documents syntax command"
+Assert-Equal ($installerSource.Contains("windo syntax doctor [query]") -eq $true) $true "installer documents syntax doctor"
 Assert-Equal (($installerSource -match "function _windo_new_command_plan") -eq $true) $true "installer defines explain command planner"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "explain")') -eq $true) $true "installer handles explain command"
 Assert-Equal ($installerSource.Contains("windo explain <command...>") -eq $true) $true "installer documents explain command"
@@ -150,13 +153,13 @@ Assert-Equal ($installerSource.Contains("WINDO_TRAY_ICON") -eq $true) $true "tra
 Assert-Equal ($installerSource.Contains("windo-tray-ready.ico") -eq $true) $true "tray launchpad resolves Enterprise brand icon"
 Assert-Equal ($installerSource.Contains("Special Edition Installer") -eq $true) $true "installer is branded as special edition"
 Assert-Equal ($bootstrapSource.Contains("Special Edition bootstrap") -eq $true) $true "bootstrap has special edition visuals"
-Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.6.4.md")) -eq $true) $true "v3.6.4 release notes exist"
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.6.5.md")) -eq $true) $true "v3.6.5 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\v5-roadmap.md")) -eq $true) $true "v5 roadmap doc exists"
-Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.6.4.md") -eq $true) $true "README links v3.6.4 release notes"
+Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.6.5.md") -eq $true) $true "README links v3.6.5 release notes"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\Enterprise\assets\ico\windo-tray-ready.ico")) -eq $true) $true "Enterprise branded tray ico exists"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\assets\banners\banner-blue-left.png")) -eq $true) $true "README banner asset exists"
 Assert-Equal ($readmeSource.Contains("brand/assets/banners/banner-blue-left.png") -eq $true) $true "README uses blue banner asset"
-Assert-Equal ((Test-Path (Join-Path $Root "versions\v3.6.4\brand\assets\banners\banner-blue-left.png")) -eq $true) $true "v3.6.4 snapshot includes README banner asset"
+Assert-Equal ((Test-Path (Join-Path $Root "versions\v3.6.5\brand\assets\banners\banner-blue-left.png")) -eq $true) $true "v3.6.5 snapshot includes README banner asset"
 
 $extrasIndex = Join-Path $root "extras\index.json"
 if (Test-Path -LiteralPath $extrasIndex) {
@@ -189,6 +192,7 @@ Assert-Equal ($jsonSchemaRaw.Contains('## `trust` payload') -eq $true) $true "js
 Assert-Equal ($jsonSchemaRaw.Contains('## `source` payload') -eq $true) $true "json-schema documents source payload"
 Assert-Equal ($jsonSchemaRaw.Contains("publishedChecksum") -eq $true) $true "json-schema documents trust published checksum"
 Assert-Equal ($jsonSchemaRaw.Contains('## `syntax` payload') -eq $true) $true "json-schema documents syntax payload"
+Assert-Equal ($jsonSchemaRaw.Contains("doctor") -eq $true) $true "json-schema documents syntax doctor payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `explain` payload') -eq $true) $true "json-schema documents explain payload"
 Assert-Equal ($jsonSchemaRaw.Contains("keybindings doctor") -eq $true) $true "json-schema documents keybindings doctor"
 Assert-Equal ($jsonSchemaRaw.Contains('## `modules` payload') -eq $true) $true "json-schema documents modules payload"
@@ -208,6 +212,7 @@ Assert-Equal ($roadmapRaw.Contains("windo trust") -eq $true) $true "v5 roadmap d
 Assert-Equal ($roadmapRaw.Contains("windo syntax") -eq $true) $true "v5 roadmap documents syntax command"
 Assert-Equal ($roadmapRaw.Contains("windo explain") -eq $true) $true "v5 roadmap documents explain command"
 Assert-Equal ($roadmapRaw.Contains("windo source") -eq $true) $true "v5 roadmap documents source command"
+Assert-Equal ($roadmapRaw.Contains("Extravaganza") -eq $false) $true "roadmap keeps future major reveal copy reserved"
 
 if ($failed -gt 0) {
     Write-Host "Test-WindoLogic: $failed failure(s)." -ForegroundColor Red

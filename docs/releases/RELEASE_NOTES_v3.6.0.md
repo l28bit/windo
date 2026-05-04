@@ -6,7 +6,7 @@
 
 ## Summary
 
-WINDO v3.6.0 rolls the V5 runway work shipped after v3.3.0 into the visible product version. The release includes the 3.4 Quiet Shell completion work, the 3.5 Trust Console, and the first 3.6 Syntax Forge capabilities.
+WINDO v3.6.0 rolls the release-runway work shipped after v3.3.0 into the visible product version. The release includes the 3.4 Quiet Shell completion work, the 3.5 Trust Console, and the first 3.6 Syntax Forge capabilities.
 
 This is not a jump to 4.x yet. Version 4 is still reserved for the Operator Mesh platform layer where modules, recipes, extras, prompt, launchpad, and export become one cohesive workflow surface.
 
