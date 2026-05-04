@@ -58,6 +58,7 @@ $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
 $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
 
+Assert-Equal ($installerSource.Contains('$WindoVersion = "3.6.0"') -eq $true) $true "installer version is 3.6.0"
 Assert-Equal (($installerSource -match "function _windo_normalize_published_installer_sha256") -eq $true) $true "installer normalizes published installer sha256"
 Assert-Equal (($bootstrapSource -match '\[A-Fa-f0-9\]\{64\}') -eq $true) $true "bootstrap uses 64-hex regex for published checksum"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "repair")') -eq $true) $true "installer handles repair command"
@@ -132,11 +133,13 @@ Assert-Equal ($installerSource.Contains("WINDO_TRAY_ICON") -eq $true) $true "tra
 Assert-Equal ($installerSource.Contains("windo-tray-ready.ico") -eq $true) $true "tray launchpad resolves Enterprise brand icon"
 Assert-Equal ($installerSource.Contains("Special Edition Installer") -eq $true) $true "installer is branded as special edition"
 Assert-Equal ($bootstrapSource.Contains("Special Edition bootstrap") -eq $true) $true "bootstrap has special edition visuals"
-Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.3.0.md")) -eq $true) $true "v3.3.0 release notes exist"
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.6.0.md")) -eq $true) $true "v3.6.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\v5-roadmap.md")) -eq $true) $true "v5 roadmap doc exists"
-Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.3.0.md") -eq $true) $true "README links v3.3.0 release notes"
+Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.6.0.md") -eq $true) $true "README links v3.6.0 release notes"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\Enterprise\assets\ico\windo-tray-ready.ico")) -eq $true) $true "Enterprise branded tray ico exists"
-Assert-Equal ($readmeSource.Contains("brand/Enterprise/assets/logo/windo-logo-full-dark-512.png") -eq $true) $true "README uses Enterprise brand logo"
+Assert-Equal ((Test-Path (Join-Path $Root "brand\assets\banners\banner-blue-left.png")) -eq $true) $true "README banner asset exists"
+Assert-Equal ($readmeSource.Contains("brand/assets/banners/banner-blue-left.png") -eq $true) $true "README uses blue banner asset"
+Assert-Equal ((Test-Path (Join-Path $Root "versions\v3.6.0\brand\assets\banners\banner-blue-left.png")) -eq $true) $true "v3.6.0 snapshot includes README banner asset"
 
 $extrasIndex = Join-Path $root "extras\index.json"
 if (Test-Path -LiteralPath $extrasIndex) {

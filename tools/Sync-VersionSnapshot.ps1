@@ -71,4 +71,13 @@ if (Test-Path -LiteralPath $brandEnterpriseSource) {
     Copy-Item -LiteralPath $brandEnterpriseSource -Destination $brandEnterpriseDest -Recurse -Force
 }
 
+$brandAssetsSource = Join-Path $root "brand\assets"
+if (Test-Path -LiteralPath $brandAssetsSource) {
+    $brandAssetsDest = Join-Path $destRoot "brand\assets"
+    if (Test-Path -LiteralPath $brandAssetsDest) {
+        Remove-Item -LiteralPath $brandAssetsDest -Recurse -Force
+    }
+    Copy-Item -LiteralPath $brandAssetsSource -Destination $brandAssetsDest -Recurse -Force
+}
+
 Write-Host "Sync-VersionSnapshot: wrote $destRoot ($($copyPairs.Count) files)." -ForegroundColor Cyan
