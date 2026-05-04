@@ -10,7 +10,6 @@ function Test-WindoBootstrapProcessElevated {
     }
 }
 
-$Repo = "https://raw.githubusercontent.com/l28bit/windo/Genisis/windo_install.ps1"
 $Temp = Join-Path $env:TEMP ("windo_install_" + [Guid]::NewGuid().ToString("n") + ".ps1")
 
 function Write-WindoBootstrapBanner {
@@ -21,8 +20,8 @@ function Write-WindoBootstrapBanner {
     Write-Host "    \ V  V /  | || |\  | |_| | |_| |" -ForegroundColor Cyan
     Write-Host "     \_/\_/  |___|_| \_|____/ \___/" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  WINDO 3.3.0 Special Edition bootstrap" -ForegroundColor White
-    Write-Host "  verified download | UAC handoff | operator launchpad" -ForegroundColor DarkGray
+    Write-Host "  WINDO 3.6.4 Special Edition bootstrap" -ForegroundColor White
+    Write-Host "  API-first verified download | UAC handoff | operator launchpad" -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -118,6 +117,35 @@ function Invoke-WindoBootstrapDownload {
     Remove-Job $job -Force -ErrorAction SilentlyContinue
 }
 
+function Get-WindoBootstrapInstallerRawUrl {
+    "https://raw.githubusercontent.com/l28bit/windo/Genisis/windo_install.ps1"
+}
+
+function Get-WindoBootstrapInstallerApiUrl {
+    "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=Genisis"
+}
+
+function Save-WindoBootstrapPublishedInstaller {
+    param([Parameter(Mandatory)][string]$OutFile)
+
+    $apiUrl = Get-WindoBootstrapInstallerApiUrl
+    try {
+        $api = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 35 -ErrorAction Stop
+        $obj = $api.Content | ConvertFrom-Json -ErrorAction Stop
+        if ($obj.content) {
+            $bytes = [Convert]::FromBase64String(([string]$obj.content -replace '\s', ''))
+            [IO.File]::WriteAllBytes($OutFile, $bytes)
+            return [pscustomobject]@{ Source = "github-api"; Url = $apiUrl }
+        }
+    } catch {
+        $apiError = $_.Exception.Message
+    }
+
+    $rawUrl = Get-WindoBootstrapInstallerRawUrl
+    Invoke-WindoBootstrapDownload -Uri $rawUrl -OutFile $OutFile -Label "Downloading installer via raw fallback..."
+    return [pscustomobject]@{ Source = "raw-fallback"; Url = $rawUrl; ApiError = $apiError }
+}
+
 function Get-WindoBootstrapChecksumRawUrl {
     "https://raw.githubusercontent.com/l28bit/windo/Genisis/checksums/installer.sha256"
 }
@@ -193,8 +221,9 @@ if (Test-WindoBootstrapProcessElevated) {
 
 try {
 
-    Write-WindoBootstrapStep -Status run -Label "Downloading installer" -Detail "non-elevated fetch from Genisis"
-    Invoke-WindoBootstrapDownload -Uri $Repo -OutFile $Temp -Label "Downloading installer (non-elevated)..."
+    Write-WindoBootstrapStep -Status run -Label "Downloading installer" -Detail "GitHub API first, raw fallback"
+    $downloadSource = Save-WindoBootstrapPublishedInstaller -OutFile $Temp
+    Write-WindoBootstrapStep -Status ok -Label "Installer source" -Detail "$($downloadSource.Source): $($downloadSource.Url)" -Color Green
 
     if (!(Test-Path $Temp)) {
         throw "Installer failed to download."
