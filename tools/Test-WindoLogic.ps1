@@ -58,8 +58,8 @@ $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
 $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "3.6.7"') -eq $true) $true "installer version is 3.6.7"
-Assert-Equal ($bootstrapSource.Contains("WINDO 3.6.7 Special Edition bootstrap") -eq $true) $true "bootstrap banner is current"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "3.6.8"') -eq $true) $true "installer version is 3.6.8"
+Assert-Equal ($bootstrapSource.Contains("WINDO 3.6.8 Special Edition bootstrap") -eq $true) $true "bootstrap banner is current"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
 Assert-Equal ($bootstrapSource.Contains("contents/windo_install.ps1?ref=Genisis") -eq $true) $true "bootstrap knows GitHub Contents API installer URL"
 Assert-Equal ($bootstrapSource.Contains('$Repo = "https://raw.githubusercontent.com/l28bit/windo/Genisis/windo_install.ps1"') -eq $false) $true "bootstrap no longer hardcodes raw installer as primary source"
@@ -89,8 +89,10 @@ Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[
 Assert-Equal ($installerSource.Contains("windo syntax [query]") -eq $true) $true "installer documents syntax command"
 Assert-Equal ($installerSource.Contains("windo syntax doctor [query]") -eq $true) $true "installer documents syntax doctor"
 Assert-Equal (($installerSource -match "function _windo_mesh_inventory") -eq $true) $true "installer defines mesh inventory"
+Assert-Equal (($installerSource -match "function _windo_mesh_doctor") -eq $true) $true "installer defines mesh doctor"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "mesh")') -eq $true) $true "installer handles mesh command"
 Assert-Equal ($installerSource.Contains("windo mesh [--json]") -eq $true) $true "installer documents mesh command"
+Assert-Equal ($installerSource.Contains("windo mesh doctor [--json]") -eq $true) $true "installer documents mesh doctor command"
 Assert-Equal ($installerSource.Contains("windo mesh --html") -eq $true) $true "installer documents mesh html command"
 Assert-Equal ($installerSource.Contains("windo_mesh_") -eq $true) $true "installer writes mesh html artifact"
 Assert-Equal (($installerSource -match "function _windo_new_command_plan") -eq $true) $true "installer defines explain command planner"
@@ -158,13 +160,13 @@ Assert-Equal ($installerSource.Contains("WINDO_TRAY_ICON") -eq $true) $true "tra
 Assert-Equal ($installerSource.Contains("windo-tray-ready.ico") -eq $true) $true "tray launchpad resolves Enterprise brand icon"
 Assert-Equal ($installerSource.Contains("Special Edition Installer") -eq $true) $true "installer is branded as special edition"
 Assert-Equal ($bootstrapSource.Contains("Special Edition bootstrap") -eq $true) $true "bootstrap has special edition visuals"
-Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.6.7.md")) -eq $true) $true "v3.6.7 release notes exist"
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v3.6.8.md")) -eq $true) $true "v3.6.8 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\v5-roadmap.md")) -eq $true) $true "v5 roadmap doc exists"
-Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.6.7.md") -eq $true) $true "README links v3.6.7 release notes"
+Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v3.6.8.md") -eq $true) $true "README links v3.6.8 release notes"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\Enterprise\assets\ico\windo-tray-ready.ico")) -eq $true) $true "Enterprise branded tray ico exists"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\assets\banners\banner-blue-left.png")) -eq $true) $true "README banner asset exists"
 Assert-Equal ($readmeSource.Contains("brand/assets/banners/banner-blue-left.png") -eq $true) $true "README uses blue banner asset"
-Assert-Equal ((Test-Path (Join-Path $Root "versions\v3.6.7\brand\assets\banners\banner-blue-left.png")) -eq $true) $true "v3.6.7 snapshot includes README banner asset"
+Assert-Equal ((Test-Path (Join-Path $Root "versions\v3.6.8\brand\assets\banners\banner-blue-left.png")) -eq $true) $true "v3.6.8 snapshot includes README banner asset"
 
 $extrasIndex = Join-Path $root "extras\index.json"
 if (Test-Path -LiteralPath $extrasIndex) {
@@ -220,6 +222,7 @@ Assert-Equal ($roadmapRaw.Contains("windo syntax") -eq $true) $true "v5 roadmap 
 Assert-Equal ($roadmapRaw.Contains("windo explain") -eq $true) $true "v5 roadmap documents explain command"
 Assert-Equal ($roadmapRaw.Contains("windo source") -eq $true) $true "v5 roadmap documents source command"
 Assert-Equal ($roadmapRaw.Contains("windo mesh") -eq $true) $true "v5 roadmap documents mesh command"
+Assert-Equal ($roadmapRaw.Contains("windo mesh doctor") -eq $true) $true "v5 roadmap documents mesh doctor command"
 Assert-Equal ($roadmapRaw.Contains("Extravaganza") -eq $false) $true "roadmap keeps future major reveal copy reserved"
 
 if ($failed -gt 0) {
