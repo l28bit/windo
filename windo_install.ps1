@@ -25,7 +25,7 @@ $WindoVersion = "3.3.0"
 $WindoBuiltinVerbs = @(
     'help', 'last', 'stats', 'history', 'report', 'dashboard', 'preflight', 'launchpad', 'export', 'self-update', 'version',
     'doctor', 'integrity', 'verify', 'trust', 'log', 'cleanup', 'config', 'backups', 'context', 'trace', 'replay',
-    'theme', 'upgrade', 'install-latest', 'uninstall', 'remove', 'profile', 'keybindings', 'completion', 'roadmap',
+    'theme', 'upgrade', 'install-latest', 'uninstall', 'remove', 'profile', 'keybindings', 'completion', 'roadmap', 'syntax',
     'modules', 'recipes', 'prompt', 'extras', 'dev', 'session', 'ai', 'repair', 'run'
 )
 $WindoBuiltinVerbsArrayLiteral = ($WindoBuiltinVerbs | ForEach-Object { "'$_'" }) -join ','
@@ -1763,8 +1763,8 @@ Use: windo prompt --json   (machine-readable bundle)
                 version = "3.6.0"
                 codename = "Syntax Forge"
                 theme = "Make common elevation workflows shorter and safer."
-                focus = @("command aliases", "recipe parameters", "dry-run previews", "syntax doctor")
-                status = "planned"
+                focus = @("windo syntax", "command aliases", "recipe parameters", "dry-run previews", "syntax doctor")
+                status = "in-progress"
                 operatorValue = "High-frequency commands become easier to express without loosening validation or audit trails."
             },
             [pscustomobject]@{
@@ -1792,6 +1792,93 @@ Use: windo prompt --json   (machine-readable bundle)
                 operatorValue = "A major release that feels new because the underlying platform foundations have been hardened across the 3.x and 4.x train."
             }
         )
+    }
+
+    function _windo_syntax_shortcuts {
+        return @(
+            [pscustomobject]@{
+                id = "update"
+                aliases = @("up", "upgrade", "latest", "install latest", "self update")
+                category = "Lifecycle"
+                summary = "Install or update WINDO from the published branch."
+                command = "windo install-latest"
+                preview = "windo trust --online"
+                risk = "network + UAC"
+                notes = "Run from a normal non-elevated shell so checksum verification happens before the elevated handoff."
+            },
+            [pscustomobject]@{
+                id = "trust"
+                aliases = @("proof", "checksum", "verify installer", "provenance", "safe")
+                category = "Security"
+                summary = "Validate local trust posture and compare installer snapshot to the published checksum."
+                command = "windo trust --online"
+                preview = "windo trust"
+                risk = "read-only network"
+                notes = "Online checksum validation is blocked from elevated shells by policy."
+            },
+            [pscustomobject]@{
+                id = "health"
+                aliases = @("doctor", "check", "preflight", "ready", "status")
+                category = "Diagnostics"
+                summary = "Run the local readiness checklist with remediation commands."
+                command = "windo preflight"
+                preview = "windo dashboard"
+                risk = "read-only"
+                notes = "Use before install-latest, support handoff, or troubleshooting."
+            },
+            [pscustomobject]@{
+                id = "repair-keys"
+                aliases = @("keys", "keybindings", "stuck key", "tab repair", "prefix repair")
+                category = "Shell Experience"
+                summary = "Reset WINDO PSReadLine bindings to the safe configured chord."
+                command = "windo keybindings safe-reset"
+                preview = "windo keybindings doctor"
+                risk = "profile/session keybinding change"
+                notes = "Use when prefix chords or completion behavior feel stuck in the current shell."
+            },
+            [pscustomobject]@{
+                id = "support"
+                aliases = @("bundle", "export", "handoff", "evidence", "support bundle")
+                category = "Evidence"
+                summary = "Create a support-ready local evidence bundle."
+                command = "windo export"
+                preview = "windo session"
+                risk = "local file write"
+                notes = "Export redacts protected payloads and is useful for issue reports."
+            },
+            [pscustomobject]@{
+                id = "recipes"
+                aliases = @("templates", "examples", "commands", "cookbook")
+                category = "Workflow"
+                summary = "List built-in elevated command recipes."
+                command = "windo recipes"
+                preview = "windo recipes"
+                risk = "read-only"
+                notes = "Run a recipe explicitly with windo recipes run <name> after reviewing it."
+            },
+            [pscustomobject]@{
+                id = "launch"
+                aliases = @("launchpad", "tray", "window", "command center")
+                category = "Visuals"
+                summary = "Open the Special Edition launchpad or native tray command center."
+                command = "windo launchpad --tray"
+                preview = "windo launchpad"
+                risk = "starts local tray helper"
+                notes = "Use windo launchpad --html for a browser artifact instead."
+            }
+        )
+    }
+
+    function _windo_syntax_matches([string]$Query) {
+        $all = @(_windo_syntax_shortcuts)
+        if ([string]::IsNullOrWhiteSpace($Query)) { return $all }
+        $q = $Query.Trim().ToLowerInvariant()
+        return @($all | Where-Object {
+            ([string]$_.id).ToLowerInvariant() -like "*$q*" -or
+            ([string]$_.summary).ToLowerInvariant() -like "*$q*" -or
+            ([string]$_.category).ToLowerInvariant() -like "*$q*" -or
+            (@($_.aliases) | Where-Object { ([string]$_).ToLowerInvariant() -like "*$q*" }).Count -gt 0
+        })
     }
 
     function _windo_apply_runtime_keybindings {
@@ -2936,6 +3023,15 @@ Use: windo prompt --json   (machine-readable bundle)
                 Examples    = @("windo trust", "windo trust --json", "windo trust --online --json")
             },
             [pscustomobject]@{
+                Name        = "syntax"
+                Category    = "Planning"
+                Summary     = "Map operator intent to exact WINDO commands without executing them."
+                Syntax      = @("windo syntax [query] [--json]")
+                Description = "Read-only Syntax Forge catalog for common intents like update, trust, health, repair keys, support bundle, recipes, and launchpad."
+                Notes       = "Designed as the safe foundation for future command aliases: it shows the command, preview command, risk class, and notes before anything privileged runs."
+                Examples    = @("windo syntax", "windo syntax update", "windo syntax proof --json", "windo syntax repair keys")
+            },
+            [pscustomobject]@{
                 Name        = "profile"
                 Category    = "Shell Experience"
                 Summary     = "Show known profile paths and WINDO block presence."
@@ -3403,6 +3499,52 @@ Use: windo prompt --json   (machine-readable bundle)
             foreach ($r in $posture.recommendations) { Write-Host "    - $r" -ForegroundColor DarkGray }
         }
         _windo_set_exit ([int]$posture.exitCode)
+        return
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "syntax") {
+        $queryParts = [System.Collections.ArrayList]@()
+        $badArgs = [System.Collections.ArrayList]@()
+        for ($si = 1; $si -lt $Command.Count; $si++) {
+            $sa = [string]$Command[$si]
+            if ([string]::IsNullOrWhiteSpace($sa)) { continue }
+            if ($sa.StartsWith("--")) { [void]$badArgs.Add($sa); continue }
+            [void]$queryParts.Add($sa)
+        }
+        if ($badArgs.Count -gt 0) {
+            if ($JsonOutput) { _emit_json "syntax" @{ error = "unknown option"; invalidArgs = @($badArgs.ToArray()); exitCode = 2 } }
+            else { Write-Host "[windo] syntax: unknown option(s): $($badArgs -join ', ')" -ForegroundColor Yellow }
+            _windo_set_exit 2
+            return
+        }
+        $query = ($queryParts.ToArray() -join " ").Trim()
+        $matches = @(_windo_syntax_matches $query)
+        $payload = [ordered]@{
+            query = $(if ([string]::IsNullOrWhiteSpace($query)) { $null } else { $query })
+            count = $matches.Count
+            shortcuts = @($matches)
+            exitCode = $(if ($matches.Count -gt 0) { 0 } else { 3 })
+        }
+        if ($JsonOutput) {
+            _emit_json "syntax" $payload
+            _windo_set_exit ([int]$payload.exitCode)
+            return
+        }
+        Write-Host "[windo] Syntax Forge" -ForegroundColor Cyan
+        if (-not [string]::IsNullOrWhiteSpace($query)) { Write-Host "  Query: $query" -ForegroundColor DarkGray }
+        if ($matches.Count -eq 0) {
+            Write-Host "  No shortcut matched. Try: update, proof, health, repair keys, support bundle, recipes, launchpad." -ForegroundColor Yellow
+            _windo_set_exit 3
+            return
+        }
+        foreach ($m in $matches) {
+            Write-Host ("  {0,-12} {1}" -f $m.id, $m.summary) -ForegroundColor Yellow
+            Write-Host "    command : $($m.command)" -ForegroundColor Green
+            Write-Host "    preview : $($m.preview)" -ForegroundColor DarkGray
+            Write-Host "    risk    : $($m.risk)" -ForegroundColor DarkGray
+            Write-Host "    aliases : $((@($m.aliases)) -join ', ')" -ForegroundColor DarkGray
+        }
+        _windo_set_exit 0
         return
     }
 

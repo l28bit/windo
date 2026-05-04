@@ -16,7 +16,7 @@ WINDO’s major-version path should keep the product useful every step of the wa
 |---|---|---|---|
 | 3.4.0 | Quiet Shell | Make WINDO disappear until it is useful. | In progress |
 | 3.5.0 | Trust Console | Make trust state explicit before elevation. | In progress |
-| 3.6.0 | Syntax Forge | Make common elevation workflows shorter and safer. | Planned |
+| 3.6.0 | Syntax Forge | Make common elevation workflows shorter and safer. | In progress |
 | 4.0.0 | Operator Mesh | Turn modules, recipes, extras, prompt, and launchpad into one coherent platform layer. | Planned |
 | 4.5.0 | Signal Deck | Make diagnosis and audit evidence faster to consume. | Planned |
 | 5.0.0 | Special Edition Extravaganza | Package the runway into the next major reveal. | Target |
@@ -40,6 +40,7 @@ WINDO’s major-version path should keep the product useful every step of the wa
 
 ### 3.6.0 Syntax Forge
 
+- `windo syntax [query]` intent-to-command planner.
 - Safer short aliases for common workflows.
 - Parameterized recipes with dry-run previews.
 - Syntax doctor for ambiguous commands.

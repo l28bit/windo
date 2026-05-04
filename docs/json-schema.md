@@ -29,7 +29,7 @@ If you prefer the **pre-v3 JSON “look”** (no top-level **`meta`**, and **`sc
 |--------|------|-------------|
 | `schemaVersion` | string | **`"3.0"`** for WINDO **v3.0.0+** CLI JSON (v2.6.x installers emitted `"2.6"`) |
 | `windoVersion` | string | Installer profile version (e.g. `"3.0.0"`) |
-| `command` | string | Logical command name for the envelope (e.g. `doctor`, `integrity`, `config`, `session`, `dashboard`, `preflight`, `launchpad`, `keybindings`, `completion`, `roadmap`, `repair`, `modules`, `extras`, `recipes`, `ai`, `backups`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `profile`; bundle-related commands when exporting, etc.) |
+| `command` | string | Logical command name for the envelope (e.g. `doctor`, `integrity`, `config`, `session`, `dashboard`, `preflight`, `launchpad`, `keybindings`, `completion`, `roadmap`, `syntax`, `repair`, `modules`, `extras`, `recipes`, `ai`, `backups`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `profile`; bundle-related commands when exporting, etc.) |
 | `generatedAt` | string | ISO-8601 timestamp |
 | `meta` | object | Host context (see below). Present when the effective theme is **modern** (or **auto** on v3.0.0+ profiles). Omitted in **classic** theme. |
 | `payload` | object | Command-specific data |
@@ -89,6 +89,7 @@ Several commands mirror **`$global:WINDO_EXIT_CODE`** inside **`payload.exitCode
 | `integrity` | 0, 3, 6 | Overall component state |
 | `verify` | 0, 2, 4 | Log missing/empty vs chain failure |
 | `trust` | 0, 2, 3, 4 | **V5 runway** **0** = trusted, **2** = bad args, **3** = attention, **4** = repair required |
+| `syntax` | 0, 2, 3 | **V5 runway** **0** = matches found, **2** = bad args, **3** = no shortcut matched |
 | `stats` | 0 | Success; invalid filters exit **before** JSON is printed (host exit **2**, no envelope) |
 | `profile` | 0 | Listing only |
 | `config` | 0 | Listing only (see **`config`** payload; v3.2.1+ adds **`extrasIndexUrl`**) |
@@ -174,6 +175,15 @@ The **`settings`** array is the machine-readable source of truth for env-driven 
 | `publishedChecksum` | object | `requested`, `status`, `url`, `sha256`, `matchesSnapshot`, and `error`. |
 | `recommendations` | array | Remediation guidance strings. |
 | `exitCode` | number | **0** trusted, **3** attention, **4** repair required. |
+
+## `syntax` payload (V5 runway)
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `query` | string \| null | Optional intent query after `windo syntax`. |
+| `count` | number | Number of matching shortcut rows. |
+| `shortcuts` | array | Shortcut rows: `id`, `aliases`, `category`, `summary`, `command`, `preview`, `risk`, and `notes`. |
+| `exitCode` | number | **0** when matches exist, **3** when no shortcut matched. |
 
 ## `session` payload (v3.2.0+ / v3.2.1+)
 
