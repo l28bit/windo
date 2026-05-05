@@ -80,4 +80,13 @@ if (Test-Path -LiteralPath $brandAssetsSource) {
     Copy-Item -LiteralPath $brandAssetsSource -Destination $brandAssetsDest -Recurse -Force
 }
 
+$nativeCompanionSource = Join-Path $root "native-companion"
+if (Test-Path -LiteralPath $nativeCompanionSource) {
+    $nativeCompanionDest = Join-Path $destRoot "native-companion"
+    if (Test-Path -LiteralPath $nativeCompanionDest) {
+        Remove-Item -LiteralPath $nativeCompanionDest -Recurse -Force
+    }
+    Copy-Item -LiteralPath $nativeCompanionSource -Destination $nativeCompanionDest -Recurse -Force
+}
+
 Write-Host "Sync-VersionSnapshot: wrote $destRoot ($($copyPairs.Count) files)." -ForegroundColor Cyan
