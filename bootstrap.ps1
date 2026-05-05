@@ -20,7 +20,7 @@ function Write-WindoBootstrapBanner {
     Write-Host "    \ V  V /  | || |\  | |_| | |_| |" -ForegroundColor Cyan
     Write-Host "     \_/\_/  |___|_| \_|____/ \___/" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  WINDO 4.2.0 Special Edition bootstrap" -ForegroundColor White
+    Write-Host "  WINDO 4.3.0 Special Edition bootstrap" -ForegroundColor White
     Write-Host "  API-first verified download | UAC handoff | security tools | operator launchpad" -ForegroundColor DarkGray
     Write-Host ""
 }
