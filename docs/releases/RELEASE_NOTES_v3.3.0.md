@@ -64,7 +64,7 @@ windo launchpad --tray
 For a clean clone or first install:
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/l28bit/windo/Genisis/bootstrap.ps1)
+iex (irm https://raw.githubusercontent.com/l28bit/windo/Genesis/bootstrap.ps1)
 . $PROFILE
 windo doctor
 windo integrity

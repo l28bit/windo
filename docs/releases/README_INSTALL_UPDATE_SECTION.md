@@ -5,7 +5,7 @@ Use this block in the main README and keep it identical wherever the one-liner i
 **Install or update** (downloads the current installer from the default branch, runs it from a temp file, then deletes the temp file):
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/l28bit/windo/Genisis/bootstrap.ps1)
+iex (irm https://raw.githubusercontent.com/l28bit/windo/Genesis/bootstrap.ps1)
 ```
 
 Notes:

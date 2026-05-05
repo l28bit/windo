@@ -12,7 +12,7 @@ Contributions are welcome.
 
 ## Default branch name
 
-The public default branch is **`Genisis`** (historical spelling). Raw GitHub URLs depend on it; do not rename it casually without a documented migration and coordination.
+The public default branch is **`Genesis`**. Raw GitHub URLs depend on it; do not rename it casually without a documented migration and coordination.
 
 ## Workflow
 
@@ -26,4 +26,4 @@ Submit a pull request with:
 
 ## Validation
 
-Before opening a PR that changes PowerShell scripts, run 	ools/Validate-Windo.ps1 in PowerShell 7 (local) or rely on the GitHub Actions workflow.
+Before opening a PR that changes PowerShell scripts, run `./tools/Validate-Windo.ps1` in PowerShell 7 (local) or rely on the GitHub Actions workflow.

@@ -11,13 +11,13 @@ v3.6.4 fixes the stale web install/upgrade path by moving installer downloads to
 `bootstrap.ps1` and `windo install-latest` now fetch `windo_install.ps1` through:
 
 ```text
-https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=Genisis
+https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=Genesis
 ```
 
 If that path is unavailable, WINDO falls back to:
 
 ```text
-https://raw.githubusercontent.com/l28bit/windo/Genisis/windo_install.ps1
+https://raw.githubusercontent.com/l28bit/windo/Genesis/windo_install.ps1
 ```
 
 The checksum check remains enforced unless `WINDO_SKIP_INSTALLER_SHA256` is set.
