@@ -20,7 +20,7 @@ function Write-WindoBootstrapBanner {
     Write-Host "    \ V  V /  | || |\  | |_| | |_| |" -ForegroundColor Cyan
     Write-Host "     \_/\_/  |___|_| \_|____/ \___/" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  WINDO 5.0.0 Special Edition bootstrap" -ForegroundColor White
+    Write-Host "  WINDO 5.1.0 Limited Edition bootstrap" -ForegroundColor White
     Write-Host "  API-first verified download | UAC handoff | security tools | operator launchpad" -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -118,11 +118,11 @@ function Invoke-WindoBootstrapDownload {
 }
 
 function Get-WindoBootstrapInstallerRawUrl {
-    "https://raw.githubusercontent.com/l28bit/windo/Genesis/windo_install.ps1"
+    "https://raw.githubusercontent.com/l28bit/windo/Exodus/windo_install.ps1"
 }
 
 function Get-WindoBootstrapInstallerApiUrl {
-    "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=Genesis"
+    "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=Exodus"
 }
 
 function Save-WindoBootstrapPublishedInstaller {
@@ -147,11 +147,11 @@ function Save-WindoBootstrapPublishedInstaller {
 }
 
 function Get-WindoBootstrapChecksumRawUrl {
-    "https://raw.githubusercontent.com/l28bit/windo/Genesis/checksums/installer.sha256"
+    "https://raw.githubusercontent.com/l28bit/windo/Exodus/checksums/installer.sha256"
 }
 
 function Get-WindoBootstrapChecksumApiUrl {
-    "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=Genesis"
+    "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=Exodus"
 }
 
 function Get-WindoBootstrapPublishedChecksum {
