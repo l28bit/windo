@@ -58,8 +58,8 @@ $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
 $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "5.2.0"') -eq $true) $true "installer version is 5.2.0"
-Assert-Equal ($bootstrapSource.Contains("WINDO 5.2.0 Limited Edition bootstrap") -eq $true) $true "bootstrap banner is current"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "5.3.0"') -eq $true) $true "installer version is 5.3.0"
+Assert-Equal ($bootstrapSource.Contains("WINDO 5.3.0 Limited Edition bootstrap") -eq $true) $true "bootstrap banner is current"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
 Assert-Equal ($bootstrapSource.Contains("contents/windo_install.ps1?ref=Exodus") -eq $true) $true "bootstrap knows GitHub Contents API installer URL"
 Assert-Equal ($bootstrapSource.Contains('$Repo = "https://raw.githubusercontent.com/l28bit/windo/Exodus/windo_install.ps1"') -eq $false) $true "bootstrap no longer hardcodes raw installer as primary source"
@@ -83,6 +83,8 @@ Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[
 Assert-Equal (($installerSource -match "function _windo_surface_state") -eq $true) $true "installer defines native surface state command payload"
 Assert-Equal (($installerSource -match "function _windo_surface_panel_script_text") -eq $true) $true "installer defines native surface panel script"
 Assert-Equal (($installerSource -match "function _windo_start_surface_panel") -eq $true) $true "installer starts native surface panel"
+Assert-Equal (($installerSource -match "function _windo_power_studio_script_text") -eq $true) $true "installer defines Power Studio script"
+Assert-Equal (($installerSource -match "function _windo_start_power_studio") -eq $true) $true "installer starts Power Studio"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "surface")') -eq $true) $true "installer handles surface command"
 Assert-Equal (($installerSource -match "function _windo_control_state") -eq $true) $true "installer defines control plane state command payload"
 Assert-Equal (($installerSource -match "function _windo_control_action_catalog") -eq $true) $true "installer defines control plane action catalog"
@@ -93,6 +95,7 @@ Assert-Equal (($installerSource -match "function _windo_edition_state") -eq $tru
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "control")') -eq $true) $true "installer handles control command"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "signal")') -eq $true) $true "installer handles signal command"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "center")') -eq $true) $true "installer handles center command"
+Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "studio")') -eq $true) $true "installer handles studio command"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "edition")') -eq $true) $true "installer handles edition command"
 Assert-Equal ($installerSource.Contains("windo_control_plane.json") -eq $true) $true "installer writes control plane manifest"
 Assert-Equal ($installerSource.Contains("windo control queue surface-prime") -eq $true) $true "installer documents control plane request queue"
@@ -102,10 +105,12 @@ Assert-Equal ($installerSource.Contains("windo control execute|inspect|cancel <r
 Assert-Equal ($installerSource.Contains("windo signal timeline") -eq $true) $true "installer documents signal timeline"
 Assert-Equal ($installerSource.Contains("windo center open") -eq $true) $true "installer documents center open"
 Assert-Equal ($installerSource.Contains("windo center panel") -eq $true) $true "installer documents center panel"
+Assert-Equal ($installerSource.Contains("windo center studio") -eq $true) $true "installer documents center studio"
 Assert-Equal ($installerSource.Contains("windo edition open") -eq $true) $true "installer documents edition open"
 Assert-Equal ($installerSource.Contains("Motion Pulse") -eq $true) $true "tray launchpad exposes motion pulse action"
 Assert-Equal ($installerSource.Contains("Run Next Queued") -eq $true) $true "tray launchpad exposes run next queued action"
 Assert-Equal ($installerSource.Contains("Surface Panel") -eq $true) $true "tray launchpad exposes surface panel action"
+Assert-Equal ($installerSource.Contains("Power Studio") -eq $true) $true "tray launchpad exposes Power Studio action"
 Assert-Equal (($installerSource -match "function _windo_profile_prompt_issues") -eq $true) $true "installer detects prompt profile issues"
 Assert-Equal (($installerSource -match "function _windo_repair_profile_prompt_init") -eq $true) $true "installer repairs guarded prompt init"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "scan")') -eq $true) $true "installer handles scan command"
@@ -206,6 +211,7 @@ Assert-Equal ($installerSource.Contains("return @(`$rows.ToArray())") -eq $true)
 Assert-Equal ($installerSource.Contains("`$recipeMap.GetEnumerator()") -eq $true) $true "launchpad enumerates built-in recipes"
 Assert-Equal ($installerSource.Contains("windo_launchpad_tray.ps1") -eq $true) $true "installer can write native tray launchpad script"
 Assert-Equal ($installerSource.Contains("windo_surface_panel.ps1") -eq $true) $true "installer can write native surface panel script"
+Assert-Equal ($installerSource.Contains("windo_power_studio.ps1") -eq $true) $true "installer can write Power Studio script"
 Assert-Equal ($installerSource.Contains("WINDO_TRAY_ICON") -eq $true) $true "tray launchpad can use branded icon override"
 Assert-Equal ($installerSource.Contains("windo-tray-ready.ico") -eq $true) $true "tray launchpad resolves Enterprise brand icon"
 Assert-Equal ($installerSource.Contains("function _windo_resolve_tray_icon") -eq $true) $true "installer resolves status-aware tray icon"
@@ -213,7 +219,10 @@ Assert-Equal ($installerSource.Contains("windo-tray-denied.ico") -eq $true) $tru
 Assert-Equal ($installerSource.Contains("function Show-WindoStatusToast") -eq $true) $true "tray launchpad has designed status toast window"
 Assert-Equal ($installerSource.Contains("FlowLayoutPanel") -eq $true) $true "tray launchpad popup uses scrollable action layout"
 Assert-Equal ($installerSource.Contains("WINDO Surface Panel") -eq $true) $true "surface panel has native window title"
+Assert-Equal ($installerSource.Contains("WINDO Power Studio") -eq $true) $true "Power Studio has native window title"
 Assert-Equal ($installerSource.Contains('id = "surface-panel"') -eq $true) $true "control catalog includes surface-panel action"
+Assert-Equal ($installerSource.Contains('id = "power-studio"') -eq $true) $true "control catalog includes power-studio action"
+Assert-Equal ($installerSource.Contains("Preview, queue, or run curated actions") -eq $true) $true "Power Studio documents preview queue run boundary"
 Assert-Equal ($installerSource.Contains("Exodus Limited Edition command center") -eq $true) $true "launchpad html carries limited edition copy"
 Assert-Equal ($installerSource.Contains("WINDO Dashboard") -eq $true) $true "dashboard html carries branded dashboard title"
 Assert-Equal ($installerSource.Contains("Limited Edition Installer") -eq $true) $true "installer is branded as limited edition"
@@ -222,7 +231,7 @@ $panelStart = $installerSource.IndexOf("function _windo_surface_panel_script_tex
 $panelEnd = $installerSource.IndexOf("function _windo_start_surface_panel", $panelStart, [StringComparison]::Ordinal)
 Assert-Equal (($panelStart -ge 0 -and $panelEnd -gt $panelStart) -eq $true) $true "surface panel script function can be extracted"
 if ($panelStart -ge 0 -and $panelEnd -gt $panelStart) {
-    $WindoVersion = "5.2.0"
+    $WindoVersion = "5.3.0"
     Invoke-Expression $installerSource.Substring($panelStart, $panelEnd - $panelStart)
     $panelScript = (_windo_surface_panel_script_text).Replace("__WINDO_ICON_PATH__", "")
     $panelErrors = $null
@@ -230,6 +239,20 @@ if ($panelStart -ge 0 -and $panelEnd -gt $panelStart) {
     [System.Management.Automation.Language.Parser]::ParseInput($panelScript, [ref]$panelTokens, [ref]$panelErrors) | Out-Null
     Assert-Equal ($panelErrors.Count) 0 "generated surface panel script parses"
 }
+Assert-Equal ($installerSource.Contains("function _windo_power_studio_script_text") -eq $true) $true "Power Studio script function exists"
+$studioStart = $installerSource.IndexOf("function _windo_power_studio_script_text", [StringComparison]::Ordinal)
+$studioEnd = $installerSource.IndexOf("function _windo_start_power_studio", $studioStart, [StringComparison]::Ordinal)
+Assert-Equal (($studioStart -ge 0 -and $studioEnd -gt $studioStart) -eq $true) $true "Power Studio script function can be extracted"
+if ($studioStart -ge 0 -and $studioEnd -gt $studioStart) {
+    $WindoVersion = "5.3.0"
+    Invoke-Expression $installerSource.Substring($studioStart, $studioEnd - $studioStart)
+    $studioScript = (_windo_power_studio_script_text).Replace("__WINDO_ICON_PATH__", "")
+    $studioErrors = $null
+    $studioTokens = $null
+    [System.Management.Automation.Language.Parser]::ParseInput($studioScript, [ref]$studioTokens, [ref]$studioErrors) | Out-Null
+    Assert-Equal ($studioErrors.Count) 0 "generated Power Studio script parses"
+}
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.3.0.md")) -eq $true) $true "v5.3.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.2.0.md")) -eq $true) $true "v5.2.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.1.1.md")) -eq $true) $true "v5.1.1 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.1.0.md")) -eq $true) $true "v5.1.0 release notes exist"
@@ -238,7 +261,7 @@ Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v4.4.0.md
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v4.5.0.md")) -eq $true) $true "v4.5.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v4.6.0.md")) -eq $true) $true "v4.6.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\v5-roadmap.md")) -eq $true) $true "v5 roadmap doc exists"
-Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v5.2.0.md") -eq $true) $true "README links v5.2.0 release notes"
+Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v5.3.0.md") -eq $true) $true "README links v5.3.0 release notes"
 Assert-Equal ((Test-Path (Join-Path $Root "native-companion\README.md")) -eq $true) $true "native companion scaffold exists"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\Enterprise\assets\ico\windo-tray-ready.ico")) -eq $true) $true "Enterprise branded tray ico exists"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\assets\banners\banner-blue-left.png")) -eq $true) $true "README banner asset exists"
