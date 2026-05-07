@@ -8,7 +8,6 @@
   <img src="brand/winDO.png" alt="WINDO logo" width="520">
 </p>
 
-**Choose elevation before execution.**
 
 WINDO is a PowerShell-first elevation helper for Windows. It gives administrators a **deliberate, auditable** way to request elevation **before** a command runs—instead of improvising after the fact.
 
