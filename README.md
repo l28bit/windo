@@ -1,5 +1,3 @@
-# WINDO
-
 <p align="center">
   <img src="brand/winDO.png" alt="WINDO logo" width="520">
 </p>
