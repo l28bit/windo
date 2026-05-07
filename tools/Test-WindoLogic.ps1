@@ -58,8 +58,8 @@ $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
 $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "5.4.0"') -eq $true) $true "installer version is 5.4.0"
-Assert-Equal ($bootstrapSource.Contains("WINDO 5.4.0 Limited Edition bootstrap") -eq $true) $true "bootstrap banner is current"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "5.4.1"') -eq $true) $true "installer version is 5.4.1"
+Assert-Equal ($bootstrapSource.Contains("WINDO 5.4.1 Limited Edition bootstrap") -eq $true) $true "bootstrap banner is current"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
 Assert-Equal ($bootstrapSource.Contains("contents/windo_install.ps1?ref=Exodus") -eq $true) $true "bootstrap knows GitHub Contents API installer URL"
 Assert-Equal ($bootstrapSource.Contains('$Repo = "https://raw.githubusercontent.com/l28bit/windo/Exodus/windo_install.ps1"') -eq $false) $true "bootstrap no longer hardcodes raw installer as primary source"
@@ -158,8 +158,17 @@ Assert-Equal ($installerSource.Contains("windo explain <command...>") -eq $true)
 Assert-Equal ($installerSource.Contains("checksumValidation") -eq $true) $true "explain payload includes checksum posture"
 Assert-Equal ($installerSource.Contains("function __windo_resolve_completion_mode") -eq $true) $true "profile completer resolves completion mode"
 Assert-Equal ($installerSource.Contains("function __windo_completion_specs") -eq $true) $true "profile completer has command-specific syntax specs"
+Assert-Equal ($installerSource.Contains("function _windo_completion_doctor") -eq $true) $true "installer defines completion doctor"
+Assert-Equal ($installerSource.Contains("function _windo_completion_repair") -eq $true) $true "installer defines completion repair"
+Assert-Equal ($installerSource.Contains('if ($sub -eq "doctor")') -eq $true) $true "completion command handles doctor"
+Assert-Equal ($installerSource.Contains('if ($sub -eq "repair")') -eq $true) $true "completion command handles repair"
 Assert-Equal ($installerSource.Contains("trust = @('--online','--offline','--json')") -eq $true) $true "profile completer knows trust syntax"
 Assert-Equal ($installerSource.Contains('if ($mode -eq "native-first") { return }') -eq $false) $true "profile completer offers WINDO verbs at empty windo prefix"
+$psReadLineBlockStart = $installerSource.IndexOf('$WindoPsReadLineBlock = @', [StringComparison]::Ordinal)
+$psReadLineBlockEnd = $installerSource.IndexOf('$WindoCompleterBlock = @', $psReadLineBlockStart, [StringComparison]::Ordinal)
+$psReadLineProfileBlock = if ($psReadLineBlockStart -ge 0 -and $psReadLineBlockEnd -gt $psReadLineBlockStart) { $installerSource.Substring($psReadLineBlockStart, $psReadLineBlockEnd - $psReadLineBlockStart) } else { "" }
+Assert-Equal ($psReadLineProfileBlock.Contains('if (-not $policy.enabled) { return }') -eq $false) $true "profile keybinding setup does not exit before completer when disabled"
+Assert-Equal ($psReadLineProfileBlock.Contains('if ($null -eq $selectedPrefixChord) { return }') -eq $false) $true "profile keybinding setup does not exit before completer when binding fails"
 Assert-Equal ($installerSource.Contains('^\s*windo(?:\s+|$)') -eq $true) $true "profile completer recognizes bare windo prefix"
 Assert-Equal ($installerSource.Contains("Register-ArgumentCompleter -CommandName windo -Native") -eq $true) $true "profile completer uses native argument completion"
 Assert-Equal ($installerSource.Contains("TabExpansion2 -inputScript `$delegate") -eq $true) $true "profile completer delegates native commands"
@@ -266,6 +275,7 @@ if ($studioStart -ge 0 -and $studioEnd -gt $studioStart) {
     [System.Management.Automation.Language.Parser]::ParseInput($studioScript, [ref]$studioTokens, [ref]$studioErrors) | Out-Null
     Assert-Equal ($studioErrors.Count) 0 "generated Power Studio script parses"
 }
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.4.1.md")) -eq $true) $true "v5.4.1 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.4.0.md")) -eq $true) $true "v5.4.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.3.0.md")) -eq $true) $true "v5.3.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.2.0.md")) -eq $true) $true "v5.2.0 release notes exist"
@@ -276,11 +286,11 @@ Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v4.4.0.md
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v4.5.0.md")) -eq $true) $true "v4.5.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v4.6.0.md")) -eq $true) $true "v4.6.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\v5-roadmap.md")) -eq $true) $true "v5 roadmap doc exists"
-Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v5.4.0.md") -eq $true) $true "README links v5.4.0 release notes"
+Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v5.4.1.md") -eq $true) $true "README links v5.4.1 release notes"
 Assert-Equal ((Test-Path (Join-Path $Root "native-companion\README.md")) -eq $true) $true "native companion scaffold exists"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\Enterprise\assets\ico\windo-tray-ready.ico")) -eq $true) $true "Enterprise branded tray ico exists"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\assets\banners\banner-blue-left.png")) -eq $true) $true "README banner asset exists"
-Assert-Equal ($readmeSource.Contains("brand/assets/banners/banner-blue-left.png") -eq $true) $true "README uses blue banner asset"
+Assert-Equal ($readmeSource.Contains("brand/assets/banners/banner-blue-left.png") -eq $false) $true "README no longer uses full-width blue banner asset"
 Assert-Equal ($readmeSource.Contains("brand/winDO.png") -eq $true) $true "README uses constrained winDO logo asset"
 Assert-Equal ($readmeSource.Contains("brand/assets/logos/transparent-github-avatar-panel.png") -eq $true) $true "README uses transparent avatar panel asset"
 Assert-Equal ($readmeSource.Contains("brand/Enterprise/assets/svg/windo-brand-mark-contained-dark.svg") -eq $true) $true "README uses Enterprise contained brand mark"
