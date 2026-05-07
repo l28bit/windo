@@ -1,10 +1,6 @@
 # WINDO
 
 <p align="center">
-  <img src="brand/assets/banners/banner-blue-left.png" alt="WINDO banner" width="100%">
-</p>
-
-<p align="center">
   <img src="brand/winDO.png" alt="WINDO logo" width="520">
 </p>
 
