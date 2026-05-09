@@ -20,6 +20,29 @@ function Get-WindoPublishedTextFileSha256([string]$Path) {
     }
 }
 
+function Get-WindoChecksumManifest([string]$Content) {
+    $manifest = @{}
+    if ($null -eq $Content) { return $manifest }
+
+    $raw = [string]$Content
+    if ($raw.Trim() -match '^[A-Fa-f0-9]{64}$') {
+        return @{ installerSha256 = $raw.Trim().ToUpperInvariant() }
+    }
+
+    foreach ($line in ($raw -split "`r?`n")) {
+        $trim = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($trim) -or $trim.StartsWith("#")) { continue }
+        if ($trim -match '^(?<key>[^=]+?)=(?<value>.*)$') {
+            $manifest[$matches.key] = $matches.value.Trim()
+        }
+    }
+    return $manifest
+}
+
+function Test-WindoHex64([string]$Value) {
+    return ($Value -match '^[A-Fa-f0-9]{64}$')
+}
+
 $files = @(
     "bootstrap.ps1",
     "windo_install.ps1",
@@ -52,22 +75,51 @@ try {
         $ok = $false
     } else {
         $checksumContent = [string](Get-Content $checksumPath -Raw)
-        $match = [regex]::Match($checksumContent, '[A-Fa-f0-9]{64}')
-        if (-not $match.Success) {
+        $checksumManifest = Get-WindoChecksumManifest -Content $checksumContent
+        $expectedInstaller = $checksumManifest.installerSha256
+        $expectedUninstaller = $checksumManifest.uninstallerSha256
+
+        if (-not (Test-WindoHex64 $expectedInstaller)) {
             Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
             Write-Host "Published installer checksum does not contain a valid SHA256."
             $ok = $false
         } else {
-            $expected = $match.Value.ToUpperInvariant()
             $actual = Get-WindoPublishedTextFileSha256 -Path $installerPath
-            if ($actual -cne $expected) {
+            if ($actual -cne $expectedInstaller) {
                 Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
                 Write-Host "Published installer checksum is stale."
-                Write-Host "Expected: $actual"
-                Write-Host "Found   : $expected"
+                Write-Host "Expected: $expectedInstaller"
+                Write-Host "Found   : $actual"
                 $ok = $false
             } else {
-                Write-Host "OK   checksums/installer.sha256" -ForegroundColor Green
+                Write-Host "OK   checksums/installer.sha256 (installer)" -ForegroundColor Green
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($expectedUninstaller)) {
+            Write-Host "WARN checksums/installer.sha256" -ForegroundColor Yellow
+            Write-Host "Published uninstaller checksum entry is missing."
+            $ok = $false
+        } elseif (-not (Test-WindoHex64 $expectedUninstaller)) {
+            Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
+            Write-Host "Published uninstaller checksum is not a valid SHA256."
+            $ok = $false
+        } else {
+            $uninstallerPath = Join-Path $root "windo_uninstall.ps1"
+            if (Test-Path $uninstallerPath) {
+                $actualUninstaller = Get-WindoPublishedTextFileSha256 -Path $uninstallerPath
+                if ($actualUninstaller -cne $expectedUninstaller) {
+                    Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
+                    Write-Host "Published uninstaller checksum is stale."
+                    Write-Host "Expected: $expectedUninstaller"
+                    Write-Host "Found   : $actualUninstaller"
+                    $ok = $false
+                } else {
+                    Write-Host "OK   checksums/installer.sha256 (uninstaller)" -ForegroundColor Green
+                }
+            } else {
+                Write-Host "WARN checksums/installer.sha256" -ForegroundColor Yellow
+                Write-Host "windo_uninstall.ps1 missing; skipping uninstaller checksum validation."
             }
         }
     }
@@ -82,24 +134,47 @@ try {
     if ($versionMatch.Success) {
         $version = $versionMatch.Groups['v'].Value
         $snapshotInstaller = Join-Path $root ("versions\v{0}\windo_install.ps1" -f $version)
+        $snapshotUninstall = Join-Path $root ("versions\v{0}\windo_uninstall.ps1" -f $version)
         $snapshotChecksum = Join-Path $root ("versions\v{0}\checksums\installer.sha256" -f $version)
         if ((Test-Path -LiteralPath $snapshotInstaller) -and (Test-Path -LiteralPath $snapshotChecksum)) {
-            $snapshotExpectedMatch = [regex]::Match(([string](Get-Content -LiteralPath $snapshotChecksum -Raw)), '[A-Fa-f0-9]{64}')
-            if (-not $snapshotExpectedMatch.Success) {
+            $snapshotExpectedContent = [string](Get-Content -LiteralPath $snapshotChecksum -Raw)
+            $snapshotManifest = Get-WindoChecksumManifest -Content $snapshotExpectedContent
+            $snapshotExpectedInstaller = $snapshotManifest.installerSha256
+            $snapshotExpectedUninstaller = $snapshotManifest.uninstallerSha256
+
+            if (-not (Test-WindoHex64 $snapshotExpectedInstaller)) {
                 Write-Host "FAIL versions/v$version/checksums/installer.sha256" -ForegroundColor Red
                 Write-Host "Snapshot installer checksum does not contain a valid SHA256."
                 $ok = $false
             } else {
                 $snapshotActual = Get-WindoPublishedTextFileSha256 -Path $snapshotInstaller
-                $snapshotExpected = $snapshotExpectedMatch.Value.ToUpperInvariant()
-                if ($snapshotActual -cne $snapshotExpected) {
+                if ($snapshotActual -cne $snapshotExpectedInstaller) {
                     Write-Host "FAIL versions/v$version/checksums/installer.sha256" -ForegroundColor Red
                     Write-Host "Snapshot installer checksum is stale."
-                    Write-Host "Expected: $snapshotActual"
-                    Write-Host "Found   : $snapshotExpected"
+                    Write-Host "Expected: $snapshotExpectedInstaller"
+                    Write-Host "Found   : $snapshotActual"
                     $ok = $false
                 } else {
                     Write-Host "OK   versions/v$version/checksums/installer.sha256" -ForegroundColor Green
+                }
+            }
+
+            if (-not (Test-WindoHex64 $snapshotExpectedUninstaller)) {
+                Write-Host "WARN versions/v$version/checksums/installer.sha256" -ForegroundColor Yellow
+                Write-Host "Snapshot uninstaller checksum does not contain a valid SHA256 or is missing."
+            } else {
+                if (Test-Path -LiteralPath $snapshotUninstall) {
+                    $snapshotActualUninstaller = Get-WindoPublishedTextFileSha256 -Path $snapshotUninstall
+                    if ($snapshotActualUninstaller -cne $snapshotExpectedUninstaller) {
+                        Write-Host "FAIL versions/v$version/checksums/installer.sha256" -ForegroundColor Red
+                        Write-Host "Snapshot uninstaller checksum is stale."
+                        Write-Host "Expected: $snapshotExpectedUninstaller"
+                        Write-Host "Found   : $snapshotActualUninstaller"
+                        $ok = $false
+                    }
+                } else {
+                    Write-Host "WARN versions/v$version/checksums/installer.sha256" -ForegroundColor Yellow
+                    Write-Host "versions/v$version/windo_uninstall.ps1 missing; skipping snapshot uninstaller checksum validation."
                 }
             }
         } else {

@@ -10,6 +10,45 @@ function Test-WindoBootstrapProcessElevated {
     }
 }
 
+function Get-WindoBootstrapReleaseBranch {
+    $branch = if ($null -ne $env:WINDO_TRACKING_BRANCH -and -not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { [string]$env:WINDO_TRACKING_BRANCH } else { "v6" }
+    return $branch
+}
+
+function ConvertFrom-WindoBootstrapBool {
+    param([string]$Name, [bool]$Default = $false)
+    $raw = [string]$env:$Name
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $Default }
+    switch ($raw.Trim().ToLowerInvariant()) {
+        '1' { return $true }
+        'true' { return $true }
+        'yes' { return $true }
+        'on' { return $true }
+        '0' { return $false }
+        'false' { return $false }
+        'no' { return $false }
+        'off' { return $false }
+        default { return $Default }
+    }
+}
+
+function _windo_bootstrap_is_retryable_web_error {
+    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+    if ($null -eq $ErrorRecord) { return $false }
+    $m = $ErrorRecord.Exception.Message
+    if ($m -match 'timeout|timed out|name resolution|Could not establish trust relationship|name not known|No such host|connection was aborted|The remote name could not be resolved') { return $true }
+    $resp = $ErrorRecord.Exception.Response
+    if ($null -ne $resp) {
+        try {
+            $code = [int]$resp.StatusCode
+            return ($code -in @(429, 500, 502, 503, 504))
+        } catch { }
+    }
+    return $false
+}
+
+$script:_windo_bootstrap_retry_ms = @(350, 900, 2200)
+
 $Temp = Join-Path $env:TEMP ("windo_install_" + [Guid]::NewGuid().ToString("n") + ".ps1")
 
 function Write-WindoBootstrapBanner {
@@ -118,62 +157,128 @@ function Invoke-WindoBootstrapDownload {
 }
 
 function Get-WindoBootstrapInstallerRawUrl {
-    "https://raw.githubusercontent.com/l28bit/windo/v6/windo_install.ps1"
+    "https://raw.githubusercontent.com/l28bit/windo/$((Get-WindoBootstrapReleaseBranch))/windo_install.ps1"
 }
 
 function Get-WindoBootstrapInstallerApiUrl {
-    "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=v6"
+    "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=$((Get-WindoBootstrapReleaseBranch))"
 }
 
 function Save-WindoBootstrapPublishedInstaller {
     param([Parameter(Mandatory)][string]$OutFile)
 
     $apiUrl = Get-WindoBootstrapInstallerApiUrl
-    try {
-        $api = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 35 -ErrorAction Stop
-        $obj = $api.Content | ConvertFrom-Json -ErrorAction Stop
-        if ($obj.content) {
-            $bytes = [Convert]::FromBase64String(([string]$obj.content -replace '\s', ''))
-            [IO.File]::WriteAllBytes($OutFile, $bytes)
-            return [pscustomobject]@{ Source = "github-api"; Url = $apiUrl }
+    $apiError = $null
+
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $api = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 35 -ErrorAction Stop
+            $obj = $api.Content | ConvertFrom-Json -ErrorAction Stop
+            if ($obj.content) {
+                $bytes = [Convert]::FromBase64String(([string]$obj.content -replace '\s', ''))
+                [IO.File]::WriteAllBytes($OutFile, $bytes)
+                return [pscustomobject]@{ Source = "github-api"; Url = $apiUrl; Attempt = $attempt }
+            }
+            throw "Installer API response did not contain content."
+        } catch {
+            $apiError = $_.Exception.Message
+            if (-not (_windo_bootstrap_is_retryable_web_error $_) -or $attempt -ge 3) { break }
+            Start-Sleep -Milliseconds $script:_windo_bootstrap_retry_ms[[Math]::Min($attempt - 1, 2)]
         }
-    } catch {
-        $apiError = $_.Exception.Message
     }
 
     $rawUrl = Get-WindoBootstrapInstallerRawUrl
-    Invoke-WindoBootstrapDownload -Uri $rawUrl -OutFile $OutFile -Label "Downloading installer via raw fallback..."
-    return [pscustomobject]@{ Source = "raw-fallback"; Url = $rawUrl; ApiError = $apiError }
+    try {
+        Invoke-WindoBootstrapDownload -Uri $rawUrl -OutFile $OutFile -Label "Downloading installer via raw fallback..."
+        return [pscustomobject]@{ Source = "raw-fallback"; Url = $rawUrl; ApiError = $apiError; Attempt = 1 }
+    } catch {
+        throw "Published installer was not available. github-api: $apiError; raw: $($_.Exception.Message)"
+    }
 }
 
 function Get-WindoBootstrapChecksumRawUrl {
-    "https://raw.githubusercontent.com/l28bit/windo/v6/checksums/installer.sha256"
+    "https://raw.githubusercontent.com/l28bit/windo/$((Get-WindoBootstrapReleaseBranch))/checksums/installer.sha256"
 }
 
 function Get-WindoBootstrapChecksumApiUrl {
-    "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=v6"
+    "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=$((Get-WindoBootstrapReleaseBranch))"
+}
+
+function Get-WindoBootstrapNormalizedPublishedChecksum([string]$Text) {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    $candidates = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($line in ($Text -split "`r?`n")) {
+        $trim = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($trim) -or $trim.StartsWith("#")) { continue }
+
+        if ($trim -match '^[^=]+?=([A-Fa-f0-9]{64})$') {
+            $null = $candidates.Add($matches[1].ToUpperInvariant())
+            continue
+        }
+        if ($trim -match '^([A-Fa-f0-9]{64})\s*$') {
+            $null = $candidates.Add($matches[1].ToUpperInvariant())
+            continue
+        }
+        if ($trim -match '^([A-Fa-f0-9]{64})\s+\S+$') {
+            $null = $candidates.Add($matches[1].ToUpperInvariant())
+            continue
+        }
+        if ($trim -match '^\S+\s+([A-Fa-f0-9]{64})$') {
+            $null = $candidates.Add($matches[1].ToUpperInvariant())
+            continue
+        }
+
+        if ($trim -match '[A-Fa-f0-9]{64}') { return $null }
+    }
+
+    if ($candidates.Count -eq 1) { return $candidates[0] }
+    return $null
 }
 
 function Get-WindoBootstrapPublishedChecksum {
     $apiUrl = Get-WindoBootstrapChecksumApiUrl
-    try {
-        $api = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
-        $obj = $api.Content | ConvertFrom-Json -ErrorAction Stop
-        if ($obj.content) {
-            $contentText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(([string]$obj.content -replace '\s', '')))
-            $m = [regex]::Match($contentText, '[A-Fa-f0-9]{64}')
-            if ($m.Success) { return $m.Value.ToUpperInvariant() }
+    $apiError = $null
+
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $api = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+            $obj = $api.Content | ConvertFrom-Json -ErrorAction Stop
+            if ($obj.content) {
+                $contentText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(([string]$obj.content -replace '\s', '')))
+                $sha = Get-WindoBootstrapNormalizedPublishedChecksum $contentText
+                if ($sha) { return $sha }
+                throw "Published checksum payload was present but did not contain a valid SHA256."
+            }
+            throw "Published checksum API response was empty."
+        } catch {
+            if (-not (_windo_bootstrap_is_retryable_web_error $_) -or $attempt -ge 3) {
+                $apiError = $_.Exception.Message
+                break
+            }
+            Start-Sleep -Milliseconds $script:_windo_bootstrap_retry_ms[[Math]::Min($attempt - 1, 2)]
         }
-    } catch {}
+    }
 
     $rawUrl = Get-WindoBootstrapChecksumRawUrl
-    try {
-        $wr = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
-        if ($null -ne $wr.Content) {
-            $m = [regex]::Match([string]$wr.Content, '[A-Fa-f0-9]{64}')
-            if ($m.Success) { return $m.Value.ToUpperInvariant() }
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $wr = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+            if ($null -ne $wr.Content) {
+                $sha = Get-WindoBootstrapNormalizedPublishedChecksum ([string]$wr.Content)
+                if ($sha) { return $sha }
+                throw "Published checksum payload was present but did not contain a valid SHA256."
+            }
+            throw "Published checksum raw response was empty."
+        } catch {
+            if (-not (_windo_bootstrap_is_retryable_web_error $_) -or $attempt -ge 3) { break }
+            Start-Sleep -Milliseconds $script:_windo_bootstrap_retry_ms[[Math]::Min($attempt - 1, 2)]
         }
-    } catch {}
+    }
+
+    if ($apiError) {
+        Write-WindoBootstrapStep -Status warn -Label "Checksum source check failed" -Detail $apiError -Color Yellow
+    }
     return $null
 }
 
@@ -229,7 +334,7 @@ try {
         throw "Installer failed to download."
     }
 
-    if (-not $env:WINDO_SKIP_INSTALLER_SHA256) {
+    if (-not (ConvertFrom-WindoBootstrapBool -Name WINDO_SKIP_INSTALLER_SHA256)) {
         Write-WindoBootstrapStep -Status run -Label "Verifying installer checksum" -Detail "published checksums/installer.sha256 (GitHub API, raw fallback)"
         try {
             $expect = Get-WindoBootstrapPublishedChecksum

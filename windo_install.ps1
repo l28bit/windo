@@ -4621,12 +4621,36 @@ Use: windo prompt --json   (machine-readable bundle)
         Remove-Job $job -Force -ErrorAction SilentlyContinue
     }
 
+    function _windo_release_branch {
+        if (-not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { return [string]$env:WINDO_TRACKING_BRANCH }
+        return "v6"
+    }
+
+    function _windo_is_retryable_web_error {
+        param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+        if ($null -eq $ErrorRecord) { return $false }
+        $msg = $ErrorRecord.Exception.Message
+        if ($msg -match 'timeout|timed out|name resolution|Could not establish trust relationship|name not known|No such host|connection was aborted|The remote name could not be resolved') { return $true }
+        $resp = $ErrorRecord.Exception.Response
+        if ($null -ne $resp) {
+            try {
+                $status = [int]$resp.StatusCode
+                return ($status -in @(429, 500, 502, 503, 504))
+            } catch { }
+        }
+        return $false
+    }
+
+    $script:_windo_retry_delays_ms = @(250, 850, 2200)
+
     function _windo_installer_raw_url {
-        return "https://raw.githubusercontent.com/l28bit/windo/v6/windo_install.ps1"
+        $branch = _windo_release_branch
+        return "https://raw.githubusercontent.com/l28bit/windo/$branch/windo_install.ps1"
     }
 
     function _windo_installer_api_url {
-        return "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=v6"
+        $branch = _windo_release_branch
+        return "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=$branch"
     }
 
     function _windo_extract_installer_version([string]$Text) {
@@ -4638,29 +4662,48 @@ Use: windo prompt --json   (machine-readable bundle)
 
     function _windo_get_published_installer_text {
         $apiUrl = _windo_installer_api_url
-        try {
-            $resp = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 35 -ErrorAction Stop
-            $obj = $resp.Content | ConvertFrom-Json -ErrorAction Stop
-            if ($obj.content) {
-                $bytes = [Convert]::FromBase64String(([string]$obj.content -replace '\s', ''))
-                $text = [System.Text.Encoding]::UTF8.GetString($bytes)
-                return [pscustomobject]@{ status = "available"; source = "github-api"; url = $apiUrl; text = $text; bytes = $bytes; version = (_windo_extract_installer_version $text); error = $null }
+        $apiError = $null
+
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $resp = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 35 -ErrorAction Stop
+                $obj = $resp.Content | ConvertFrom-Json -ErrorAction Stop
+                if ($obj.content) {
+                    $bytes = [Convert]::FromBase64String(([string]$obj.content -replace '\s', ''))
+                    $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+                    return [pscustomobject]@{ status = "available"; source = "github-api"; url = $apiUrl; text = $text; bytes = $bytes; version = (_windo_extract_installer_version $text); error = $null; attempt = $attempt }
+                }
+                throw "Installer API response did not include file content."
+            } catch {
+                $apiError = $_.Exception.Message
+                if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) {
+                    break
+                }
+                Start-Sleep -Milliseconds $script:_windo_retry_delays_ms[[Math]::Min($attempt - 1, 2)]
             }
-        } catch {
-            $apiError = $_.Exception.Message
         }
 
         $rawUrl = _windo_installer_raw_url
-        try {
-            $resp = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 35 -ErrorAction Stop
-            $text = [string]$resp.Content
-            $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
-            return [pscustomobject]@{ status = "available"; source = "raw-fallback"; url = $rawUrl; text = $text; bytes = $bytes; version = (_windo_extract_installer_version $text); error = $apiError }
-        } catch {
-            $msg = $_.Exception.Message
-            if ($apiError) { $msg = "github-api: $apiError; raw: $msg" }
-            return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; text = $null; bytes = $null; version = $null; error = $msg }
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $tmpFile = Join-Path $env:TEMP ("windo_install_raw_" + [Guid]::NewGuid().ToString("n") + ".ps1")
+            try {
+                Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 35 -OutFile $tmpFile -ErrorAction Stop
+                $bytes = [System.IO.File]::ReadAllBytes($tmpFile)
+                $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+                return [pscustomobject]@{ status = "available"; source = "raw-fallback"; url = $rawUrl; text = $text; bytes = $bytes; version = (_windo_extract_installer_version $text); error = $apiError; attempt = $attempt }
+            } catch {
+                if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) {
+                    $msg = $_.Exception.Message
+                    if ($apiError) { $msg = "github-api: $apiError; raw: $msg" }
+                    return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; text = $null; bytes = $null; version = $null; error = $msg; attempt = $attempt }
+                }
+                Start-Sleep -Milliseconds $script:_windo_retry_delays_ms[[Math]::Min($attempt - 1, 2)]
+            } finally {
+                if (Test-Path -LiteralPath $tmpFile -ErrorAction SilentlyContinue) { Remove-Item -LiteralPath $tmpFile -Force -ErrorAction SilentlyContinue }
+            }
         }
+
+        return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; text = $null; bytes = $null; version = $null; error = "failed to download installer metadata."; attempt = 3 }
     }
 
     function _windo_save_published_installer {
@@ -4675,26 +4718,62 @@ Use: windo prompt --json   (machine-readable bundle)
 
     function _windo_normalize_published_installer_sha256([string]$Text) {
         if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
-        $m = [regex]::Match($Text, '[A-Fa-f0-9]{64}')
-        if (-not $m.Success) { return $null }
-        return $m.Value.ToUpperInvariant()
+        $candidates = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in ($Text -split "`r?`n")) {
+            $trim = $line.Trim()
+            if ([string]::IsNullOrWhiteSpace($trim) -or $trim.StartsWith("#")) { continue }
+
+            if ($trim -match '^[^=]+?=([A-Fa-f0-9]{64})$') {
+                $null = $candidates.Add($matches[1].ToUpperInvariant())
+                continue
+            }
+            if ($trim -match '^([A-Fa-f0-9]{64})\s*$') {
+                $null = $candidates.Add($matches[1].ToUpperInvariant())
+                continue
+            }
+            if ($trim -match '^([A-Fa-f0-9]{64})\s+\S+$') {
+                $null = $candidates.Add($matches[1].ToUpperInvariant())
+                continue
+            }
+            if ($trim -match '^\S+\s+([A-Fa-f0-9]{64})$') {
+                $null = $candidates.Add($matches[1].ToUpperInvariant())
+                continue
+            }
+
+            if ($trim -match '[A-Fa-f0-9]{64}') { return $null }
+        }
+
+        if ($candidates.Count -eq 1) { return $candidates[0].ToUpperInvariant() }
+        return $null
     }
 
     function _windo_installer_checksum_raw_url {
-        return "https://raw.githubusercontent.com/l28bit/windo/v6/checksums/installer.sha256"
+        $branch = _windo_release_branch
+        return "https://raw.githubusercontent.com/l28bit/windo/$branch/checksums/installer.sha256"
     }
 
     function _windo_installer_checksum_api_url {
-        return "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=v6"
+        $branch = _windo_release_branch
+        return "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=$branch"
     }
 
     function _windo_read_checksum_from_github_contents([string]$Url) {
-        $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
-        $obj = $resp.Content | ConvertFrom-Json -ErrorAction Stop
-        if ($null -eq $obj -or [string]::IsNullOrWhiteSpace([string]$obj.content)) { return $null }
-        $base64 = ([string]$obj.content -replace '\s', '')
-        $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($base64))
-        return (_windo_normalize_published_installer_sha256 $text)
+        $apiError = $null
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+                $obj = $resp.Content | ConvertFrom-Json -ErrorAction Stop
+                if ($null -eq $obj -or [string]::IsNullOrWhiteSpace([string]$obj.content)) { return $null }
+                $base64 = ([string]$obj.content -replace '\s', '')
+                $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($base64))
+                return (_windo_normalize_published_installer_sha256 $text)
+            } catch {
+                $apiError = $_.Exception.Message
+                if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) { break }
+                Start-Sleep -Milliseconds $script:_windo_retry_delays_ms[[Math]::Min($attempt - 1, 2)]
+            }
+        }
+        throw $apiError
     }
 
     function _windo_get_published_installer_sha256 {
@@ -4704,34 +4783,41 @@ Use: windo prompt --json   (machine-readable bundle)
             if (_is_sha256_hex $sha) {
                 return [pscustomobject]@{ status = "available"; source = "github-api"; url = $apiUrl; sha256 = $sha; error = $null }
             }
+            return [pscustomobject]@{ status = "invalid"; source = "github-api"; url = $apiUrl; sha256 = $sha; error = "published checksum was reachable but did not contain a valid SHA256" }
         } catch {
             $apiError = $_.Exception.Message
         }
 
         $rawUrl = _windo_installer_checksum_raw_url
-        try {
-            $resp = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
-            $sha = _windo_normalize_published_installer_sha256 ([string]$resp.Content)
-            if (_is_sha256_hex $sha) {
-                return [pscustomobject]@{ status = "available"; source = "raw-fallback"; url = $rawUrl; sha256 = $sha; error = $null }
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $resp = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+                $sha = _windo_normalize_published_installer_sha256 ([string]$resp.Content)
+                if (_is_sha256_hex $sha) {
+                    return [pscustomobject]@{ status = "available"; source = "raw-fallback"; url = $rawUrl; sha256 = $sha; error = $null }
+                }
+                return [pscustomobject]@{ status = "invalid"; source = "raw-fallback"; url = $rawUrl; sha256 = $sha; error = "published checksum was reachable but did not contain a valid SHA256" }
+            } catch {
+                if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) {
+                    $msg = $_.Exception.Message
+                    if ($apiError) { $msg = "github-api: $apiError; raw: $msg" }
+                    return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; sha256 = $null; error = $msg }
+                }
+                Start-Sleep -Milliseconds $script:_windo_retry_delays_ms[[Math]::Min($attempt - 1, 2)]
             }
-            return [pscustomobject]@{ status = "invalid"; source = "raw-fallback"; url = $rawUrl; sha256 = $sha; error = "published checksum was reachable but did not contain a valid SHA256" }
-        } catch {
-            $msg = $_.Exception.Message
-            if ($apiError) { $msg = "github-api: $apiError; raw: $msg" }
-            return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; sha256 = $null; error = $msg }
         }
+        return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; sha256 = $null; error = $apiError }
     }
 
     function _windo_verify_installer_sha256_optional([string]$Path) {
-        if ($env:WINDO_SKIP_INSTALLER_SHA256) { return }
+        if (_windo_parse_bool_value $env:WINDO_SKIP_INSTALLER_SHA256 -Default $false) { return }
         if (!(Test-Path $Path)) { return }
         $published = _windo_get_published_installer_sha256
         $expect = $published.sha256
         if ($null -eq $expect) { return }
         $got = (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToUpperInvariant()
         if ($got -cne $expect) {
-            throw "Installer SHA256 does not match published checksum (branch v6). Set `$env:WINDO_SKIP_INSTALLER_SHA256=1 to skip. Expected=$expect Got=$got"
+            throw "Installer SHA256 does not match published checksum (branch $(_windo_release_branch)). Set `$env:WINDO_SKIP_INSTALLER_SHA256=1 to skip. Expected=$expect Got=$got"
         }
     }
 
