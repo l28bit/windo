@@ -26,16 +26,10 @@ function Get-WindoChecksumManifestLine([string]$Key, [string]$Value) {
 function Get-WindoPublishedTextFileSha256([string]$Path) {
     if (!(Test-Path -LiteralPath $Path)) { return $null }
     $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $normalized = New-Object System.Collections.Generic.List[byte]
-    for ($i = 0; $i -lt $bytes.Length; $i++) {
-        if ($bytes[$i] -eq 13 -and ($i + 1) -lt $bytes.Length -and $bytes[$i + 1] -eq 10) {
-            continue
-        }
-        $null = $normalized.Add($bytes[$i])
-    }
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
-        $hashBytes = $sha.ComputeHash($normalized.ToArray())
+        # Runtime verification uses Get-FileHash on raw bytes, so publish the same raw SHA256 domain.
+        $hashBytes = $sha.ComputeHash($bytes)
         -join ($hashBytes | ForEach-Object { $_.ToString("X2") })
     } finally {
         $sha.Dispose()
@@ -47,7 +41,15 @@ if ($null -eq $installerHash) { throw "Missing installer path: $InstallerPath" }
 $uninstallerHash = Get-WindoPublishedTextFileSha256 -Path $UninstallerPath
 
 $branch = Get-WindoReleaseBranch $env:WINDO_TRACKING_BRANCH
-$releaseCommit = if ([string]::IsNullOrWhiteSpace($env:WINDO_RELEASE_COMMIT)) { "unknown" } else { $env:WINDO_RELEASE_COMMIT }
+$releaseCommit = if (-not [string]::IsNullOrWhiteSpace($env:WINDO_RELEASE_COMMIT)) {
+    [string]$env:WINDO_RELEASE_COMMIT
+} else {
+    try {
+        (git rev-parse HEAD).Trim()
+    } catch {
+        "unknown"
+    }
+}
 $generatedAt = (Get-Date -Format "o")
 
 $payload = @(

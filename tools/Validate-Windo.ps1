@@ -4,16 +4,10 @@ $root = Split-Path $PSScriptRoot -Parent
 
 function Get-WindoPublishedTextFileSha256([string]$Path) {
     $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $normalized = New-Object System.Collections.Generic.List[byte]
-    for ($i = 0; $i -lt $bytes.Length; $i++) {
-        if ($bytes[$i] -eq 13 -and ($i + 1) -lt $bytes.Length -and $bytes[$i + 1] -eq 10) {
-            continue
-        }
-        $null = $normalized.Add($bytes[$i])
-    }
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
-        $hashBytes = $sha.ComputeHash($normalized.ToArray())
+        # Validate against the same raw SHA256 domain used by bootstrap/install hash checks.
+        $hashBytes = $sha.ComputeHash($bytes)
         -join ($hashBytes | ForEach-Object { $_.ToString("X2") })
     } finally {
         $sha.Dispose()
