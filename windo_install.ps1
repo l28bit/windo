@@ -601,7 +601,7 @@ Write-Utf8NoBomFile -Path $UpdateScript -Content $SelfUpdateContent
 
 $UninstallContent = @'
 <# =====================================================================
-WINDO uninstall â€” removes scheduled tasks, profile block, and WINDO data.
+WINDO uninstall - removes scheduled tasks, profile block, and WINDO data.
 
 Run elevated (recommended) so scheduled tasks unregister reliably:
   powershell.exe -ExecutionPolicy Bypass -File .\windo_uninstall.ps1 -Confirm
@@ -1229,7 +1229,7 @@ function windo {
         if ([string]::IsNullOrWhiteSpace($h)) { $h = [Environment]::GetEnvironmentVariable('OLLAMA_HOST', 'User') }
         if ([string]::IsNullOrWhiteSpace($h)) { $h = [Environment]::GetEnvironmentVariable('OLLAMA_HOST', 'Machine') }
         if ([string]::IsNullOrWhiteSpace($h)) {
-            return "Ollama: OLLAMA_HOST is unset â€” server defaults to 127.0.0.1:11434 (local only)."
+            return "Ollama: OLLAMA_HOST is unset - server defaults to 127.0.0.1:11434 (local only)."
         }
         $t = $h.Trim()
         $tl = $t.ToLowerInvariant()
@@ -1237,9 +1237,9 @@ function windo {
             return $null
         }
         if ($tl -match '^(https?://)?0\.0\.0\.0(:|/|$)' -or $tl -match '^0\.0\.0\.0:\d+$') {
-            return "Ollama: OLLAMA_HOST binds all interfaces â€” confirm firewall rules and intentional LAN exposure."
+            return "Ollama: OLLAMA_HOST binds all interfaces - confirm firewall rules and intentional LAN exposure."
         }
-        return "Ollama: OLLAMA_HOST may point off loopback â€” confirm intentional network exposure and firewall rules."
+        return "Ollama: OLLAMA_HOST may point off loopback - confirm intentional network exposure and firewall rules."
     }
 
     function _windo_ai_credential_env_snapshot {
@@ -2900,7 +2900,7 @@ Recommended env (set by WINDO after successful elevation):
   WINDO_LAST_REQUEST_ID   last completed RequestId (audit correlation)
   WINDO_VERSION           WINDO CLI / profile version ($WindoVersion)
 
-Example segment (JSON) â€” map fields to your theme's env segment or a custom script block:
+  Example segment (JSON) - map fields to your theme's env segment or a custom script block:
 {
   "type": "text",
   "style": "diamond",
@@ -2908,7 +2908,7 @@ Example segment (JSON) â€” map fields to your theme's env segment or a cust
   "background": "#1e1e1e",
   "leading_diamond": " ",
   "trailing_diamond": "",
-  "template": " WINDO {{ if .Env.WINDO_VERSION }}v{{ .Env.WINDO_VERSION }}{{ end }}{{ if .Env.WINDO_LAST_REQUEST_ID }} Â· {{ .Env.WINDO_LAST_REQUEST_ID }}{{ end }} "
+  "template": " WINDO {{ if .Env.WINDO_VERSION }}v{{ .Env.WINDO_VERSION }}{{ end }}{{ if .Env.WINDO_LAST_REQUEST_ID }} - {{ .Env.WINDO_LAST_REQUEST_ID }}{{ end }} "
 }
 
 Use: windo prompt --json   (machine-readable bundle)
@@ -4105,7 +4105,7 @@ Use: windo prompt --json   (machine-readable bundle)
             _windo_start_downloaded_installer -ScriptPath $TempInst
         } catch {
             $branch = _windo_release_branch
-            Write-Host "[windo] Could not install from $branch: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "[windo] Could not install from ${branch}: $($_.Exception.Message)" -ForegroundColor Red
             _windo_set_exit 1
         } finally {
             if (Test-Path -LiteralPath $TempInst) { Remove-Item -LiteralPath $TempInst -Force -ErrorAction SilentlyContinue }
@@ -4147,7 +4147,7 @@ Use: windo prompt --json   (machine-readable bundle)
     function _suggest_if_denied([int]$exitCode, [string]$output) {
         $low = ($output | Out-String).ToLowerInvariant()
         if ($exitCode -eq 5 -or $exitCode -eq 740 -or $low -match 'access is denied|denied\.|requires elevation|must be run from|privilege') {
-            Write-Host "[windo] Hint: Access was denied or blocked. Check paths and ACLs; run 'windo doctor'. If tasks are missing, re-run the installer elevated once. Elevation remains deliberate â€” WINDO does not auto-elevate your interactive shell." -ForegroundColor DarkYellow
+            Write-Host "[windo] Hint: Access was denied or blocked. Check paths and ACLs; run 'windo doctor'. If tasks are missing, re-run the installer elevated once. Elevation remains deliberate - WINDO does not auto-elevate your interactive shell." -ForegroundColor DarkYellow
         }
     }
 
@@ -4385,7 +4385,7 @@ Use: windo prompt --json   (machine-readable bundle)
             "subtle" { return @{ frames = @(".", "o", "O", "o"); intervalMs = 140; colors = @("Gray", "DarkGray"); clearWidth = 90; usesColor = $false } }
             "steady" { return @{ frames = @("|", "-", "|", "-", "=", "-", "|", "-", "/"); intervalMs = 180; colors = @("Gray", "DarkGray"); clearWidth = 102; usesColor = $false } }
             "standard" { return @{ frames = @("|", "/", "-", "\"); intervalMs = 110; colors = @("Cyan"); clearWidth = 112; usesColor = $false } }
-            "rich" { return @{ frames = @("|", "/", "-", "\", "=", "â‰¡"); intervalMs = 80; colors = @("Cyan", "Blue", "Magenta", "DarkCyan"); clearWidth = 118; usesColor = $true } }
+            "rich" { return @{ frames = @("|", "/", "-", "\\", "=", "==="); intervalMs = 80; colors = @("Cyan", "Blue", "Magenta", "DarkCyan"); clearWidth = 118; usesColor = $true } }
             "burst" { return @{ frames = @(">", ">>", ">>>", " >>", "  >", " >"); intervalMs = 70; colors = @("Cyan", "Blue", "Cyan", "White", "Blue"); clearWidth = 120; usesColor = $true } }
             "cinematic" { return @{ frames = @("[=    ]", "[ =   ]", "[  =  ]", "[   = ]", "[    =]", "[   = ]", "[  =  ]", "[ =   ]"); intervalMs = 75; colors = @("Cyan", "Blue", "DarkCyan", "Cyan", "DarkCyan", "Blue", "Cyan", "White"); clearWidth = 132; usesColor = $true } }
             default { return @{ frames = @("|", "/", "-", "\"); intervalMs = 110; colors = @("Cyan"); clearWidth = 112; usesColor = $false } }
@@ -4704,6 +4704,7 @@ Use: windo prompt --json   (machine-readable bundle)
                 if ($obj.content) {
                     $bytes = [Convert]::FromBase64String(([string]$obj.content -replace '\s', ''))
                     $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+                    $resolvedBlobSha = if ($obj.sha) { [string]$obj.sha } else { $null }
                     return [pscustomobject]@{
                         status = "available"
                         source = "github-api"
@@ -4711,7 +4712,7 @@ Use: windo prompt --json   (machine-readable bundle)
                         text = $text
                         bytes = $bytes
                         version = (_windo_extract_installer_version $text)
-                        blobSha = if ($obj.sha) { [string]$obj.sha }
+                        blobSha = $resolvedBlobSha
                         error = $null
                         attempt = $attempt
                     }
@@ -4810,9 +4811,10 @@ Use: windo prompt --json   (machine-readable bundle)
                 $base64 = ([string]$obj.content -replace '\s', '')
                 $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($base64))
                 $sha = _windo_normalize_published_installer_sha256 $text
+                $resolvedBlobSha = if ($obj.sha) { [string]$obj.sha } else { $null }
                 return [pscustomobject]@{
                     sha256 = $sha
-                    blobSha = if ($obj.sha) { [string]$obj.sha }
+                    blobSha = $resolvedBlobSha
                 }
             } catch {
                 $apiError = $_.Exception.Message
@@ -6858,7 +6860,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Syntax      = @("windo keybindings [status]", "windo keybindings doctor [--json]", "windo keybindings set --chord <chord>", "windo keybindings disable|enable|reset|safe-reset")
                 Description = "Inspect effective chording, recover from broken chords, and switch to safe defaults."
                 Notes       = "safe-reset removes legacy handlers and reboots the configured chord in one command. doctor uses advisory heuristics to spot non-WINDO handlers on WINDO chords."
-                Examples    = @("windo keybindings status --json", "windo keybindings doctor", "windo keybindings disable", "windo keybindings safe-reset")
+                Examples    = @("windo keybindings status", "windo keybindings doctor", "windo keybindings disable", "windo keybindings safe-reset")
             },
             [pscustomobject]@{
                 Name        = "completion"
@@ -7247,10 +7249,10 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Name        = "export"
                 Category    = "Reporting"
                 Summary     = "Bundle manifest, config payload, and log excerpt."
-                Syntax      = @("windo export [-o zip] [-n N] [--redact] [--json]", "windo --json export â€¦")
+                Syntax      = @("windo export [-o zip] [-n N] [--redact] [--json]", "windo --json export ...")
                 Description = "Creates an audit bundle for handoff to support/debug workflows."
                 Notes       = "Use --redact to mask path-like strings in JSON payloads. With --json, prints a machine-readable summary after the zip is written (path, size, audit counts)."
-                Examples    = @("windo export", "windo export -o .\\bundle.zip --redact", "windo --json export -n 50")
+                Examples    = @("windo export", "windo export -o .\bundle.zip --redact", "windo --json export -n 50")
             },
             [pscustomobject]@{
                 Name        = "trace"
@@ -9303,7 +9305,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             } else {
                 Write-Host "[windo] JSON envelope theme saved: $sub  ($PrefsFile)" -ForegroundColor Green
                 Write-Host "  Effective --json: schemaVersion=$($eff.schemaLabel), meta=$(if ($eff.includeMeta) { 'on' } else { 'off' })" -ForegroundColor DarkGray
-                Write-Host "  (Runner, tasks, and audit security are unchangedâ€”only CLI JSON shape.)" -ForegroundColor DarkGray
+                Write-Host "  (Runner, tasks, and audit security are unchanged - only CLI JSON shape.)" -ForegroundColor DarkGray
             }
             _windo_set_exit 0
             return
@@ -9330,7 +9332,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             Write-Host "[windo] JSON envelope theme (CLI --json output only)" -ForegroundColor Cyan
             Write-Host "  WINDO $WindoVersion  embedded schema: $SchemaVersion" -ForegroundColor DarkGray
             Write-Host "  Prefs file    : $PrefsFile" -ForegroundColor DarkGray
-            Write-Host "  Saved preset  : $(if ($fileMode) { $fileMode } else { '(none â†’ auto)' })"
+            Write-Host "  Saved preset  : $(if ($fileMode) { $fileMode } else { '(none -> auto)' })"
             Write-Host "  Env override  : $(if ($env:WINDO_JSON_ENVELOPE) { $env:WINDO_JSON_ENVELOPE } else { '(none)' })  (wins over file)"
             Write-Host "  Effective now : schemaVersion=$($eff.schemaLabel), meta=$(if ($eff.includeMeta) { 'on' } else { 'off' })"
             Write-Host "  Set: windo theme classic | modern | auto" -ForegroundColor DarkGray
@@ -9926,7 +9928,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             $nmapMap = $null
             if ($ports.Count -eq 0 -and $probeTargets.Count -gt 64) {
                 $allIp = $true
-                foreach ($p in @($probeTargets)) { if (-not _windo_net_scan_is_ipv4 $p) { $allIp = $false; break } }
+            foreach ($p in @($probeTargets)) { if (-not (_windo_net_scan_is_ipv4 $p)) { $allIp = $false; break } }
                 if ($allIp) { $nmapMap = _windo_net_scan_nmap_reachable -Targets $probeTargets -TimeoutSeconds $timeout }
             }
 
@@ -9967,7 +9969,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                     ip = $host
                     reachable = [bool]$icmp.reachable
                     rttMs = if ($icmp.rttMs -eq $null) { $null } else { [int]$icmp.rttMs }
-                    ports = if ($ports.Count -eq 0) { @{} } else { [ordered]$portMap }
+                    ports = if ($ports.Count -eq 0) { @{} } else { $portMap }
                 })
             }
 
@@ -10000,7 +10002,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             return
         }
 
-        # probe — dedicated non-blocking TCP port probe (netcat-style, no ICMP required)
+        # probe - dedicated non-blocking TCP port probe (netcat-style, no ICMP required)
         if ($sub -eq "probe") {
             $probeHost = ""; $probePortSpec = ""; $probeTimeoutMs = 800
             $pi = $argStart
@@ -10064,7 +10066,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             _windo_set_exit $probeCode; return
         }
 
-        # nmap — pass-through to nmap.exe with availability guard
+        # nmap - pass-through to nmap.exe with availability guard
         if ($sub -eq "nmap") {
             $nmapExe = Get-Command nmap -ErrorAction SilentlyContinue
             if (-not $nmapExe) {
@@ -10084,7 +10086,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             return
         }
 
-        # rdp — delegate to the windo rdp verb (read posture; apply requires elevation)
+        # rdp - delegate to the windo rdp verb (read posture; apply requires elevation)
         if ($sub -eq "rdp") {
             $rdpFwdArgs = @("rdp")
             for ($si = $argStart; $si -lt $Command.Count; $si++) { $rdpFwdArgs += [string]$Command[$si] }
@@ -10092,7 +10094,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             # fall through to the rdp verb below
         }
 
-        # vnc — delegate to the windo vnc verb (read posture; stop requires elevation)
+        # vnc - delegate to the windo vnc verb (read posture; stop requires elevation)
         if ($sub -eq "vnc") {
             $vncFwdArgs = @("vnc")
             for ($si = $argStart; $si -lt $Command.Count; $si++) { $vncFwdArgs += [string]$Command[$si] }
@@ -10100,7 +10102,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             # fall through to the vnc verb below
         }
 
-        # wsl — delegate to the windo wsl verb
+        # wsl - delegate to the windo wsl verb
         if ($sub -eq "wsl") {
             $wslFwdArgs = @("wsl")
             for ($si = $argStart; $si -lt $Command.Count; $si++) { $wslFwdArgs += [string]$Command[$si] }
@@ -10254,7 +10256,11 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                         'off' { $rdpNla = $false }
                         'disabled' { $rdpNla = $false }
                         default {
-                            if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; error = "--nla must be on|off|true|false|yes|no|1|0"; exitCode = 2 } else { Write-Host "[windo] --nla must be one of: on, off, true, false, yes, no, 1, 0." -ForegroundColor Yellow }
+                            if ($JsonOutput) {
+                                _emit_json "rdp" @{ subcommand = "config"; error = "--nla must be on|off|true|false|yes|no|1|0"; exitCode = 2 }
+                            } else {
+                                Write-Host "[windo] --nla must be one of: on, off, true, false, yes, no, 1, 0." -ForegroundColor Yellow
+                            }
                             _windo_set_exit 2
                             return
                         }
@@ -10276,7 +10282,11 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                         'off' { $rdpNla = $false }
                         'disabled' { $rdpNla = $false }
                         default {
-                            if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; error = "--nla must be on|off|true|false|yes|no|1|0"; exitCode = 2 } else { Write-Host "[windo] --nla must be one of: on, off, true, false, yes, no, 1, 0." -ForegroundColor Yellow }
+                            if ($JsonOutput) {
+                                _emit_json "rdp" @{ subcommand = "config"; error = "--nla must be on|off|true|false|yes|no|1|0"; exitCode = 2 }
+                            } else {
+                                Write-Host "[windo] --nla must be one of: on, off, true, false, yes, no, 1, 0." -ForegroundColor Yellow
+                            }
                             _windo_set_exit 2
                             return
                         }
@@ -11515,7 +11525,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             $cmdArgs = $Command[($runIdx + 1)..($Command.Count - 1)]
             $payload += @('--exec') + $cmdArgs
             $res = _windo_wsl_exec @($payload)
-            if ($JsonOutput) { _emit_json "wsl" @{ command = "exec"; distro = $distro; command = @($cmdArgs); output = @($res.output); exitCode = [int]$res.exitCode } } else { if ($res.output.Count -gt 0) { Write-Host ($res.output -join "`r`n") } }
+            if ($JsonOutput) { _emit_json "wsl" @{ command = "exec"; distro = $distro; args = @($cmdArgs); output = @($res.output); exitCode = [int]$res.exitCode } } else { if ($res.output.Count -gt 0) { Write-Host ($res.output -join "`r`n") } }
             if ($res.exitCode -ne 0 -and -not $JsonOutput) { Write-Host "[windo] exec failed." -ForegroundColor Red }
             _windo_set_exit [int]$res.exitCode
             return
@@ -11556,7 +11566,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 if ($JsonOutput) {
                     if ($commandText) {
                         $res = _windo_wsl_exec @($runArgs)
-                        _emit_json "wsl" @{ command = "launch"; distro = $distro; command = @($runArgs); output = @($res.output); exitCode = [int]$res.exitCode }
+                        _emit_json "wsl" @{ command = "launch"; distro = $distro; args = @($runArgs); output = @($res.output); exitCode = [int]$res.exitCode }
                         _windo_set_exit [int]$res.exitCode
                         return
                     }
@@ -11600,7 +11610,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             if ($distro) { $toolArgs += @('-d', $distro) }
             $toolArgs += @('--exec','wslpath',$convert,$targetPath)
             if ($DryRun -and -not $argMap.ContainsKey('dry-run')) {
-                if ($JsonOutput) { _emit_json "wsl" @{ command = "path"; direction = $direction; path = $targetPath; distro = $distro; converted = $null; dryRun = $true; command = "wsl " + ($toolArgs -join " "); exitCode = 0 } } else { Write-Host "[windo] DRY-RUN path convert command: wsl " + ($toolArgs -join " ") }
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "path"; direction = $direction; path = $targetPath; distro = $distro; converted = $null; dryRun = $true; commandLine = "wsl " + ($toolArgs -join " "); exitCode = 0 } } else { Write-Host "[windo] DRY-RUN path convert command: wsl " + ($toolArgs -join " ") }
                 _windo_set_exit 0
                 return
             }
@@ -11771,7 +11781,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 background = "#1e1e1e"
                 leading_diamond = " "
                 trailing_diamond = ""
-                template = " WINDO {{ if .Env.WINDO_VERSION }}v{{ .Env.WINDO_VERSION }}{{ end }}{{ if .Env.WINDO_LAST_REQUEST_ID }} Â· {{ .Env.WINDO_LAST_REQUEST_ID }}{{ end }} "
+                template = " WINDO {{ if .Env.WINDO_VERSION }}v{{ .Env.WINDO_VERSION }}{{ end }}{{ if .Env.WINDO_LAST_REQUEST_ID }} - {{ .Env.WINDO_LAST_REQUEST_ID }}{{ end }} "
             }
             exitCode = 0
         }
@@ -11946,7 +11956,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
 }
 "@
         $lp = @"
-# WINDO module $mid â€” loaded after WINDO core (non-fatal on error)
+        # WINDO module $mid - loaded after WINDO core (non-fatal on error)
 `$WindoModuleId = '$mid'
 Write-Host "[WINDO module $mid] loaded." -ForegroundColor DarkGray
 "@
@@ -12404,14 +12414,14 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             exitCode = $(if ($sub -eq "status") { 0 } else { $exitPayload })
         }
         if ($JsonOutput) { _emit_json "ai" $pl } else {
-            Write-Host "[windo] ai $sub â€” AI / local env names only (values never shown)" -ForegroundColor Cyan
+            Write-Host "[windo] ai $sub - AI / local env names only (values never shown)" -ForegroundColor Cyan
             Write-Host "  Elevated         : $($snap.elevated)" -ForegroundColor DarkGray
             Write-Host "  Ollama (set)     : $(if ($snap.ollamaSetNames.Count) { $snap.ollamaSetNames -join ', ' } else { '(none)' })" -ForegroundColor DarkGray
             Write-Host "  Process (set)    : $(if ($snap.processSetNames.Count) { $snap.processSetNames -join ', ' } else { '(none)' })"
             Write-Host "  User scope (set) : $(if ($snap.userSetNames.Count) { $snap.userSetNames -join ', ' } else { '(none)' })"
             Write-Host "  Machine (set)    : $(if ($snap.machineSetNames.Count) { $snap.machineSetNames -join ', ' } else { '(none)' })"
             foreach ($iss in $issues) { Write-Host "  ! $iss" -ForegroundColor Yellow }
-            if ($sub -eq "doctor") { foreach ($r in $rec) { Write-Host "  â†’ $r" -ForegroundColor DarkGray } }
+            if ($sub -eq "doctor") { foreach ($r in $rec) { Write-Host "  -> $r" -ForegroundColor DarkGray } }
         }
         _windo_set_exit $(if ($sub -eq "status") { 0 } else { $exitPayload })
         return
@@ -12433,8 +12443,8 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
         }
         $pol = $res.policy
         $hints = @(
-            "Open a new terminal or run:  . `$PROFILE  â€” so your profile block matches prefs.",
-            "From a normal (non-elevated) window:  windo install-latest  â€” refreshes the embedded profile from v6 when you are behind."
+            "Open a new terminal or run:  . `$PROFILE  - so your profile block matches prefs."
+            "From a normal (non-elevated) window:  windo install-latest  - refreshes the embedded profile from v6 when you are behind."
         )
         if ($JsonOutput) {
             _emit_json "repair" @{
@@ -12447,9 +12457,9 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
                 exitCode = 0
             }
         } else {
-            Write-Host "[windo] repair ($sub): keybindings safe-reset â€” legacy WINDO chords cleared this session; prefix preference Alt+w." -ForegroundColor Green
+            Write-Host "[windo] repair ($sub): keybindings safe-reset - legacy WINDO chords cleared this session; prefix preference Alt+w." -ForegroundColor Green
             Write-Host "  Effective: $(if ($pol.enabled) { $pol.chord } else { '(disabled)' }) (source=$($pol.chordSource))" -ForegroundColor DarkGray
-            foreach ($h in $hints) { Write-Host "  â†’ $h" -ForegroundColor DarkGray }
+            foreach ($h in $hints) { Write-Host "  -> $h" -ForegroundColor DarkGray }
         }
         _windo_set_exit 0
         return
@@ -12487,7 +12497,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
                     exitCode = 0
                 }
             } else {
-                Write-Host "[windo] keybindings doctor (advisory â€” heuristic only)" -ForegroundColor Cyan
+                Write-Host "[windo] keybindings doctor (advisory - heuristic only)" -ForegroundColor Cyan
                 foreach ($c in $checks) {
                     $st = if ($c.looksLikeWindoBinding) { 'ok' } else { 'review' }
                     Write-Host "  [$st] $($c.role) $($c.chord)" -ForegroundColor $(if ($c.looksLikeWindoBinding) { 'Green' } else { 'Yellow' })
@@ -13927,7 +13937,7 @@ Register-WindoArgumentCompleter
 $WindoCompleterBlock = $WindoCompleterBlock.Replace("__WINDO_BUILTIN_ARRAY__", $WindoBuiltinVerbsArrayLiteral)
 
 $WindoModulesLoaderBlock = @'
-# WINDO optional modules loader (enabled in %USERPROFILE%\.pwsh_secure\windo_prefs.json â†’ enabledModules)
+# WINDO optional modules loader (enabled in %USERPROFILE%\.pwsh_secure\windo_prefs.json -> enabledModules)
 $__wmRoot = Join-Path $HOME 'Documents\windo\modules'
 $__wmPrefs = Join-Path $HOME '.pwsh_secure\windo_prefs.json'
 $__wmEnabled = [string[]]@()
