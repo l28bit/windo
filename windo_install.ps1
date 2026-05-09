@@ -4767,6 +4767,13 @@ Use: windo prompt --json   (machine-readable bundle)
             $trim = $line.Trim()
             if ([string]::IsNullOrWhiteSpace($trim) -or $trim.StartsWith("#")) { continue }
 
+            if ($trim -match '^(?<key>[^=]+?)\s*=\s*(?<value>[A-Fa-f0-9]{64})$') {
+                if ($matches.key -ieq "installerSha256") {
+                    return $matches.value.ToUpperInvariant()
+                }
+                continue
+            }
+
             if ($trim -match '^[^=]+?=([A-Fa-f0-9]{64})$') {
                 $null = $candidates.Add($matches[1].ToUpperInvariant())
                 continue
@@ -4788,6 +4795,25 @@ Use: windo prompt --json   (machine-readable bundle)
         }
 
         if ($candidates.Count -eq 1) { return $candidates[0].ToUpperInvariant() }
+        return $null
+    }
+
+    function _windo_get_snapshot_installer_sha256([string]$Version) {
+        if ([string]::IsNullOrWhiteSpace($Version)) { return $null }
+        $trimVersion = $Version.Trim()
+        if (-not ($trimVersion -match '^\d+\.\d+\.\d+$')) { return $null }
+
+        $url = "https://raw.githubusercontent.com/l28bit/windo/v$trimVersion/checksums/installer.sha256"
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+                $sha = _windo_normalize_published_installer_sha256 ([string]$resp.Content)
+                return $sha
+            } catch {
+                if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) { return $null }
+                Start-Sleep -Milliseconds $script:_windo_retry_delays_ms[[Math]::Min($attempt - 1, 2)]
+            }
+        }
         return $null
     }
 
@@ -4939,6 +4965,12 @@ Use: windo prompt --json   (machine-readable bundle)
                     Write-Host "[windo] SHA256 mismatch vs checksum file accepted via GitHub object hash (blob=$blobSha) from branch $(_windo_release_branch). Continuing in compatibility mode." -ForegroundColor Yellow
                     if (-not $strictMode) { return }
                 }
+            }
+            $version = if ($null -ne $installerPayload -and $installerPayload.version) { [string]$installerPayload.version } else { $null }
+            $snapshot = if ($version) { _windo_get_snapshot_installer_sha256 -Version $version } else { $null }
+            if ($null -ne $snapshot -and $got -ieq $snapshot) {
+                Write-Host "[windo] SHA256 mismatch vs checksums/installer.sha256 accepted via published snapshot checksums for v$version. Continuing in compatibility mode." -ForegroundColor Yellow
+                if (-not $strictMode) { return }
             }
             if ($strictMode) {
                 throw "Installer SHA256 does not match published checksum (branch $(_windo_release_branch), strict mode). Set `$env:WINDO_SKIP_INSTALLER_SHA256=1 or WINDO_STRICT_INSTALLER_VERIFICATION=0 to continue. Expected=$expect Got=$got"

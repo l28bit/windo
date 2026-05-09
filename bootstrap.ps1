@@ -263,6 +263,13 @@ function Get-WindoBootstrapNormalizedPublishedChecksum([string]$Text) {
         $trim = $line.Trim()
         if ([string]::IsNullOrWhiteSpace($trim) -or $trim.StartsWith("#")) { continue }
 
+        if ($trim -match '^(?<key>[^=]+?)\s*=\s*(?<value>[A-Fa-f0-9]{64})$') {
+            if ($matches.key -ieq "installerSha256") {
+                return $matches.value.ToUpperInvariant()
+            }
+            continue
+        }
+
         if ($trim -match '^[^=]+?=([A-Fa-f0-9]{64})$') {
             $null = $candidates.Add($matches[1].ToUpperInvariant())
             continue
@@ -284,6 +291,36 @@ function Get-WindoBootstrapNormalizedPublishedChecksum([string]$Text) {
     }
 
     if ($candidates.Count -eq 1) { return $candidates[0] }
+    return $null
+}
+
+function Get-WindoBootstrapVersionedPublishedChecksum([string]$Version) {
+    if ([string]::IsNullOrWhiteSpace($Version)) { return $null }
+    $trimVersion = $Version.Trim()
+    if (-not ($trimVersion -match '^\d+\.\d+\.\d+$')) { return $null }
+
+    $rawUrl = "https://raw.githubusercontent.com/l28bit/windo/v$trimVersion/checksums/installer.sha256"
+    $apiError = $null
+
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $resp = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+            if ($null -ne $resp.Content) {
+                return Get-WindoBootstrapNormalizedPublishedChecksum ([string]$resp.Content)
+            }
+            throw "Versioned checksum raw response was empty."
+        } catch {
+            $apiError = $_.Exception.Message
+            if (-not (_windo_bootstrap_is_retryable_web_error $_) -or $attempt -ge 3) {
+                return $null
+            }
+            Start-Sleep -Milliseconds $script:_windo_bootstrap_retry_ms[[Math]::Min($attempt - 1, 2)]
+        }
+    }
+
+    if ($apiError) {
+        Write-WindoBootstrapStep -Status warn -Label "Versioned checksum check failed" -Detail $apiError -Color Yellow
+    }
     return $null
 }
 
@@ -380,6 +417,7 @@ try {
     Write-WindoBootstrapStep -Status run -Label "Downloading installer" -Detail "GitHub API first, raw fallback"
         $downloadSource = Save-WindoBootstrapPublishedInstaller -OutFile $Temp
     Write-WindoBootstrapStep -Status ok -Label "Installer source" -Detail "$($downloadSource.Source): $($downloadSource.Url)" -Color Green
+            $releaseBranch = Get-WindoBootstrapReleaseBranch
 
     if (!(Test-Path $Temp)) {
         throw "Installer failed to download."
@@ -397,11 +435,21 @@ try {
                         $gotBlob = Get-WindoBootstrapFileBlobSha1 -Path $Temp
                         if ($gotBlob -ieq $blobSha.ToUpperInvariant()) {
                             Write-WindoBootstrapStep -Status warn -Label "Checksum drift tolerated" -Detail "Installer blob SHA1 matches GitHub object $blobSha (continuing)." -Color Yellow
+                            Write-WindoBootstrapStep -Status ok -Label "Checksum accepted" -Color Green
+                            $expected = $null
+                        }
+                    }
+
+                    if ($null -ne $expected) {
+                        $installerText = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($Temp))
+                        $version = if ($installerText -match '\$WindoVersion\s*=\s*"(?<v>\d+\.\d+\.\d+)"') { $matches.v } else { $null }
+                        $snapshot = if ($version) { Get-WindoBootstrapVersionedPublishedChecksum -Version $version } else { $null }
+                        if ($null -ne $snapshot -and $got -ieq $snapshot) {
+                            Write-WindoBootstrapStep -Status warn -Label "Checksum drift tolerated" -Detail "SHA256 matches checksums/installer.sha256 snapshot for v$version on branch $releaseBranch. Continuing in compatibility mode." -Color Yellow
+                            $expected = $null
                         } else {
                             throw "Installer SHA256 does not match published checksum. Set WINDO_SKIP_INSTALLER_SHA256=1 to skip. Expected=$expected Got=$got"
                         }
-                    } else {
-                        throw "Installer SHA256 does not match published checksum. Set WINDO_SKIP_INSTALLER_SHA256=1 to skip. Expected=$expected Got=$got"
                     }
                 }
             }
