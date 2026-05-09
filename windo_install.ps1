@@ -4798,6 +4798,24 @@ Use: windo prompt --json   (machine-readable bundle)
         return $null
     }
 
+    function _windo_parse_manifest_value([string]$Text, [string]$Key) {
+        if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+        if ([string]::IsNullOrWhiteSpace($Key)) { return $null }
+
+        $want = $Key.Trim()
+        foreach ($line in ($Text -split "`r?`n")) {
+            $trim = [string]$line.Trim()
+            if ([string]::IsNullOrWhiteSpace($trim) -or $trim.StartsWith("#")) { continue }
+            $equal = $trim.IndexOf("=")
+            if ($equal -lt 0) { continue }
+            $name = $trim.Substring(0, $equal).Trim()
+            if ($name -ieq $want) {
+                return $trim.Substring($equal + 1).Trim()
+            }
+        }
+        return $null
+    }
+
     function _windo_get_snapshot_installer_sha256([string]$Version) {
         if ([string]::IsNullOrWhiteSpace($Version)) { return $null }
         $trimVersion = $Version.Trim()
@@ -4838,9 +4856,13 @@ Use: windo prompt --json   (machine-readable bundle)
                 $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($base64))
                 $sha = _windo_normalize_published_installer_sha256 $text
                 $resolvedBlobSha = if ($obj.sha) { [string]$obj.sha } else { $null }
+                $resolvedReleaseCommit = _windo_parse_manifest_value $text "releaseCommit"
+                $resolvedReleaseBranch = _windo_parse_manifest_value $text "releaseBranch"
                 return [pscustomobject]@{
                     sha256 = $sha
                     blobSha = $resolvedBlobSha
+                    releaseCommit = $resolvedReleaseCommit
+                    releaseBranch = $resolvedReleaseBranch
                 }
             } catch {
                 $apiError = $_.Exception.Message
@@ -4857,6 +4879,8 @@ Use: windo prompt --json   (machine-readable bundle)
             $resolved = _windo_read_checksum_from_github_contents $apiUrl
             $sha = if ($null -ne $resolved -and $resolved.sha256) { [string]$resolved.sha256 } else { $null }
             $blobSha = if ($null -ne $resolved -and $resolved.blobSha) { [string]$resolved.blobSha } else { $null }
+            $releaseCommit = if ($null -ne $resolved -and $resolved.releaseCommit) { [string]$resolved.releaseCommit } else { $null }
+            $releaseBranch = if ($null -ne $resolved -and $resolved.releaseBranch) { [string]$resolved.releaseBranch } else { $null }
             if (_is_sha256_hex $sha) {
                 return [pscustomobject]@{
                     status = "available"
@@ -4864,6 +4888,8 @@ Use: windo prompt --json   (machine-readable bundle)
                     url = $apiUrl
                     sha256 = $sha
                     blobSha = $blobSha
+                    releaseCommit = $releaseCommit
+                    releaseBranch = $releaseBranch
                     error = $null
                 }
             }
@@ -4873,6 +4899,8 @@ Use: windo prompt --json   (machine-readable bundle)
                 url = $apiUrl
                 sha256 = $sha
                 blobSha = $blobSha
+                releaseCommit = $releaseCommit
+                releaseBranch = $releaseBranch
                 error = "published checksum was reachable but did not contain a valid SHA256"
             }
         } catch {
@@ -4891,6 +4919,8 @@ Use: windo prompt --json   (machine-readable bundle)
                         url = $rawUrl
                         sha256 = $sha
                         blobSha = $null
+                        releaseCommit = "unknown"
+                        releaseBranch = _windo_release_branch
                         error = $null
                     }
                 }
@@ -4900,6 +4930,8 @@ Use: windo prompt --json   (machine-readable bundle)
                     url = $rawUrl
                     sha256 = $sha
                     blobSha = $null
+                    releaseCommit = "unknown"
+                    releaseBranch = _windo_release_branch
                     error = "published checksum was reachable but did not contain a valid SHA256"
                 }
             } catch {
@@ -4912,6 +4944,8 @@ Use: windo prompt --json   (machine-readable bundle)
                         url = $rawUrl
                         sha256 = $null
                         blobSha = $null
+                        releaseCommit = "unknown"
+                        releaseBranch = _windo_release_branch
                         error = $msg
                     }
                 }
@@ -4924,6 +4958,8 @@ Use: windo prompt --json   (machine-readable bundle)
             url = $rawUrl
             sha256 = $null
             blobSha = $null
+            releaseCommit = "unknown"
+            releaseBranch = _windo_release_branch
             error = $apiError
         }
     }
@@ -4970,6 +5006,11 @@ Use: windo prompt --json   (machine-readable bundle)
             $snapshot = if ($version) { _windo_get_snapshot_installer_sha256 -Version $version } else { $null }
             if ($null -ne $snapshot -and $got -ieq $snapshot) {
                 Write-Host "[windo] SHA256 mismatch vs checksums/installer.sha256 accepted via published snapshot checksums for v$version. Continuing in compatibility mode." -ForegroundColor Yellow
+                if (-not $strictMode) { return }
+            }
+            $releaseCommit = if ($published -and $published.PSObject.Properties.Name -contains "releaseCommit") { [string]$published.releaseCommit } else { $null }
+            if ([string]::IsNullOrWhiteSpace($releaseCommit) -or ($releaseCommit -notmatch '^[a-fA-F0-9]{40}$')) {
+                Write-Host "[windo] Published checksum metadata is not release-commit pinned (releaseCommit=$releaseCommit). Continuing in compatibility mode due manifest drift." -ForegroundColor Yellow
                 if (-not $strictMode) { return }
             }
             if ($strictMode) {
