@@ -13,72 +13,19 @@ Experienced operators treat commands as intent. Elevation should not be accident
 
 **intent → choose elevation → execute with authority**
 
-The default GitHub branch for raw URLs is **`Exodus`**.
+The default GitHub branch for raw URLs is **`v6`**.
 
 ---
 
-## What's new in v5.4.1 Exodus Limited Edition
+## What's new in WINDO V6
 
-- **Completion Recovery** — profile keybinding setup no longer exits before the `Register-WindoArgumentCompleter` block, so `windo <Tab>` keeps WINDO command discovery instead of falling back to path names.
-- **Completion Doctor** — `windo completion doctor` checks `TabExpansion2`, registration state, profile completer text, legacy early-return risk, and sample `windo ` completions.
-- **Completion Repair** — `windo completion repair` re-registers the argument completer in the current session when the profile is already loaded.
-- **Windows Integration Plane** — `windo integrate` inspects and repairs current-user Start Menu, desktop, startup tray, and command-shim wiring so WINDO behaves more like a dedicated Windows tool.
-- **Explicit integration repair** — `windo integrate repair` writes Start Menu shortcuts, a Power Studio desktop shortcut, a startup tray shortcut, `.pwsh_secure\windo_start_tray.ps1`, and a current-user `windo.cmd` shim without machine-wide writes.
-- **Integration doctor** — `windo integrate doctor` checks shell COM, shortcut presence, startup wiring, shim presence, and user PATH posture with copy-ready repair commands.
-- **Control-plane integration actions** — `integrate-status`, `integrate-doctor`, `integrate-repair`, `integrate-open`, `integrate-shim`, and `integrate-startup` are now curated visible-shell actions for tray, Power Studio, and Command Center flows.
-- **Native startup path** — `WINDO Command Center Tray.lnk` can launch the browser-independent tray surface at sign-in through the same explicit current-user integration layer.
-- **Power Studio** — `windo studio` and `windo center studio` open a modern Windows Forms wizard surface with guided Start, Trust, Repair, Security, Developer, and Package workflow tabs.
-- **Preview, queue, run workflow controls** — Power Studio exposes curated actions with separate Preview, Queue, and Run buttons so operators can inspect intent before launching visible PowerShell execution.
-- **Production visual jump** — native surfaces now lean into a Windows 11-style command room with status cards, tabbed workflows, progress motion, and tighter action hierarchy.
-- **Native Surface Panel** — `windo surface panel` and `windo center panel` open a dedicated Windows Forms command surface with status cards and curated visible-shell actions.
-- **Status-aware native icons** — tray and panel launch paths now resolve ready, warning, denied, elevated, or neutral Enterprise icons when those assets exist, with `WINDO_TRAY_ICON` still available as an override.
-- **Control Center visual actions** — `surface-panel` joins the curated control action catalog, tray popup, and tab completion path so the browser-independent surface is discoverable everywhere.
-- **Surface polish pass** — `windo dashboard --html`, `windo launchpad --html`, and `windo launchpad --tray` now share a stronger branded operator design system.
-- **Tray Command Center redesign** — the native Windows Forms popup now uses scrollable action rows, clearer command text, and a local status-toast window.
-- **Dashboard readability** — health, integrity, audit categories, recent audit, issues, and paths now have clearer hierarchy for repeated operational use.
-- **Exodus Limited Edition surface** — `windo edition open` renders a local animated command-center console with the final brand assets, V5 status, curated actions, and release identity.
-- **Limited Edition motion** — `windo edition pulse` adds a policy-aware terminal animation for the V5+ surface while still respecting `WINDO_MOTION`, CI, redirected output, and `WINDO_NO_SPINNER`.
-- **Command grammar hardening** — `windo control preview <action-id>`, `windo control execute <request-id>`, `windo center actions`, `windo center preview`, `windo center execute-next`, and `windo signal open` make the V5 command language more explicit and easier to discover.
-- **Exodus source move** — install/update, checksum, extras, trust, README, and build docs now point at the `Exodus` branch.
-- **Command Center Special Edition** — `windo center` unifies tray, control plane, Signal Deck, surface, motion, trust, recipes, modules, extras, audit, and export into a PowerShell-native Windows command center.
-- **Command Center Actions** — `windo control execute-next|inspect|cancel|history` adds explicit request lifecycle states and result JSON beside queued control-plane requests.
-- **Signal Deck** — `windo signal status|timeline|last|export` correlates control requests, last elevation metadata, audit-chain health, trust posture, and native-surface readiness.
-- **Native Shell Polish** — `windo surface doctor|repair|open` checks and repairs tray/surface/control readiness, then opens the browser-independent tray surface.
-- **Native companion scaffold** — `native-companion/` starts the future compiled-helper path without making a compiled binary required for V5.
-- **Control Plane Wiring** — `windo control` primes a local Windows control-plane manifest, exposes a curated action catalog, queues explicit JSON action requests, and launches known actions in visible PowerShell windows for tray/native orchestration.
-- **Tray action expansion** — `windo launchpad --tray` now includes surface, control-plane, and motion actions in the native Windows popup/menu path.
-- **Native Surface Prep** — `windo surface` inspects tray/native readiness, motion policy, profile prompt issues, and can prime a local surface manifest under `.pwsh_secure`.
-- **Motion policy** — `windo motion auto|on|quiet|off|reset|pulse` controls subtle terminal animations while staying quiet in CI, redirected output, and `WINDO_NO_SPINNER`.
-- **Profile prompt doctor** — `windo profile doctor` detects unguarded oh-my-posh init pipelines and missing cached prompt init scripts; `windo profile repair --prompt-init` wraps oh-my-posh init so profile load degrades to a warning instead of breaking.
-- **Security Foundry** — `windo scan`, `windo vault`, `windo sshx`, and `windo crypto` add local-first security workflows without changing the elevation trust boundary.
-- **Branch source cutover** — install/update, extras, checksum, and trust URLs now target the **`Exodus`** branch.
-- **README brand polish** — removes the rough cropped wordmark and uses constrained final assets so GitHub renders cleanly.
-- **WINDO scan** — scan files, directories, multiple paths, or recursive scopes for hashes, Mark-of-the-Web, launchable extensions, and suspicious script patterns.
-- **DPAPI vault** — store named API keys or credentials under `.pwsh_secure` with current-user DPAPI protection.
-- **SSH operator tools** — check OpenSSH tooling, create `.ssh\config`, generate ed25519 keys, and test SSH targets.
-- **Crypto helpers** — inspect certificates/keys with OpenSSL/certutil and calculate SHA256 hashes with short syntax.
-- **Compact execution output** — elevated external commands now default to one small sudo-like status line; `windo output legacy` restores the older multi-line Status/Duration/Output layout.
-- **Syntax pass-through fix** — external command flags like `windo powercfg -h off` now stay with the target command instead of being interpreted as WINDO help.
-- **Account handoff syntax** — `windo - <username> [command...]` starts a PowerShell process under another local/domain account using Windows credentials.
-- **Python venv helper** — `windo venv create|activate|deactivate|status|remove` manages local virtual environments without elevation.
-- **Package-manager routing** — `windo pkg winget|choco|scoop ...` adds clearer intent and guidance before handing package work to the elevated runner where appropriate.
-- **Operator Mesh Workbench** — `windo mesh workbench` turns trust, recipes, modules, extras, launchpad, and export into workflow lanes with copy-ready next commands.
-- **Quiet Shell** — native-first completion and completion policy make `windo <command><Tab>` behave more like normal PowerShell.
-- **Source of Truth** — `windo source` shows the published installer source, version, checksum, and local snapshot alignment.
-- **Trust Console** — `windo trust` and `windo trust --online` verify local posture and installer checksum provenance.
-- **Recipe Atlas** — the built-in recipe catalog now includes a much larger read-only operator set for identity, services, networking, firewall, storage, power, time, Defender, certificates, scheduled tasks, drivers, tools, and OS posture.
-- **Operator Mesh cockpit** — `windo mesh --html` and `windo mesh --open` render the V4-prep inventory as a branded local cockpit with copy-ready next commands.
-- **Operator Mesh Doctor** — `windo mesh doctor` scores local Operator Mesh readiness across tasks, integrity, audit chain, recipes, modules, extras, brand/tray assets, and export posture.
-- **Operator Mesh preview** — `windo mesh` shows modules, recipes, extras, launchpad/tray assets, and export readiness in one read-only V4-prep view.
-- **Syntax Doctor** — `windo syntax doctor [query]` flags exact, fuzzy, ambiguous, or missing intent matches and suggests the safest next command.
-- **Syntax Forge** — `windo syntax [query]` maps operator intent to exact commands, previews, risk notes, and aliases without executing anything.
-- **Execution Plan** — `windo explain <command...>` shows route, privilege boundary, artifacts, audit behavior, and checksum posture before running anything.
-- **API-first installer fetch** — bootstrap and `windo install-latest` fetch the installer through the GitHub Contents API first, with raw branch fallback.
-- **Checksum source hardening** — online checksum checks prefer the GitHub Contents API and fall back to raw branch content to avoid stale raw-CDN results after a sync.
-- **Quieter roadmap** — `windo roadmap` focuses on the current 3.x and V4 runway while future major-package details stay reserved.
-- **Recipe previews** — `windo recipes preview <name>` and recipe `--dry-run` show exact elevated commands before scheduled tasks, request files, result files, or audit entries are touched.
+- **V6 command surface and branding** — refreshed installer identity (`WINDO 6.0.0 V6`) and aligned README guidance for concise operator workflows.
+- **Network posture in one command** — `windo net-scan` now covers `status`, `resolve`, `arp`, and `ping` with clear local-only behavior and bounded probing defaults.
+- **Container handoff** — `windo container` now provides a validated docker/podman control surface with `--runtime` explicitness and safe defaults.
+- **NetOps companion module** — `extras/network-ops` adds `netops-*` local helpers for subnet scan, ARP map, RDP/VNC posture checks, and WSL access helpers.
+- **Safety defaults documented** — `net-scan` defaults keep scans bounded (`--host-limit 254`, `--timeout 1`) and do not transmit probe data off the host unless user commands do.
 
-Full list: [`CHANGELOG.md`](CHANGELOG.md). Release copy: [`docs/releases/RELEASE_NOTES_v5.4.1.md`](docs/releases/RELEASE_NOTES_v5.4.1.md).
+Full list: [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
@@ -100,10 +47,10 @@ WINDO does **not** bypass Windows security boundaries; it uses a controlled elev
 
 ## Install / Update
 
-**Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1), saves `windo_install.ps1` to a **temp file**, verifies its checksum, then starts it from the temp file. In interactive sessions WINDO requests **UAC elevation** for the installer so scheduled tasks and secure-dir ACL work can complete; the temp file is removed afterward. The **full installer is not** piped through `Invoke-Expression`.
+**Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/v6/bootstrap.ps1), saves `windo_install.ps1` to a **temp file**, verifies its checksum, then starts it from the temp file. In interactive sessions WINDO requests **UAC elevation** for the installer so scheduled tasks and secure-dir ACL work can complete; the temp file is removed afterward. The **full installer is not** piped through `Invoke-Expression`.
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1)
+iex (irm https://raw.githubusercontent.com/l28bit/windo/v6/bootstrap.ps1)
 ```
 
 Run the **installer** from an **elevated** session when you want scheduled tasks registered and `%USERPROFILE%\.pwsh_secure\` updated without permission issues—**after** you have downloaded and confirmed.
@@ -120,7 +67,7 @@ windo install-latest
 
 Or use the bootstrap one-liner above, or run `.\windo_install.ps1` from a clone. There is no version gate: the installer replaces the WINDO profile block and refreshes secure-dir artifacts.
 
-**Remove WINDO completely:** run **`windo uninstall`** (or **`windo remove`**) from a normal shell. WINDO prefers the bundled local **`%USERPROFILE%\.pwsh_secure\windo_uninstall.ps1`** and starts it elevated with UAC; if the local copy is missing it falls back to the published raw uninstaller from `Exodus`. After your profile is loaded you can also run **`windo-uninstall`** (alias: **`windoremove`**) directly. Optional **`-KeepSnapshots`** / **`--keep-snapshots`** keeps `%USERPROFILE%\Documents\windo\`. The uninstaller removes WINDO marker blocks from the known **current-user** PowerShell profiles for **pwsh** and **Windows PowerShell**.
+**Remove WINDO completely:** run **`windo uninstall`** (or **`windo remove`**) from a normal shell. WINDO prefers the bundled local **`%USERPROFILE%\.pwsh_secure\windo_uninstall.ps1`** and starts it elevated with UAC; if the local copy is missing it falls back to the published raw uninstaller from `v6`. After your profile is loaded you can also run **`windo-uninstall`** (alias: **`windoremove`**) directly. Optional **`-KeepSnapshots`** / **`--keep-snapshots`** keeps `%USERPROFILE%\Documents\windo\`. The uninstaller removes WINDO marker blocks from the known **current-user** PowerShell profiles for **pwsh** and **Windows PowerShell**.
 
 **Offline / clone:** run the installer from disk:
 
@@ -170,23 +117,27 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo report [-o path]` | Write a local HTML audit report with summary, categories, and integrity levels. |
 | `windo dashboard [--json] [--html [-o path]] [--open]` | **v3.2.8+** Operator health view: tasks, integrity, audit-chain status, category bars, recent entries, and optional local HTML dashboard. |
 | `windo preflight [--json]` | **v3.3.0+** Readiness scan with actionable fix commands; checks update posture, tasks, integrity, audit chain, profile, and keybindings. |
-| `windo launchpad [--json] [--html [--output path\|--output=path]] [--open] [--tray]` | **v3.3.0+** Special Edition command center. `--tray` starts a native Windows task-tray agent; HTML mode remains available for portable reports. |
+| `windo launchpad [--json] [--html [--output path\|--output=path]] [--open] [--tray]` | **v3.3.0+** Command center with terminal, JSON, HTML, and native tray output modes. `--tray` starts a native Windows task-tray agent; HTML mode remains available for portable reports. |
 | `windo completion [status\|doctor\|repair\|native-first\|hybrid\|windo\|off\|reset]` | **v3.4.0+ / v5.4.1+** Control native-first WINDO tab-completion behavior, diagnose registration, and re-register the completer in-session. |
 | `windo output [status\|compact\|quiet\|legacy\|reset]` | **v4.0.1+** Control elevated-command result verbosity. Default **`compact`** is sudo-like; **`legacy`** restores Status/Duration/Output lines. |
-| `windo motion [status\|auto\|on\|quiet\|off\|reset\|pulse]` | **v4.2.0+** Control subtle terminal motion and animations; auto mode stays quiet for CI, redirected output, and `WINDO_NO_SPINNER`. |
+| `windo motion [status\|auto\|on\|quiet\|off\|reset\|profile\|pulse]` | **v4.2.0+** Control terminal motion and animation profiles; auto mode stays quiet for CI, redirected output, and `WINDO_NO_SPINNER`. |
 | `windo surface [status\|prime\|pulse\|doctor\|repair\|open\|panel]` | **v4.2.0+ / v5.2.0+** Native surface readiness wiring, diagnostics, repair, tray open path, and browser-independent Windows Forms panel. |
 | `windo integrate [status\|doctor\|prime\|repair\|shortcuts\|startup\|shim\|open]` | **v5.4.0+** Current-user Windows integration plane: Start Menu/Desktop shortcuts, sign-in tray shortcut, startup script, command shim, user PATH advisory/repair, and integration doctor. |
 | `windo control [status\|prime\|actions\|preview\|queue\|run\|execute-next\|next\|execute\|inspect\|cancel\|history\|pulse\|clear]` | **v4.3.0+ / v5.1.0+** Local Windows control plane: manifest, curated action catalog, explicit JSON request queue, lifecycle states, result files, action preview, specific request execution, and visible-shell executor. |
 | `windo signal [status\|timeline\|last\|export\|open]` | **v4.5.0+ / v5.1.0+** Signal Deck diagnostics across control requests, last elevation metadata, trust, audit chain, and native-surface readiness. |
 | `windo center [status\|open\|tray\|panel\|studio\|actions\|preview\|run\|queue\|execute-next\|next\|execute\|history\|signal]` | **v5.0.0+ / v5.3.0+** PowerShell-native Command Center unifying tray, Power Studio, native panel, control, surface, motion, signal, trust, recipes, modules, extras, audit, and export. |
 | `windo studio [--json]` | **v5.3.0+** Open the guided Windows-native Power Studio workflow surface. Alias path: `windo center studio`. |
-| `windo edition [status\|open\|html\|pulse]` | **v5.1.0+** Exodus Limited Edition branded local console with final assets, animated HTML, edition status, and a policy-aware terminal pulse. |
+| `windo edition [status\|open\|html\|pulse]` | **v5.1.0+** Local command-surface console with animated HTML, edition status, and policy-aware terminal pulse. |
 | `windo roadmap [--json]` | **v3.4.0+** Show the release runway from Quiet Shell through V4 preparation, with future major-package details reserved. |
 | `windo source [--json]` | **v3.6.4+** Show published installer source/version/checksum and local snapshot alignment. |
 | `windo trust [--online] [--json]` | **v3.5.0+** Score local trust posture and optionally compare the installer snapshot against the published checksum. |
 | `windo scan [path...] [--recurse] [--max-mb N] [--no-hash] [--json]` | **v4.1.0+** Local posture scanner for scripts, launchable files, Mark-of-the-Web, hashes, and suspicious text patterns. |
+| `windo net-scan [status] [--json]` \| `windo net-scan resolve <host...> [--json]` \| `windo net-scan arp [--interface <alias>] [--include-stale] [--json]` \| `windo net-scan ping <cidr \| host...> [--timeout <seconds>] [--host-limit N] [--ports <port,...>] [--json]` | **v6.0.0+** Local network posture and reachable-host checks (`status`, `resolve`, `arp`, `ping`) with bounded default probing (`hostLimit=254`, `timeout=1`) and consistent JSON payloads. |
+| `windo rdp [status\|firewall\|config\|troubleshoot] [--json]` | **v6.0.0+** RDP posture checks and firewall posture actions with consistent JSON payloads (`status`, `firewall`, `config`, `troubleshoot`). |
+| `windo wsl [status\|list\|ls\|check\|version\|install\|convert\|inspect\|exec\|launch\|path\|import\|export] [--json]` | **v6.0.0+** WSL availability, conversion/import/export workflows, inspection, command forwarding, and runtime launch strategies with `--dry-run` and JSON payloads. |
 | `windo vault status\|list\|set\|get\|remove` | **v4.1.0+** DPAPI CurrentUser secret vault under `.pwsh_secure`. Useful for API keys and local operator secrets. |
 | `windo sshx status\|keygen\|config\|test` | **v4.1.0+** OpenSSH helper for tool status, ed25519 key generation, `.ssh\config`, and SSH tests. |
+| `windo container [ps\|images\|status\|logs\|restart\|start\|stop\|rmi\|rm\|pull] [--runtime docker\|podman\|auto]` | **v6.0.0+** Container runtime passthrough (docker/podman) with explicit runtime selection (`--runtime auto` prefers docker when both are available). |
 | `windo crypto status\|cert\|key\|hash` | **v4.1.0+** Certificate, key, and SHA256 helper backed by local OpenSSL/certutil/Get-FileHash. |
 | `windo syntax [query] [--json]` / `windo syntax doctor [query] [--json]` | **v3.6.0+** Read-only intent-to-command planner with preview commands, risk notes, aliases, and **v3.6.5+** intent diagnosis. |
 | `windo mesh [doctor\|workbench] [--json] [--html [--output path\|--output=path]] [--open]` | **v3.6.6+** Read-only Operator Mesh preview; **v3.6.8+** readiness scoring; **v4.0.0+** workflow workbench lanes and optional local HTML workbench. |
@@ -201,10 +152,11 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo stats [--since YYYY-MM-DD] [--last-days N]` | Audit log summary; optional filters on decrypted entry **`Timestamp`** (still scans full log to decrypt). **`--last-days`** must be a **positive** integer; **`--since`** and **`--last-days`** are mutually exclusive. |
 | `windo profile [status\|doctor\|repair] [--prompt-init] [--all] [--json]` | Show known profile paths, WINDO block state, and prompt-init issues. **v4.2.0+** can guard oh-my-posh init so missing cached prompt scripts do not break profile load. |
 | `windo cleanup [-w]` | Back up log to `.pwsh_secure`, clear active log, remove pending req/res JSON. Optional `-w` is accepted for compatibility and ignored. |
-| `windo install-latest [--force] [--non-interactive] [--timeout <seconds|ms>] [--preserve-env [ALL\|name1,name2]]` | **v3.1.0+** Download and run the latest `windo_install.ps1` from **`Exodus`**. **v3.1.1+:** download only in a **non-elevated** shell; **confirm** after verify, then run installer ( **`--force`** / env for CI). |
+| `windo install-latest [--force] [--non-interactive] [--timeout <seconds|ms>] [--preserve-env [ALL\|name1,name2]]` | **v3.1.0+** Download and run the latest `windo_install.ps1` from **`v6`**. **v3.1.1+:** download only in a **non-elevated** shell; **confirm** after verify, then run installer ( **`--force`** / env for CI). |
 | `windo upgrade` | Alias of **`install-latest`**. |
 | `windo theme [classic \| modern \| auto]` | **v3.1.0+** Choose **CLI JSON** “look” only: **`classic`** = `schemaVersion` **2.6** without **`meta`**; **`modern`** = **3.0** + **`meta`**; **`auto`** = follow the embedded profile. Runner, tasks, and audit **do not** change—see [`docs/json-schema.md`](docs/json-schema.md). |
 | `windo modules list \| enable \| disable \| doctor \| verify` | **v3.2.0+** Optional modules under **`Documents\windo\modules`** (see **`windo help modules`**); enabled ids persist in **`windo_prefs.json`**. |
+| `windo netops-resolve \| netops-subnet-scan \| netops-arp-map \| netops-rdp-vnc \| netops-wsl` | **v6.0.0+ (module)** Optional **`extras/samples/network-ops`** module helpers; return local PowerShell objects (no WINDO JSON envelope). |
 | `windo recipes [list] \| show \| preview \| run` / `windo run --recipe <name>` | **v3.2.0+** Built-in elevated **recipe** templates (bundled data, not arbitrary script). **v3.6.0+** adds first-class preview and recipe dry-run payloads. **v3.6.9+** expands the catalog into a broad read-only operator atlas; optional tool recipes report gracefully when the tool is absent. |
 | `windo venv create\|activate\|deactivate\|status\|remove` | **v4.0.1+** Local Python virtual environment helper. Activation affects the current shell by dot-sourcing `Activate.ps1`. |
 | `windo pkg status` / `windo pkg winget\|choco\|scoop <args...>` | **v4.0.1+** Package-manager handoff with clearer status and manager-specific guidance before elevation. |
@@ -216,9 +168,57 @@ The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDA
 | `windo repair [all \| keybindings]` | **v3.2.7+** Quick recovery: same as **`windo keybindings safe-reset`** with hints (reload profile, **`install-latest`**). Use when **`w`** / prefix feels stuck or after upgrading from an older WINDO. |
 | `windo uninstall` / `windo remove` | Run the elevated uninstaller, preferring the bundled local copy under `.pwsh_secure`; removes tasks, current-user WINDO profile blocks, WINDO files under `.pwsh_secure`, optional `Documents\windo`. |
 
-Append **`--json`** or **`-Json`** to supported commands for structured output. On v3.0.0+ profiles the default envelope uses **`schemaVersion`** **`3.0`** and **`meta`**. You can still get a **2.6-style** envelope (no **`meta`**) via **`windo theme classic`** or **`WINDO_JSON_ENVELOPE`**—without downgrading WINDO itself. See [`docs/json-schema.md`](docs/json-schema.md).
+Append **`--json`** or **`-Json`** to supported commands for structured output. On v3.0.0+ profiles the default envelope uses **`schemaVersion`** **`3.0`** and **`meta`**. You can still get a **2.6-style** envelope (no **`meta`**) via **`windo theme classic`** or **`WINDO_JSON_ENVELOPE`**—without downgrading WINDO itself. See [`docs/json-schema.md`](docs/json-schema.md) for `scan`, `net-scan`, `container`, `rdp`, `wsl`, and optional `network-ops` payload examples.
 
 Append **`--dry-run`** (or **`-DryRun`**) on elevated commands or `windo replay` / `windo !!` to print what would run **without** starting the task, writing req/res files, or appending the audit log. **`windo self-update --dry-run`** prints that the update task would be started only.
+
+### V6 example commands
+
+These show the safer defaults and explicit options introduced for network scanning and container handoff:
+
+```powershell
+windo net-scan status --json
+windo net-scan resolve myserver.local DC01 --json
+windo net-scan arp --interface Ethernet --json
+windo net-scan ping 10.10.10.0/24 --host-limit 254 --timeout 1 --ports 22,80,443 --json
+windo container --runtime podman ps
+windo container --runtime auto images --json
+windo container --dry-run pull nginx:latest
+```
+
+Representative `windo net-scan ping` JSON payload (safe default `hostLimit=254`, `timeoutSeconds=1`):
+
+```json
+{
+  "schemaVersion": "3.0",
+  "windoVersion": "6.0.0",
+  "command": "net-scan",
+  "generatedAt": "2026-05-08T18:00:00.0000000-05:00",
+  "meta": {
+    "psEdition": "Core",
+    "psVersion": "7.5.5",
+    "osVersion": "Microsoft Windows NT 10.0.26200.0"
+  },
+  "payload": {
+    "subcommand": "ping",
+    "scannedAt": "2026-05-08T18:00:00.0000000-05:00",
+    "cidr": "10.10.10.0/24",
+    "hostLimit": 254,
+    "timeoutSeconds": 1,
+    "ports": [22, 443],
+    "hosts": [
+      { "ip": "10.10.10.1", "reachable": true, "rttMs": 1, "ports": { "22": false, "443": true } },
+      { "ip": "10.10.10.10", "reachable": true, "rttMs": 3, "ports": { "22": true, "443": true } },
+      { "ip": "10.10.10.20", "reachable": false, "rttMs": null, "ports": {} }
+    ],
+    "reachableCount": 2,
+    "unreachableCount": 1,
+    "errorCount": 0,
+    "errors": [],
+    "exitCode": 3
+  }
+}
+```
 
 Global sudo-like flags for elevated commands can be placed before the command:
 - `--non-interactive` (or `-n`) to avoid install confirmation prompts for `install-latest` in automation
@@ -258,7 +258,7 @@ windo keybindings safe-reset
 
 `safe-reset` removes legacy WINDO handlers, reapplies `Alt+w`, and then applies fallback logic in one command.
 
-**Shortcut:** **`windo repair`** (same as **`windo repair all`**) runs that safe-reset and prints reminders to **`. $PROFILE`** and run **`windo install-latest`** from a normal shell when your installed profile lags **Exodus**.
+**Shortcut:** **`windo repair`** (same as **`windo repair all`**) runs that safe-reset and prints reminders to **`. $PROFILE`** and run **`windo install-latest`** from a normal shell when your installed profile lags **`v6`**.
 
 To keep the classic style everywhere, set `WINDO_PREFIX_CHORD=Alt+w` (or your preferred chord) in your profile session and avoid `windo keybindings` edits for that machine.
 
@@ -316,7 +316,7 @@ Optional **modules** and **extras** (v3.2+): [`docs/modules-and-extras.md`](docs
 | `WINDO_RUNNER_TIMEOUT_MS` | Max wait for the elevated child process (default **7200000** ms = 2 h; max **86400000**). |
 | `WINDO_RUNNER_MAX_OUTPUT_BYTES` | Approximate cap on captured stdout+stderr (default **4194304**; split per stream in the runner). |
 | `WINDO_MAX_COMMAND_CHARS` | Max length of the command line passed to `cmd.exe` (default **8191**). |
-| `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the `Exodus` branch (`bootstrap.ps1`, **`windo install-latest`** / **`upgrade`**). |
+| `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the `v6` branch (`bootstrap.ps1`, **`windo install-latest`** / **`upgrade`**). |
 | `WINDO_JSON_ENVELOPE` | **v3.1.0+** Optional override for **`--json`** envelope shape: **`classic`** (2.6, no **`meta`**), **`modern`** (3.0 + **`meta`**), or **`auto`**. Overrides **`windo_prefs.json`** when set (see [`docs/json-schema.md`](docs/json-schema.md)). Does not change runner or security behavior. |
 | `SUDO_TIMEOUT` | Per-command override (seconds or `ms`, e.g. `10`, `10s`, `500ms`) for the `--timeout` flag when not passed explicitly. |
 | `SUDO_PROMPT` | Optional custom text for the `windo install-latest` confirmation prompt. |

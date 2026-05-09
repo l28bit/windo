@@ -1,5 +1,5 @@
-<# =====================================================================
-WINDO v5.4.1 Limited Edition Installer
+﻿<# =====================================================================
+WINDO V6 Installer
 Run once in an elevated PowerShell session.
 
 Installs:
@@ -19,14 +19,14 @@ Maintainer: new windo subcommands must be added to $WindoBuiltinVerbs (single so
 
 $ErrorActionPreference = "Stop"
 
-$WindoVersion = "5.4.1"
+$WindoVersion = "6.0.0"
 
 # Single source of truth for embedded profile: completer skip-list (plus '!!') and windo last-command first-token exclusions.
 $WindoBuiltinVerbs = @(
     'help', 'last', 'stats', 'history', 'report', 'dashboard', 'preflight', 'launchpad', 'export', 'self-update', 'version',
     'doctor', 'integrity', 'verify', 'trust', 'source', 'explain', 'log', 'cleanup', 'config', 'backups', 'context', 'trace', 'replay',
     'theme', 'output', 'motion', 'surface', 'integrate', 'control', 'signal', 'center', 'studio', 'edition', 'upgrade', 'install-latest', 'uninstall', 'remove', 'profile', 'keybindings', 'completion', 'roadmap', 'syntax', 'mesh',
-    'modules', 'recipes', 'prompt', 'extras', 'dev', 'session', 'ai', 'repair', 'scan', 'vault', 'sshx', 'crypto', 'venv', 'pkg', 'run'
+        'modules', 'recipes', 'prompt', 'extras', 'dev', 'session', 'ai', 'repair', 'scan', 'vault', 'sshx', 'crypto', 'venv', 'pkg', 'net-scan', 'rdp', 'vnc', 'container', 'wsl', 'run'
 )
 $WindoBuiltinVerbsArrayLiteral = ($WindoBuiltinVerbs | ForEach-Object { "'$_'" }) -join ','
 $TaskMain     = "WindoElevatedRunner"
@@ -54,7 +54,7 @@ function Write-WindoEditionBanner {
     Write-Host "    \ V  V /  | || |\  | |_| | |_| |" -ForegroundColor Cyan
     Write-Host "     \_/\_/  |___|_| \_|____/ \___/" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host ("  WINDO {0}  Special Edition  ::  {1}" -f $WindoVersion, $Phase.ToUpperInvariant()) -ForegroundColor White
+    Write-Host ("  WINDO {0}  V6  ::  {1}" -f $WindoVersion, $Phase.ToUpperInvariant()) -ForegroundColor White
     Write-Host "  deliberate elevation | audit chain | security tools | operator visuals" -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -601,7 +601,7 @@ Write-Utf8NoBomFile -Path $UpdateScript -Content $SelfUpdateContent
 
 $UninstallContent = @'
 <# =====================================================================
-WINDO uninstall — removes scheduled tasks, profile block, and WINDO data.
+WINDO uninstall â€” removes scheduled tasks, profile block, and WINDO data.
 
 Run elevated (recommended) so scheduled tasks unregister reliably:
   powershell.exe -ExecutionPolicy Bypass -File .\windo_uninstall.ps1 -Confirm
@@ -848,7 +848,7 @@ function Invoke-WindoBundledUninstall {
     $SecureDir = Join-Path $HOME ".pwsh_secure"
     $BundledUninstallPath = Join-Path $SecureDir "windo_uninstall.ps1"
     $SnapshotUninstallPath = Join-Path (Join-Path $HOME "Documents") "windo\windo_uninstall.ps1"
-    $UnUrl = "https://raw.githubusercontent.com/l28bit/windo/Exodus/windo_uninstall.ps1"
+    $UnUrl = "https://raw.githubusercontent.com/l28bit/windo/v6/windo_uninstall.ps1"
     $TempUn = $null
     $ScriptPath = $null
 
@@ -1229,7 +1229,7 @@ function windo {
         if ([string]::IsNullOrWhiteSpace($h)) { $h = [Environment]::GetEnvironmentVariable('OLLAMA_HOST', 'User') }
         if ([string]::IsNullOrWhiteSpace($h)) { $h = [Environment]::GetEnvironmentVariable('OLLAMA_HOST', 'Machine') }
         if ([string]::IsNullOrWhiteSpace($h)) {
-            return "Ollama: OLLAMA_HOST is unset — server defaults to 127.0.0.1:11434 (local only)."
+            return "Ollama: OLLAMA_HOST is unset â€” server defaults to 127.0.0.1:11434 (local only)."
         }
         $t = $h.Trim()
         $tl = $t.ToLowerInvariant()
@@ -1237,9 +1237,9 @@ function windo {
             return $null
         }
         if ($tl -match '^(https?://)?0\.0\.0\.0(:|/|$)' -or $tl -match '^0\.0\.0\.0:\d+$') {
-            return "Ollama: OLLAMA_HOST binds all interfaces — confirm firewall rules and intentional LAN exposure."
+            return "Ollama: OLLAMA_HOST binds all interfaces â€” confirm firewall rules and intentional LAN exposure."
         }
-        return "Ollama: OLLAMA_HOST may point off loopback — confirm intentional network exposure and firewall rules."
+        return "Ollama: OLLAMA_HOST may point off loopback â€” confirm intentional network exposure and firewall rules."
     }
 
     function _windo_ai_credential_env_snapshot {
@@ -1547,6 +1547,14 @@ function windo {
             'environment-os'            = @{ description = 'Show basic OS environment variables only.'; command = 'powershell.exe -NoProfile -Command "Get-ChildItem Env:OS,Env:PROCESSOR_ARCHITECTURE,Env:COMPUTERNAME,Env:USERDOMAIN | Select-Object Name,Value"' }
             'firewall-current-profile'  = @{ description = 'Show current Windows Firewall profile configuration.'; command = 'netsh.exe advfirewall show currentprofile' }
             'firewall-profiles'         = @{ description = 'Show Windows Firewall profile states (netsh).'; command = 'netsh.exe advfirewall show allprofiles state' }
+            'rdp-check'                 = @{ description = 'Inspect local RDP enablement, registry config, and related firewall rules.'; command = 'windo rdp status --json' }
+            'rdp-firewall'              = @{ description = 'Inspect RDP inbound firewall rules for desktop ports.'; command = 'windo rdp firewall status --json' }
+            'rdp-troubleshoot'          = @{ description = 'Collect practical RDP troubleshooting state and connectivity checks.'; command = 'windo rdp troubleshoot --host localhost --ports 3389 --json' }
+            'rdp-configure'             = @{ description = 'Enable/disable RDP and set NLA preference with optional service restart.'; command = 'windo rdp config --enable --nla on --json' }
+            'vnc-check'                 = @{ description = 'Inspect common VNC services, registry presence, and listener/listen ports.'; command = 'windo vnc status --json' }
+            'vnc-firewall'              = @{ description = 'Inspect VNC inbound firewall rules for 5900/5901.'; command = 'windo vnc firewall status --json' }
+            'vnc-test'                  = @{ description = 'Probe VNC ports on a target host or localhost.'; command = 'windo vnc test --host localhost --ports 5900,5901 --json' }
+            'vnc-troubleshoot'          = @{ description = 'Collect practical VNC troubleshooting state and port checks.'; command = 'windo vnc troubleshoot --host localhost --ports 5900,5901 --json' }
             'fsutil-drives'             = @{ description = 'Show mounted drive letters.'; command = 'fsutil.exe fsinfo drives' }
             'fsutil-trim'               = @{ description = 'Show TRIM behavior setting.'; command = 'fsutil.exe behavior query DisableDeleteNotify' }
             'gpresult-summary'          = @{ description = 'Show Group Policy result summary for the current context.'; command = 'gpresult.exe /r' }
@@ -1771,9 +1779,757 @@ function windo {
         }
     }
 
+    function _windo_net_scan_is_ipv4([string]$Address) {
+        $ip = $null
+        if ([string]::IsNullOrWhiteSpace($Address)) { return $false }
+        if (-not [System.Net.IPAddress]::TryParse([string]$Address, [ref]$ip)) { return $false }
+        return $ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork
+    }
+
+    function _windo_net_scan_expand_subnet([string]$Cidr, [int]$HostLimit) {
+        $trimmed = [string]$Cidr.Trim()
+        if (-not $trimmed -match '^(?<network>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/(?<prefix>\d{1,2})$') {
+            throw "Invalid CIDR format. Use A.B.C.D/Prefix."
+        }
+        $prefix = [int]$Matches.prefix
+        if ($prefix -lt 8 -or $prefix -gt 30) { throw "Prefix $prefix is unsupported for local scans; use /8..30." }
+        $network = $Matches.network
+        $addr = $null
+        if (-not [System.Net.IPAddress]::TryParse($network, [ref]$addr)) { throw "Invalid CIDR network: $network" }
+        $bytes = $addr.GetAddressBytes()
+        [Array]::Reverse($bytes)
+        $networkInt = [BitConverter]::ToUInt32($bytes, 0)
+        $hostBits = 32 - $prefix
+        $hostCount = [Math]::Pow(2, $hostBits) - 2
+        if ($hostCount -lt 1) { throw "CIDR prefix is too narrow for host enumeration." }
+        if ($hostCount -gt $HostLimit) { throw "Subnet scan would produce $hostCount hosts; exceeds host limit $HostLimit. Use --host-limit or a narrower subnet." }
+        $start = $networkInt + 1
+        $end = $networkInt + [uint32]$hostCount
+        $results = [System.Collections.ArrayList]@()
+        for ($i = $start; $i -le $end; $i++) {
+            $ipBytes = [BitConverter]::GetBytes([uint32]$i)
+            [Array]::Reverse($ipBytes)
+            [void]$results.Add(([System.Net.IPAddress]::new($ipBytes)).ToString())
+        }
+        return @($results)
+    }
+
+    function _windo_net_scan_parse_ports([string]$PortsRaw) {
+        if ([string]::IsNullOrWhiteSpace($PortsRaw)) { return @() }
+        $parts = $PortsRaw -split '[,;]\s*' | Where-Object { $_ -ne "" }
+        $out = [System.Collections.ArrayList]@()
+        foreach ($p in $parts) {
+            $portCandidate = [string]$p.Trim()
+            if ([string]::IsNullOrWhiteSpace($portCandidate)) { continue }
+            $n = 0
+            if (-not [int]::TryParse($portCandidate, [ref]$n)) { throw "Invalid port '$portCandidate'." }
+            if ($n -lt 1 -or $n -gt 65535) { throw "Port must be 1..65535: $n." }
+            if (@($out) -notcontains [int]$n) { [void]$out.Add([int]$n) }
+        }
+        [void]$out.Sort()
+        return @($out)
+    }
+
+    function _windo_net_scan_probe_icmp([string]$Target, [int]$TimeoutSeconds) {
+        try {
+            $reply = Test-Connection -ComputerName $Target -Count 1 -TimeoutSeconds $TimeoutSeconds -ErrorAction Stop
+            if ($null -eq $reply) {
+                return @{ reachable = $false; rttMs = $null; error = $null }
+            }
+            $first = @($reply)[0]
+            $rawMs = $null
+            if ($first.PSObject.Properties.Name -contains 'ResponseTime') { $rawMs = $first.ResponseTime }
+            if ($null -ne $rawMs -and $rawMs -ge 0) {
+                return @{ reachable = $true; rttMs = [int][math]::Round([double]$rawMs); error = $null }
+            }
+            return @{ reachable = $true; rttMs = $null; error = $null }
+        } catch {
+            return @{ reachable = $false; rttMs = $null; error = $_.Exception.Message }
+        }
+    }
+
+    function _windo_net_scan_probe_tcp([string]$Host, [int]$Port, [int]$TimeoutSeconds) {
+        $client = $null
+        try {
+            $client = New-Object System.Net.Sockets.TcpClient
+            $task = $client.ConnectAsync($Host, $Port)
+            if (-not $task.Wait($TimeoutSeconds * 1000)) { return @{ open = $false; error = $null } }
+            if ($task.Status -ne 'RanToCompletion' -or $task.IsFaulted) {
+                return @{ open = $false; error = "TCP connect not completed." }
+            }
+            return @{ open = $true; error = $null }
+        } catch {
+            return @{ open = $false; error = $_.Exception.Message }
+        } finally {
+            if ($client) { $client.Close() }
+        }
+    }
+
+    function _windo_net_scan_has_nmap {
+        return [bool](Get-Command nmap -ErrorAction SilentlyContinue)
+    }
+
+    function _windo_net_scan_nmap_reachable([string[]]$Targets, [int]$TimeoutSeconds) {
+        if (-not (_windo_net_scan_has_nmap)) { return $null }
+        $args = @(
+            "-sn", "-n", "--max-retries", "1", "--scan-delay", "0",
+            "--host-timeout", "$TimeoutSeconds" + "s",
+            "--min-rate", "500", "-T4", "-oG", "-"
+        )
+        $args += @($Targets)
+        $reachable = @{}
+        try {
+            $raw = & nmap @args 2>$null
+            if (-not $raw) { return $null }
+            foreach ($line in @($raw)) {
+                $text = [string]$line
+                if ($text -match 'Host:\s+([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s+Status:\s+Up') {
+                    $reachable[$Matches[1]] = $true
+                    continue
+                }
+                if ($text -match 'Host:\s+([^\s]+)\s+\(([0-9]{1,3}(?:\.[0-9]{1,3}){3})\)\s+Status:\s+Up') {
+                    $reachable[$Matches[2]] = $true
+                }
+            }
+            if ($reachable.Count -gt 0) { return $reachable } else { return @{} }
+        } catch {
+            return $null
+        }
+    }
+
+    function _windo_net_scan_status() {
+        $adapters = [System.Collections.ArrayList]@()
+        $errors = [System.Collections.ArrayList]@()
+        try {
+            $items = Get-NetAdapter -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' }
+            foreach ($adapter in @($items)) {
+                $cfg = $null
+                try { $cfg = Get-NetIPConfiguration -InterfaceIndex $adapter.ifIndex -ErrorAction SilentlyContinue } catch { $cfg = $null }
+                $ipv4 = @()
+                $ipv6 = @()
+                $gateways = @()
+                $dnsServers = @()
+                if ($cfg) {
+                    if ($cfg.IPv4Address) { $ipv4 = @($cfg.IPv4Address | ForEach-Object { [string]$_.IPAddress } | Where-Object { $_ }) }
+                    if ($cfg.IPv6Address) { $ipv6 = @($cfg.IPv6Address | ForEach-Object { [string]$_.IPAddress } | Where-Object { $_ }) }
+                    if ($cfg.IPv4DefaultGateway) { $gateways = @($cfg.IPv4DefaultGateway | ForEach-Object { [string]$_.NextHop } | Where-Object { $_ }) }
+                    if ($cfg.DNSServer) {
+                        try {
+                            $dnsServers = @($cfg.DNSServer.ServerAddresses | ForEach-Object { [string]$_ } | Where-Object { $_ })
+                        } catch { $dnsServers = @() }
+                    }
+                }
+                [void]$adapters.Add([ordered]@{
+                    alias = [string]$adapter.Name
+                    ipv4 = @($ipv4)
+                    ipv6 = @($ipv6)
+                    gateway = $(if ($gateways.Count -gt 0) { $gateways[0] } else { $null })
+                    dnsServers = @($dnsServers)
+                    macAddress = $(if ($adapter.MacAddress) { [string]$adapter.MacAddress } else { $null })
+                    linkSpeed = $(if ($adapter.LinkSpeed) { [string]$adapter.LinkSpeed } else { $null })
+                })
+            }
+            return [pscustomobject]@{ adapters = @($adapters); errors = @($errors); exitCode = $(if ($errors.Count -gt 0) { 3 } else { 0 }) }
+        } catch {
+            return [pscustomobject]@{ adapters = @(); errors = @([ordered]@{ path = "Get-NetAdapter"; error = $_.Exception.Message }); exitCode = 3 }
+        }
+    }
+
+    function _windo_net_scan_arp_from_cli([string]$Interface, [bool]$IncludeStale) {
+        $rows = [System.Collections.ArrayList]@()
+        $lines = @()
+        try {
+            $raw = & arp.exe -a 2>$null
+            if ($raw) { $lines = @($raw) } else { return @{ neighbors = @(); exitCode = 0; source = "arp.exe -a"; errors = @() } }
+        } catch {
+            return @{ neighbors = @(); exitCode = 3; source = "arp.exe -a"; errors = @(@{ path = "arp.exe -a"; error = $_.Exception.Message }) }
+        }
+        $currentInterface = $null
+        $targetInterface = if ([string]::IsNullOrWhiteSpace($Interface)) { $null } else { [string]$Interface.ToLowerInvariant() }
+        $seen = @{}
+        foreach ($line in @($lines)) {
+            $text = [string]$line
+            if ($text -match '^\s*Interface:\s+\S+\s+---\s+(?<interface>.+?)\s*$') {
+                $currentInterface = [string]$Matches['interface'].Trim()
+                continue
+            }
+            if ($text -match '^\s*Internet Address') { continue }
+            if ($text -match '^(?<ip>\d{1,3}(?:\.\d{1,3}){3})\s+(?<mac>[0-9A-Fa-f-]{17}|<incomplete>)\s+(?<state>\S+)') {
+                $state = [string]$Matches['state'].ToLowerInvariant()
+                if (-not $IncludeStale -and $state -in @('incomplete', 'invalid', 'unreachable')) { continue }
+                if ($targetInterface -and $currentInterface -and ($currentInterface.ToLowerInvariant() -notlike "*$targetInterface*")) { continue }
+                $ip = [string]$Matches['ip']
+                $mac = [string]$Matches['mac']
+                $dedupeKey = "$ip|$mac|$currentInterface"
+                if ($seen.ContainsKey($dedupeKey)) { continue }
+                $seen[$dedupeKey] = $true
+                [void]$rows.Add([ordered]@{
+                    ip = $ip
+                    mac = $mac
+                    state = if ($state -eq "static") { "Permanent" } elseif ($state -eq "dynamic") { "Reachable" } else { ([string]$state).ToUpperInvariant() }
+                    interfaceAlias = $currentInterface
+                })
+            }
+        }
+        return @{ neighbors = @($rows); exitCode = 0; source = "arp.exe -a"; errors = @() }
+    }
+
+    function _windo_net_scan_arp([string]$Interface, [bool]$IncludeStale) {
+        try {
+            $neighbors = Get-NetNeighbor -AddressFamily IPv4 -ErrorAction Stop
+            if ($Interface) {
+                $neighbors = @($neighbors | Where-Object { [string]$_.InterfaceAlias -ieq [string]$Interface })
+            }
+            if (-not $IncludeStale) {
+                $neighbors = @($neighbors | Where-Object { $_.State -notin @('Unreachable', 'Incomplete', 'Invalid') })
+            }
+            $rows = [System.Collections.ArrayList]@()
+            foreach ($n in @($neighbors)) {
+                [void]$rows.Add([ordered]@{
+                    ip = if ($null -ne $n.IPAddress) { [string]$n.IPAddress } else { $null }
+                    mac = if ($null -ne $n.LinkLayerAddress) { [string]$n.LinkLayerAddress } else { $null }
+                    state = if ($null -ne $n.State) { [string]$n.State } else { $null }
+                    interfaceAlias = if ($null -ne $n.InterfaceAlias) { [string]$n.InterfaceAlias } else { $null }
+                })
+            }
+            return @{ neighbors = @($rows); exitCode = 0; source = "Get-NetNeighbor"; errors = @() }
+        } catch {
+            return _windo_net_scan_arp_from_cli $Interface $IncludeStale
+        }
+    }
+
+    function _windo_net_scan_resolve([string[]]$HostList, [array]$TagRules = @()) {
+        $rows = [System.Collections.ArrayList]@()
+        $errors = [System.Collections.ArrayList]@()
+        $resolvedCount = 0
+        foreach ($h in @($HostList)) {
+            $trimmed = [string]$h.Trim()
+            if ([string]::IsNullOrWhiteSpace($trimmed)) { continue }
+            $addresses = @()
+            $err = $null
+            $method = $null
+            try {
+                $resolved = Resolve-DnsName -Name $trimmed -ErrorAction Stop | Where-Object { $_.Type -eq 'A' -or $_.Type -eq 'AAAA' } | Select-Object -ExpandProperty IPAddress
+                $method = "Resolve-DnsName"
+                if ($resolved) { $addresses = @($resolved | ForEach-Object { [string]$_ } | Sort-Object -Unique) }
+            } catch {
+                try {
+                    $fallback = [System.Net.Dns]::GetHostAddresses($trimmed)
+                    $method = "System.Net.Dns::GetHostAddresses"
+                    if ($fallback) { $addresses = @($fallback | ForEach-Object { $_.ToString() } | Sort-Object -Unique) }
+                } catch {
+                    $err = $_.Exception.Message
+                }
+            }
+            if ($addresses.Count -eq 0) {
+                if (-not $err) { $err = "No address found." }
+                [void]$errors.Add([ordered]@{ host = $trimmed; error = $err })
+            } else {
+                $resolvedCount++
+            }
+            $hostIdRows = [System.Collections.ArrayList]@()
+            $identityTags = [System.Collections.ArrayList]@()
+            foreach ($ip in @($addresses)) {
+                $rev = @()
+                try { $rev = Resolve-DnsName -Name ([string]$ip) -Type PTR -ErrorAction Stop | Where-Object { $_.NameHost } | Select-Object -ExpandProperty NameHost -Unique } catch { }
+                if (-not $rev -or $rev.Count -eq 0) {
+                    try {
+                        $host = [System.Net.Dns]::GetHostEntry([string]$ip)
+                        if ($host.HostName) { $rev = @([string]$host.HostName) }
+                    } catch { }
+                }
+                $hostIdRows.Add(@($rev))
+                if ($TagRules -and $TagRules.Count -gt 0) {
+                    $matched = _windo_net_scan_apply_host_tags -Ip $ip -HostNames @($rev) -Type "resolved" -TagRules $TagRules
+                    if ($matched.Count -gt 0) {
+                        [void]$identityTags.Add([ordered]@{
+                            ip = [string]$ip
+                            names = @($rev)
+                            tags = @($matched)
+                        })
+                    }
+                }
+            }
+            [void]$rows.Add([ordered]@{
+                host = $trimmed
+                addresses = @($addresses)
+                addressCount = $addresses.Count
+                reverseHostnames = [array]$hostIdRows
+                method = $method
+                identityTags = @($identityTags)
+                error = $err
+            })
+        }
+        return [pscustomobject]@{ hosts = @($rows); resolvedCount = [int]$resolvedCount; errorCount = $errors.Count; exitCode = $(if ($errors.Count -gt 0) { 3 } else { 0 }); errors = @($errors); methods = @("Resolve-DnsName", "System.Net.Dns::GetHostAddresses") }
+    }
+
+    function _windo_net_scan_resolve_reverse_dns([string]$IpAddress) {
+        $names = [System.Collections.ArrayList]@()
+        try {
+            $ptr = Resolve-DnsName -Name $IpAddress -Type PTR -ErrorAction Stop | Where-Object { $_.NameHost } | Select-Object -ExpandProperty NameHost -Unique
+            foreach ($n in @($ptr)) { [void]$names.Add([string]$n) }
+        } catch {
+        }
+        if ($names.Count -gt 0) { return @($names) }
+        try {
+            $host = [System.Net.Dns]::GetHostEntry($IpAddress)
+            if ($host.HostName) { [void]$names.Add([string]$host.HostName) }
+        } catch {
+        }
+        return @($names)
+    }
+
+    function _windo_net_scan_load_host_tags([string]$TagFilePath) {
+        $path = $TagFilePath
+        if (-not $path -or [string]::IsNullOrWhiteSpace($path)) {
+            $path = [string]$env:WINDO_NET_SCAN_HOST_TAGS
+        }
+        if (-not $path -or [string]::IsNullOrWhiteSpace($path)) { return @() }
+        if (-not (Test-Path -LiteralPath $path)) { throw "Host tag file not found: $path" }
+        try {
+            $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+            $payload = $raw | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            throw "Failed to parse host tag JSON: $($_.Exception.Message)"
+        }
+        if (-not ($payload -is [System.Collections.IEnumerable]) -or ($payload -is [string])) {
+            throw "Host tag JSON must be an array of objects."
+        }
+        $rows = [System.Collections.ArrayList]@()
+        foreach ($entry in @($payload)) {
+            if ($null -eq $entry) { continue }
+            if ($entry -is [string]) {
+                [void]$rows.Add([ordered]@{ label = [string]$entry; pattern = [string]$entry; field = 'ip'; type = ''; note = ''; meta = $null })
+                continue
+            }
+            $label = if ($entry.PSObject.Properties.Name -contains 'label') { [string]$entry.label } else { '' }
+            $pattern = if ($entry.PSObject.Properties.Name -contains 'pattern') { [string]$entry.pattern } else { '' }
+            if ([string]::IsNullOrWhiteSpace($label) -and -not [string]::IsNullOrWhiteSpace($pattern)) { $label = $pattern }
+            if ([string]::IsNullOrWhiteSpace($pattern)) { continue }
+            [void]$rows.Add([ordered]@{
+                label = [string]$label
+                pattern = [string]$pattern
+                field = if ($entry.PSObject.Properties.Name -contains 'field') { [string]$entry.field } else { 'ip' }
+                type = if ($entry.PSObject.Properties.Name -contains 'type') { [string]$entry.type } else { '' }
+                note = if ($entry.PSObject.Properties.Name -contains 'note') { [string]$entry.note } else { '' }
+                meta = if ($entry.PSObject.Properties.Name -contains 'meta') { $entry.meta } else { $null }
+            })
+        }
+        return @($rows)
+    }
+
+    function _windo_net_scan_apply_host_tags([string]$Ip, [string[]]$HostNames, [string]$Mac, [string]$InterfaceAlias, [string]$Type, [array]$TagRules) {
+        $identity = [System.Collections.ArrayList]@()
+        $ipLower = if ([string]::IsNullOrWhiteSpace($Ip)) { '' } else { [string]$Ip.ToLowerInvariant() }
+        $macLower = if ([string]::IsNullOrWhiteSpace($Mac)) { '' } else { [string]$Mac.ToLowerInvariant() }
+        $ifaceLower = if ([string]::IsNullOrWhiteSpace($InterfaceAlias)) { '' } else { [string]$InterfaceAlias.ToLowerInvariant() }
+        foreach ($t in @($TagRules)) {
+            if (-not $t) { continue }
+            $field = if ($t.field) { [string]$t.field.ToLowerInvariant() } else { 'ip' }
+            $pattern = if ($t.pattern) { [string]$t.pattern.ToLowerInvariant() } else { '' }
+            if ([string]::IsNullOrWhiteSpace($pattern)) { continue }
+            $matched = $false
+            switch ($field) {
+                'ip' {
+                    if ($ipLower -like $pattern) { $matched = $true }
+                }
+                'hostname' {
+                    foreach ($h in @($HostNames)) { if (([string]$h.ToLowerInvariant()) -like $pattern) { $matched = $true; break } }
+                }
+                'mac' {
+                    if ($macLower -like $pattern) { $matched = $true }
+                }
+                'interface' {
+                    if ($ifaceLower -like $pattern) { $matched = $true }
+                }
+                'type' {
+                    if (($Type.ToLowerInvariant()) -like $pattern) { $matched = $true }
+                }
+                default { }
+            }
+            if ($matched) {
+                [void]$identity.Add([ordered]@{
+                    field = [string]$field
+                    pattern = [string]$pattern
+                    label = if ($t.label) { [string]$t.label } else { [string]$pattern }
+                    type = if ($t.type) { [string]$t.type } else { $null }
+                    note = if ($t.note) { [string]$t.note } else { $null }
+                    meta = $t.meta
+                })
+            }
+        }
+        return @($identity)
+    }
+
+    function _windo_net_scan_ping_report([object]$Payload, [bool]$JsonOutput) {
+        if ($null -eq $Payload) {
+            if ($JsonOutput) {
+                _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "internal ping payload missing"; exitCode = 2 }
+            } else {
+                Write-Host "[windo] net-scan ping: internal payload missing." -ForegroundColor Red
+            }
+            return
+        }
+        if ($JsonOutput) {
+            _emit_json "net-scan" $Payload
+            return
+        }
+        Write-Host "[windo] net-scan ping" -ForegroundColor Cyan
+        if ($Payload.discovery) {
+            $discoveryMethods = @()
+            if ($Payload.discovery.methods) { $discoveryMethods = @($Payload.discovery.methods) }
+            if ($discoveryMethods.Count -gt 0) { Write-Host ("  Discovery methods: {0}" -f ($discoveryMethods -join ", ")) -ForegroundColor DarkGray }
+            if ($Payload.discovery.note) { Write-Host ("  Note: {0}" -f $Payload.discovery.note) -ForegroundColor DarkGray }
+        }
+        if ($Payload.cidr) {
+            Write-Host ("  CIDR: {0}" -f $Payload.cidr) -ForegroundColor DarkGray
+        }
+        if ($Payload.targets) {
+            Write-Host ("  Targets: {0}" -f ($Payload.targets -join ", ")) -ForegroundColor DarkGray
+        }
+        if ($Payload.ports -and $Payload.ports.Count -gt 0) {
+            Write-Host ("  Ports: {0}" -f ($Payload.ports -join ", ")) -ForegroundColor DarkGray
+        }
+        Write-Host ("  Probed: {0}, reachable: {1}, unreachable: {2}, errors: {3}" -f $Payload.probedCount, $Payload.reachableCount, $Payload.unreachableCount, $Payload.errorCount) -ForegroundColor DarkGray
+        foreach ($h in @($Payload.hosts)) {
+            Write-Host ("  {0,-16} reachable={1,-5} rtt={2}" -f $h.ip, $h.reachable, $(if ($null -eq $h.rttMs) { "n/a" } else { [string]$h.rttMs })) -ForegroundColor $(if ($h.reachable) { "Green" } else { "Yellow" })
+            if ($h.hostnames -and $h.hostnames.Count -gt 0) {
+                Write-Host ("    hostnames: {0}" -f ($h.hostnames -join ", ")) -ForegroundColor DarkGray
+            }
+            if ($h.identityTags -and $h.identityTags.Count -gt 0) {
+                Write-Host ("    tags: {0}" -f ($h.identityTags | ForEach-Object { [string]$_.label } -join ", ")) -ForegroundColor DarkGray
+            }
+            if ($h.ports.Count -gt 0) {
+                foreach ($pk in $h.ports.Keys) { Write-Host ("    {0,-5}: {1}" -f $pk, $h.ports[$pk]) -ForegroundColor DarkGray }
+            }
+        }
+        if ($Payload.errors -and $Payload.errors.Count -gt 0) {
+            Write-Host "  Errors:" -ForegroundColor Red
+            foreach ($e in @($Payload.errors)) { Write-Host ("    {0}: {1}" -f $e.ip, $e.error) -ForegroundColor Red }
+        }
+    }
+
     function _windo_tool_state([string]$Name) {
         $c = Get-Command $Name -ErrorAction SilentlyContinue
         [pscustomobject]@{ name = $Name; available = [bool]$c; path = $(if ($c) { [string]$c.Source } else { $null }) }
+    }
+
+    function _windo_service_state([string]$ServiceName) {
+        try {
+            $svc = Get-Service -Name $ServiceName -ErrorAction Stop
+            return [pscustomobject]@{
+                name = [string]$ServiceName
+                exists = $true
+                status = [string]$svc.Status
+                startType = [string]$svc.StartType
+                canStop = [bool]$svc.CanStop
+                canPause = [bool]$svc.CanPauseAndContinue
+                canShutdown = [bool]$svc.CanShutdown
+                exitCode = 0
+            }
+        } catch {
+            return [pscustomobject]@{
+                name = [string]$ServiceName
+                exists = $false
+                status = "Missing"
+                startType = $null
+                canStop = $false
+                canPause = $false
+                canShutdown = $false
+                error = $_.Exception.Message
+                exitCode = 3
+            }
+        }
+    }
+
+    function _windo_parse_ports_raw([string]$RawPorts) {
+        if ([string]::IsNullOrWhiteSpace($RawPorts)) { return @() }
+        $parts = $RawPorts -split '[,;]\s*' | Where-Object { $_ -and $_.Trim() -ne "" }
+        $ports = [System.Collections.ArrayList]@()
+        foreach ($raw in @($parts)) {
+            $value = [string]$raw.Trim()
+            if ($value -eq "any") { return @(-1) }
+            if ($value -match '^\s*(\d+)\s*-\s*(\d+)\s*$') {
+                $start = [int]$Matches[1]
+                $end = [int]$Matches[2]
+                if ($start -gt $end) { throw "Invalid port range '$value'." }
+                if ($start -lt 1 -or $start -gt 65535 -or $end -lt 1 -or $end -gt 65535) { throw "Port range '$value' out of range (1..65535)." }
+                for ($p = $start; $p -le $end; $p++) {
+                    if (@($ports) -notcontains $p) { [void]$ports.Add($p) }
+                }
+                continue
+            }
+            $port = 0
+            if (-not [int]::TryParse($value, [ref]$port)) { throw "Invalid port '$value'." }
+            if ($port -lt 1 -or $port -gt 65535) { throw "Port must be 1..65535: $port." }
+            if (@($ports) -notcontains $port) { [void]$ports.Add($port) }
+        }
+        [void]$ports.Sort()
+        return @($ports)
+    }
+
+    function _windo_firewall_rules_for_patterns([string[]]$Patterns, [int[]]$Ports = @()) {
+        $rules = [System.Collections.ArrayList]@()
+        try {
+            $items = Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled Any -ErrorAction Stop
+            foreach ($rule in @($items)) {
+                $display = [string]$rule.DisplayName
+                $name = [string]$rule.Name
+                $group = if ($rule.Group) { [string]$rule.Group } else { "" }
+                $line = "$display $name $group"
+                $match = $false
+                foreach ($pattern in @($Patterns)) {
+                    if ($line -match [regex]::Escape([string]$pattern)) { $match = $true; break }
+                }
+                if (-not $match) { continue }
+
+                $portValues = [System.Collections.ArrayList]@()
+                try {
+                    $filter = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule -ErrorAction Stop
+                    if ($filter.LocalPort) {
+                        $rawPortList = @([string]$filter.LocalPort) -split ','
+                        foreach ($rp in $rawPortList) {
+                            $rp = $rp.Trim()
+                            if ($rp -eq "Any") {
+                                [void]$portValues.Add("Any")
+                                continue
+                            }
+                            if ($rp -match '^(\d+)-(\d+)$') {
+                                for ($i = [int]$Matches[1]; $i -le [int]$Matches[2]; $i++) { [void]$portValues.Add([int]$i) }
+                                continue
+                            }
+                            $n = 0
+                            if ([int]::TryParse($rp, [ref]$n)) { [void]$portValues.Add($n) }
+                        }
+                    }
+                } catch { }
+                if ($Ports.Count -gt 0 -and $Ports -notcontains -1) {
+                    $intersects = $false
+                    foreach ($p in $Ports) {
+                        if ($p -eq -1) { $intersects = $true; break }
+                        if ($portValues.Count -eq 0) { continue }
+                        if ($portValues.Contains("Any")) { $intersects = $true; break }
+                        if ($portValues.Contains($p)) { $intersects = $true; break }
+                    }
+                    if (-not $intersects) { continue }
+                }
+
+                [void]$rules.Add([ordered]@{
+                    name = $name
+                    displayName = $display
+                    group = $group
+                    description = if ($rule.Description) { [string]$rule.Description } else { $null }
+                    enabled = [bool]$rule.Enabled
+                    profile = if ($rule.Profile) { [string]$rule.Profile } else { $null }
+                    protocol = $filter.Protocol
+                    localPort = if ($portValues.Count -eq 0) { $null } else { @($portValues) }
+                    action = [string]$rule.Action
+                    edgeTraversal = [bool]$rule.EdgeTraversalPolicy
+                })
+            }
+            return @($rules)
+        } catch {
+            return @()
+        }
+    }
+
+    function _windo_firewall_apply_rules([string[]]$RuleNames, [bool]$Enable) {
+        $updated = [System.Collections.ArrayList]@()
+        foreach ($name in @($RuleNames)) {
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            try {
+                if ($Enable) {
+                    Enable-NetFirewallRule -Name $name -ErrorAction Stop
+                } else {
+                    Disable-NetFirewallRule -Name $name -ErrorAction Stop
+                }
+                $current = Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue
+                [void]$updated.Add([ordered]@{
+                    name = [string]$name
+                    action = $(if ($Enable) { "enabled" } else { "disabled" })
+                    status = if ($current) { [bool]$current.Enabled } else { $Enable }
+                    success = $true
+                })
+            } catch {
+                [void]$updated.Add([ordered]@{
+                    name = [string]$name
+                    action = $(if ($Enable) { "enabled" } else { "disabled" })
+                    success = $false
+                    error = $_.Exception.Message
+                })
+            }
+        }
+        return @($updated)
+    }
+
+    function _windo_remote_rdp_config_snapshot {
+        $tsPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server"
+        $tcpPath = Join-Path $tsPath "WinStations\RDP-Tcp"
+        $deny = $null
+        $nla = $null
+        $securityLayer = $null
+        try { $deny = Get-ItemProperty -Path $tsPath -Name fDenyTSConnections -ErrorAction Stop | Select-Object -ExpandProperty fDenyTSConnections } catch { }
+        try { $nla = Get-ItemProperty -Path $tsPath -Name UserAuthentication -ErrorAction Stop | Select-Object -ExpandProperty UserAuthentication } catch { }
+        try { $securityLayer = Get-ItemProperty -Path $tcpPath -Name SecurityLayer -ErrorAction Stop | Select-Object -ExpandProperty SecurityLayer } catch { }
+        $svc = _windo_service_state "TermService"
+        return [ordered]@{
+            registry = [ordered]@{
+                terminalServerPath = $tsPath
+                terminalServerFq = if ($null -ne $deny) { [int]$deny } else { $null }
+                userAuthentication = if ($null -ne $nla) { [int]$nla } else { $null }
+                securityLayer = if ($null -ne $securityLayer) { [int]$securityLayer } else { $null }
+            }
+            service = $svc
+        }
+    }
+
+    function _windo_remote_set_rdp_config {
+        param(
+            [Nullable[bool]]$Enable,
+            [Nullable[bool]]$Nla,
+            [Nullable[int]]$SecurityLayer,
+            [switch]$RestartService
+        )
+
+        $tsPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server"
+        $tcpPath = Join-Path $tsPath "WinStations\RDP-Tcp"
+        $changes = [System.Collections.ArrayList]@()
+
+        try {
+            if ($Enable -ne $null) {
+                $target = if ($Enable) { 0 } else { 1 }
+                Set-ItemProperty -Path $tsPath -Name fDenyTSConnections -Value $target -Type DWord
+                [void]$changes.Add([ordered]@{ key = "fDenyTSConnections"; action = "set"; value = $target })
+                if ($target -eq 0) {
+                    try { Set-ItemProperty -Path $tsPath -Name "fDenyTSConnections" -Value 0 -Type DWord } catch { }
+                }
+            }
+            if ($Nla -ne $null) {
+                $target = if ($Nla) { 1 } else { 0 }
+                Set-ItemProperty -Path $tsPath -Name UserAuthentication -Value $target -Type DWord
+                [void]$changes.Add([ordered]@{ key = "UserAuthentication"; action = "set"; value = $target })
+            }
+            if ($SecurityLayer -ne $null) {
+                if ($SecurityLayer -notin 0..2) { throw "SecurityLayer must be 0, 1, or 2." }
+                Set-ItemProperty -Path $tcpPath -Name SecurityLayer -Value [int]$SecurityLayer -Type DWord
+                [void]$changes.Add([ordered]@{ key = "SecurityLayer"; action = "set"; value = [int]$SecurityLayer })
+            }
+            if ($RestartService -and (Get-Service -Name TermService -ErrorAction SilentlyContinue)) {
+                try {
+                    Restart-Service -Name TermService -ErrorAction Stop
+                    $restartAction = "restarted"
+                } catch {
+                    $restartAction = "restart-failed"
+                }
+            } else {
+                $restartAction = "not-requested"
+            }
+            $snapshot = _windo_remote_rdp_config_snapshot
+            return @{
+                success = $true
+                restart = $restartAction
+                changes = @($changes)
+                snapshot = $snapshot
+            }
+        } catch {
+            return @{
+                success = $false
+                restart = "failed"
+                changes = @($changes)
+                error = $_.Exception.Message
+            }
+        }
+    }
+
+    function _windo_remote_vnc_services {
+        $servicePatterns = @("vnc", "uvnc", "winvnc", "tvnserver", "tightvnc", "ultravnc", "realvnc", "x11", "vncserver")
+        $services = [System.Collections.ArrayList]@()
+        try {
+            $all = Get-Service -ErrorAction SilentlyContinue
+            foreach ($svc in @($all)) {
+                $source = ([string]$svc.Name + " " + [string]$svc.DisplayName).ToLowerInvariant()
+                $matched = $false
+                foreach ($pattern in @($servicePatterns)) {
+                    if ($source -like "*$pattern*") { $matched = $true; break }
+                }
+                if (-not $matched) { continue }
+                [void]$services.Add([ordered]@{
+                    name = [string]$svc.Name
+                    displayName = if ($svc.DisplayName) { [string]$svc.DisplayName } else { [string]$svc.Name }
+                    status = [string]$svc.Status
+                    startType = [string]$svc.StartType
+                    canStop = [bool]$svc.CanStop
+                })
+            }
+        } catch { }
+        return @($services)
+    }
+
+    function _windo_remote_credential_preview([string]$VaultName) {
+        $empty = @{
+            exists = $false
+            name = [string]$VaultName
+            username = $null
+            passwordPreview = $null
+        }
+        if ([string]::IsNullOrWhiteSpace($VaultName)) { return $empty }
+        $map = _windo_vault_read_map
+        if (-not $map.ContainsKey([string]$VaultName)) { return $empty }
+
+        $entry = $map[[string]$VaultName]
+        $plain = $null
+        try {
+            if ($entry -is [string]) {
+                $plain = _dpapi_unprotect $entry
+            } elseif ($entry -is [pscustomobject] -or ($entry -is [hashtable])) {
+                $protected = $null
+                if ($entry -is [hashtable]) {
+                    if ($entry.ContainsKey("protected")) { $protected = $entry["protected"] }
+                    elseif ($entry.ContainsKey("encrypted")) { $protected = $entry["encrypted"] }
+                    elseif ($entry.ContainsKey("value")) { $protected = $entry["value"] }
+                } else {
+                    if ($entry.PSObject.Properties.Name -contains "protected") { $protected = $entry.protected }
+                    elseif ($entry.PSObject.Properties.Name -contains "encrypted") { $protected = $entry.encrypted }
+                    elseif ($entry.PSObject.Properties.Name -contains "value") { $protected = $entry.value }
+                    elseif ($entry.PSObject.Properties.Name -contains "user" -and $entry.PSObject.Properties.Name -contains "password") {
+                        $plain = [string]$entry.user + ":" + [string]$entry.password
+                    }
+                }
+                if ($null -ne $protected) {
+                    $plain = _dpapi_unprotect [string]$protected
+                }
+            } else {
+                return @{
+                    exists = $false
+                    name = [string]$VaultName
+                    error = "Unsupported vault item format."
+                }
+            }
+        } catch {
+            return @{
+                exists = $false
+                name = [string]$VaultName
+                error = $_.Exception.Message
+            }
+        }
+
+        $username = $null
+        if ($plain -match '^(?<user>[^:]+):(?<pwd>.*)$') {
+            $username = $Matches.user
+            $pw = $Matches.pwd
+        } elseif ($plain) {
+            $username = $plain
+            $pw = ""
+        } else {
+            $pw = ""
+        }
+        if ([string]::IsNullOrEmpty($pw)) { $preview = $null } else { $preview = $pw.Substring(0, [Math]::Min(2, $pw.Length)) + "****" }
+        return @{
+            exists = $true
+            name = [string]$VaultName
+            username = $username
+            passwordPreview = $preview
+        }
     }
 
     function _windo_get_recipe_command_line([string]$RecipeId) {
@@ -2121,7 +2877,7 @@ function windo {
     function _windo_extras_index_url {
         $raw = [string]$env:WINDO_EXTRAS_INDEX_URL
         if (-not [string]::IsNullOrWhiteSpace($raw)) { return $raw.Trim() }
-        return "https://raw.githubusercontent.com/l28bit/windo/Exodus/extras/index.json"
+        return "https://raw.githubusercontent.com/l28bit/windo/v6/extras/index.json"
     }
 
     function _windo_fetch_text_url([string]$Uri) {
@@ -2144,7 +2900,7 @@ Recommended env (set by WINDO after successful elevation):
   WINDO_LAST_REQUEST_ID   last completed RequestId (audit correlation)
   WINDO_VERSION           WINDO CLI / profile version ($WindoVersion)
 
-Example segment (JSON) — map fields to your theme's env segment or a custom script block:
+Example segment (JSON) â€” map fields to your theme's env segment or a custom script block:
 {
   "type": "text",
   "style": "diamond",
@@ -2152,7 +2908,7 @@ Example segment (JSON) — map fields to your theme's env segment or a custom sc
   "background": "#1e1e1e",
   "leading_diamond": " ",
   "trailing_diamond": "",
-  "template": " WINDO {{ if .Env.WINDO_VERSION }}v{{ .Env.WINDO_VERSION }}{{ end }}{{ if .Env.WINDO_LAST_REQUEST_ID }} · {{ .Env.WINDO_LAST_REQUEST_ID }}{{ end }} "
+  "template": " WINDO {{ if .Env.WINDO_VERSION }}v{{ .Env.WINDO_VERSION }}{{ end }}{{ if .Env.WINDO_LAST_REQUEST_ID }} Â· {{ .Env.WINDO_LAST_REQUEST_ID }}{{ end }} "
 }
 
 Use: windo prompt --json   (machine-readable bundle)
@@ -2381,14 +3137,14 @@ Use: windo prompt --json   (machine-readable bundle)
             [pscustomobject]@{
                 version = "4.6.0"
                 codename = "Native Shell Polish"
-                theme = "Harden tray, surface, motion, and native readiness before V5."
+                theme = "Harden tray, surface, motion, and native readiness before V6."
                 focus = @("surface doctor", "surface repair", "surface open", "status-aware tray path", "compiled-helper scaffold")
                 status = "shipped"
                 operatorValue = "The Windows-native surface becomes easier to inspect, repair, and open without exposing future companion-app internals."
             },
             [pscustomobject]@{
                 version = "5.0.0"
-                codename = "Command Center Special Edition"
+                codename = "Command Center"
                 theme = "A native-feeling Windows command center for deliberate elevation."
                 focus = @("windo center", "tray", "control plane", "signal deck", "surface", "motion", "trust", "recipes")
                 status = "shipped"
@@ -2396,9 +3152,9 @@ Use: windo prompt --json   (machine-readable bundle)
             },
             [pscustomobject]@{
                 version = "5.1.0"
-                codename = "Exodus Limited Edition"
-                theme = "Make the V5 command center feel like a special release, not just a command surface."
-                focus = @("windo edition", "limited edition console", "brand assets", "HTML animation", "edition pulse", "Exodus branch")
+                codename = "Command Center"
+                theme = "Make the V6 command center feel complete and consistent, not just a command surface."
+                focus = @("windo edition", "command center console", "brand assets", "HTML animation", "edition pulse", "Release branch")
                 status = "shipped"
                 operatorValue = "Operators get a branded local edition console plus stronger command grammar for previewing and executing curated actions."
             },
@@ -2521,7 +3277,7 @@ Use: windo prompt --json   (machine-readable bundle)
                 id = "launch"
                 aliases = @("launchpad", "tray", "window", "command center")
                 category = "Visuals"
-                summary = "Open the Special Edition launchpad or native tray command center."
+                summary = "Open the WINDO launchpad or native tray command center."
                 command = "windo launchpad --tray"
                 preview = "windo launchpad"
                 risk = "starts local tray helper"
@@ -2536,6 +3292,26 @@ Use: windo prompt --json   (machine-readable bundle)
                 preview = "windo control actions"
                 risk = "local manifest write"
                 notes = "Use windo control queue <action-id> for explicit request files or windo control run <action-id> to launch a curated action visibly."
+            },
+            [pscustomobject]@{
+                id = "rdp"
+                aliases = @("rdp", "remote desktop", "rdp status", "rdp firewall", "rdp troubleshoot", "rdp config")
+                category = "Remote Access"
+                summary = "Inspect RDP registry and service posture, firewall rules, and troubleshooting state."
+                command = "windo rdp status --json"
+                preview = "windo rdp troubleshoot --host localhost --json"
+                risk = "elevation for config/apply changes"
+                notes = "Use status only commands before elevating; enable/disable/config may need Administrator and are planned through the WINDO runner."
+            },
+            [pscustomobject]@{
+                id = "vnc"
+            aliases = @("vnc", "vnc status", "vnc firewall", "vnc stop", "vnc test", "vnc troubleshoot")
+                category = "Remote Access"
+                summary = "Inspect VNC services and listeners, plus port reachability checks."
+                command = "windo vnc status --json"
+                preview = "windo vnc test --host localhost --ports 5900,5901 --json"
+                risk = "elevation for service stop operations"
+                notes = "Vault entries are optional and only previewed as username + masked password for safe operator context."
             },
             [pscustomobject]@{
                 id = "integration"
@@ -2652,6 +3428,94 @@ Use: windo prompt --json   (machine-readable bundle)
         return ((@($Parts) | ForEach-Object { _windo_quote_plan_part ([string]$_) }) -join " ")
     }
 
+    function _windo_parse_bool_value {
+        param([object]$Raw, [bool]$Default = $false)
+        if ($null -eq $Raw) { return $Default }
+        $value = [string]$Raw
+        if ([string]::IsNullOrWhiteSpace($value)) { return $Default }
+        switch ($value.Trim().ToLowerInvariant()) {
+            "1" { return $true }
+            "true" { return $true }
+            "yes" { return $true }
+            "on" { return $true }
+            "enabled" { return $true }
+            "0" { return $false }
+            "false" { return $false }
+            "no" { return $false }
+            "off" { return $false }
+            "disabled" { return $false }
+            default { return $Default }
+        }
+    }
+
+    function _windo_motion_classification {
+        param([object[]]$Parts)
+        $parts = @($Parts | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        if ($parts.Count -gt 0 -and ([string]$parts[0]).ToLowerInvariant() -eq "windo") {
+            $parts = if ($parts.Count -gt 1) { @($parts[1..($parts.Count - 1)]) } else { @() }
+        }
+        $verb = if ($parts.Count -gt 0) { ([string]$parts[0]).ToLowerInvariant() } else { "" }
+        $sub = if ($parts.Count -gt 1) { ([string]$parts[1]).ToLowerInvariant() } else { "" }
+
+        $durationClass = "short"
+        $profileHint = "subtle"
+        $context = $(if ([string]::IsNullOrWhiteSpace($verb)) { "empty" } else { "short" })
+
+        switch -Regex ($verb) {
+            "^((install-latest)|(upgrade)|(self-update)|uninstall)$" {
+                $durationClass = "long"
+                $profileHint = "standard"
+                $context = "installer-update"
+            }
+            "^pkg$" {
+                $durationClass = if ($sub -eq "status") { "short" } else { "long" }
+                $profileHint = if ($durationClass -eq "long") { "standard" } else { "subtle" }
+                $context = "pkg"
+            }
+            "^recipes$" {
+                if ($sub -eq "run") {
+                    $durationClass = "long"
+                    $profileHint = "standard"
+                    $context = "recipe-run"
+                } else {
+                    $durationClass = "short"
+                    $context = "recipe"
+                }
+            }
+            "^run$" {
+                $durationClass = "long"
+                $profileHint = "standard"
+                $context = "recipe-run"
+            }
+            "^source$" {
+                $durationClass = "short"
+                $context = "source"
+            }
+            "^integrate$" {
+                $durationClass = "medium"
+                $profileHint = "standard"
+                $context = "integration"
+            }
+            "^surface$|^control$|^motion$|^edition$|^studio$|^center$" {
+                $durationClass = "long"
+                $profileHint = "standard"
+                $context = $verb
+            }
+            "^windi$|^syntax$|^help$|^version$|^config$|^context$|^doctor$|^log$|^verify$|^integrity$|^history$|^stats$|^profile$|^motion$" {
+                $durationClass = "short"
+                $profileHint = "subtle"
+                $context = $verb
+            }
+            default { }
+        }
+
+        [pscustomobject]@{
+            estimatedDurationClass = $durationClass
+            motionProfileHint = $profileHint
+            motionContext = $context
+        }
+    }
+
     function _windo_new_command_plan([object[]]$Parts) {
         $target = @($Parts | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
         if ($target.Count -gt 0 -and ([string]$target[0]).ToLowerInvariant() -eq "windo") {
@@ -2661,6 +3525,7 @@ Use: windo prompt --json   (machine-readable bundle)
         $commandLine = _windo_join_plan_command $target
         $verb = if ($target.Count -gt 0) { ([string]$target[0]).ToLowerInvariant() } else { "" }
         $sub = if ($target.Count -gt 1) { ([string]$target[1]).ToLowerInvariant() } else { "" }
+        $motionProfile = _windo_motion_classification $target
         $artifacts = [System.Collections.ArrayList]@()
         $preflight = [System.Collections.ArrayList]@("windo trust", "windo preflight")
         $next = [System.Collections.ArrayList]@()
@@ -2681,6 +3546,9 @@ Use: windo prompt --json   (machine-readable bundle)
             preflight = @()
             nextCommands = @()
             warnings = @()
+            estimatedDurationClass = [string]$motionProfile.estimatedDurationClass
+            motionContext = [string]$motionProfile.motionContext
+            motionProfileHint = [string]$motionProfile.motionProfileHint
             exitCode = 0
         }
 
@@ -2846,6 +3714,16 @@ Use: windo prompt --json   (machine-readable bundle)
                 [void]$next.Add($(if ($commandLine) { $commandLine } else { "windo pkg status" }))
                 break
             }
+            "container" {
+                $plan.route = "local container runtime handoff"
+                $plan.category = "Operators"
+                $plan.privilegeBoundary = "local shell only; no scheduled task used"
+                $plan.writesLocalFiles = $false
+                $plan.createsAuditEntry = $false
+                $plan.checksumValidation = "not applicable; dispatch is limited to local docker/podman binaries"
+                [void]$next.Add($(if ($commandLine) { $commandLine } else { "windo container ps" }))
+                break
+            }
             "scan" {
                 $plan.route = "local security posture scan"
                 $plan.category = "Security"
@@ -2854,6 +3732,62 @@ Use: windo prompt --json   (machine-readable bundle)
                 $plan.createsAuditEntry = $false
                 $plan.checksumValidation = "calculates SHA256 for scanned files when hashing is enabled"
                 [void]$next.Add($(if ($commandLine) { $commandLine } else { "windo scan ." }))
+                break
+            }
+            "net-scan" {
+                $plan.route = "local network posture scan"
+                $plan.category = "Security"
+                $plan.privilegeBoundary = "read-only unless rdp/vnc apply subcommands are supplied; those require elevation"
+                $plan.writesLocalFiles = $false
+                $plan.createsAuditEntry = $false
+                $plan.checksumValidation = "not applicable; local network inspection only"
+                [void]$next.Add($(if ($commandLine) { $commandLine } else { "windo net-scan status" }))
+                break
+            }
+            "rdp" {
+                if ($sub -in @("status", "")) {
+                    $plan.route = "RDP posture read-only"
+                    $plan.category = "Remote Access"
+                    $plan.privilegeBoundary = "current user local reads"
+                    $plan.writesLocalFiles = $false
+                    $plan.createsAuditEntry = $false
+                    $plan.checksumValidation = "not applicable; registry read-through and service state only"
+                } elseif ($sub -in @("firewall", "config", "troubleshoot")) {
+                    $plan.route = "RDP apply/diagnostics"
+                    $plan.category = "Remote Access"
+                    $plan.privilegeBoundary = "scheduled task runner unless --dry-run is used"
+                    $plan.writesLocalFiles = $false
+                    $plan.createsAuditEntry = $true
+                    $plan.checksumValidation = "not applicable; runner/updater integrity is checked before execution"
+                } else {
+                    $plan.route = "remote access command"
+                    $plan.category = "Remote Access"
+                    $plan.privilegeBoundary = "read-only; unknown subcommand handled at runtime"
+                }
+                [void]$next.Add($(if ($commandLine) { $commandLine } else { "windo rdp status" }))
+                break
+            }
+            "vnc" {
+                if ($sub -in @("status", "")) {
+                    $plan.route = "VNC posture read-only"
+                    $plan.category = "Remote Access"
+                    $plan.privilegeBoundary = "current user local reads"
+                    $plan.writesLocalFiles = $false
+                    $plan.createsAuditEntry = $false
+                    $plan.checksumValidation = "not applicable; service probes and firewall reads only"
+                } elseif ($sub -in @("firewall", "test", "troubleshoot", "stop")) {
+                    $plan.route = "VNC apply/diagnostics"
+                    $plan.category = "Remote Access"
+                    $plan.privilegeBoundary = "scheduled task runner unless --dry-run is used"
+                    $plan.writesLocalFiles = $false
+                    $plan.createsAuditEntry = $true
+                    $plan.checksumValidation = "not applicable; runner/updater integrity is checked before execution"
+                } else {
+                    $plan.route = "remote access command"
+                    $plan.category = "Remote Access"
+                    $plan.privilegeBoundary = "read-only; unknown subcommand handled at runtime"
+                }
+                [void]$next.Add($(if ($commandLine) { $commandLine } else { "windo vnc status" }))
                 break
             }
             "vault" {
@@ -3128,13 +4062,13 @@ Use: windo prompt --json   (machine-readable bundle)
         }
         $TempInst = Join-Path $env:TEMP ("windo_install_" + [Guid]::NewGuid().ToString("n") + ".ps1")
         try {
-            Write-Host "[windo] Downloading latest installer from Exodus (GitHub API first, raw fallback)..." -ForegroundColor Cyan
+            Write-Host "[windo] Downloading latest installer from v6 (GitHub API first, raw fallback)..." -ForegroundColor Cyan
             $publishedInstaller = _windo_save_published_installer -Path $TempInst
             Write-Host "[windo] Installer source: $($publishedInstaller.source)  version=$($publishedInstaller.version)" -ForegroundColor DarkGray
             if (!(Test-Path $TempInst)) { throw "Download failed." }
             _windo_verify_installer_sha256_optional $TempInst
             if ((Get-Item $TempInst).Length -lt 5000) { throw "Installer file size looks invalid." }
-            Write-Host "[windo] Download finished; checksum verified when published on Exodus." -ForegroundColor Green
+            Write-Host "[windo] Download finished; checksum verified when published on v6." -ForegroundColor Green
             $runNow = $false
             if ($ForceContinue -or $env:WINDO_INSTALL_NONINTERACTIVE -or $env:CI) {
                 $runNow = $true
@@ -3168,7 +4102,7 @@ Use: windo prompt --json   (machine-readable bundle)
             Write-Host "[windo] Starting installer. When it finishes, reload: . `$PROFILE" -ForegroundColor Yellow
             _windo_start_downloaded_installer -ScriptPath $TempInst
         } catch {
-            Write-Host "[windo] Could not install from Exodus: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "[windo] Could not install from v6: $($_.Exception.Message)" -ForegroundColor Red
             _windo_set_exit 1
         } finally {
             if (Test-Path -LiteralPath $TempInst) { Remove-Item -LiteralPath $TempInst -Force -ErrorAction SilentlyContinue }
@@ -3210,7 +4144,7 @@ Use: windo prompt --json   (machine-readable bundle)
     function _suggest_if_denied([int]$exitCode, [string]$output) {
         $low = ($output | Out-String).ToLowerInvariant()
         if ($exitCode -eq 5 -or $exitCode -eq 740 -or $low -match 'access is denied|denied\.|requires elevation|must be run from|privilege') {
-            Write-Host "[windo] Hint: Access was denied or blocked. Check paths and ACLs; run 'windo doctor'. If tasks are missing, re-run the installer elevated once. Elevation remains deliberate — WINDO does not auto-elevate your interactive shell." -ForegroundColor DarkYellow
+            Write-Host "[windo] Hint: Access was denied or blocked. Check paths and ACLs; run 'windo doctor'. If tasks are missing, re-run the installer elevated once. Elevation remains deliberate â€” WINDO does not auto-elevate your interactive shell." -ForegroundColor DarkYellow
         }
     }
 
@@ -3327,13 +4261,13 @@ Use: windo prompt --json   (machine-readable bundle)
         param([string]$Raw)
         if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
         $normalized = $Raw.Trim()
-        $m = [regex]::Match($normalized, '^(?<value>\d+)\s*(?<unit>ms|s)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        $m = [regex]::Match($normalized, '^(?<value>\d+(?:\.\d+)?)\s*(?<unit>ms|s)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
         if (-not $m.Success) { return $null }
         try {
-            $val = [int64]$m.Groups['value'].Value
+            $val = [double]$m.Groups['value'].Value
             $unit = $m.Groups['unit'].Value.ToLowerInvariant()
-            if ($unit -eq 'ms') { return [int]$val }
-            return [int]($val * 1000)
+            if ($unit -eq 'ms') { return [int][Math]::Round($val) }
+            return [int][Math]::Round($val * 1000)
         } catch { return $null }
     }
 
@@ -3421,11 +4355,93 @@ Use: windo prompt --json   (machine-readable bundle)
         }
     }
 
+    function _windo_normalize_motion_profile([string]$Profile) {
+        if ([string]::IsNullOrWhiteSpace($Profile)) { return "auto" }
+        switch ($Profile.Trim().ToLowerInvariant()) {
+            "auto" { return "auto" }
+            "off" { return "off" }
+            "none" { return "off" }
+            "subtle" { return "subtle" }
+            "steady" { return "steady" }
+            "standard" { return "standard" }
+            "rich" { return "rich" }
+            "ambient" { return "ambient" }
+            "quiet" { return "ambient" }
+            "minimal" { return "ambient" }
+            "burst" { return "burst" }
+            "cinematic" { return "cinematic" }
+            "full" { return "rich" }
+            default { return "auto" }
+        }
+    }
+
+    function _windo_motion_profile_definition([string]$Profile) {
+        switch (_windo_normalize_motion_profile $Profile) {
+            "off" { return @{ frames = @(); intervalMs = 0; colors = @(); clearWidth = 0; usesColor = $false } }
+            "ambient" { return @{ frames = @(".", " "); intervalMs = 170; colors = @("DarkGray"); clearWidth = 84; usesColor = $false } }
+            "subtle" { return @{ frames = @(".", "o", "O", "o"); intervalMs = 140; colors = @("Gray", "DarkGray"); clearWidth = 90; usesColor = $false } }
+            "steady" { return @{ frames = @("|", "-", "|", "-", "=", "-", "|", "-", "/"); intervalMs = 180; colors = @("Gray", "DarkGray"); clearWidth = 102; usesColor = $false } }
+            "standard" { return @{ frames = @("|", "/", "-", "\"); intervalMs = 110; colors = @("Cyan"); clearWidth = 112; usesColor = $false } }
+            "rich" { return @{ frames = @("|", "/", "-", "\", "=", "â‰¡"); intervalMs = 80; colors = @("Cyan", "Blue", "Magenta", "DarkCyan"); clearWidth = 118; usesColor = $true } }
+            "burst" { return @{ frames = @(">", ">>", ">>>", " >>", "  >", " >"); intervalMs = 70; colors = @("Cyan", "Blue", "Cyan", "White", "Blue"); clearWidth = 120; usesColor = $true } }
+            "cinematic" { return @{ frames = @("[=    ]", "[ =   ]", "[  =  ]", "[   = ]", "[    =]", "[   = ]", "[  =  ]", "[ =   ]"); intervalMs = 75; colors = @("Cyan", "Blue", "DarkCyan", "Cyan", "DarkCyan", "Blue", "Cyan", "White"); clearWidth = 132; usesColor = $true } }
+            default { return @{ frames = @("|", "/", "-", "\"); intervalMs = 110; colors = @("Cyan"); clearWidth = 112; usesColor = $false } }
+        }
+    }
+
+    function _windo_motion_frames([string]$Profile) {
+        return @(_windo_motion_profile_definition $Profile).frames
+    }
+
+    function _windo_motion_interval_ms([string]$Profile) {
+        return [int](_windo_motion_profile_definition $Profile).intervalMs
+    }
+
+    function _windo_resolve_motion_profile_name {
+        param(
+            [pscustomobject]$Plan,
+            [string]$Context = "dispatch",
+            [string]$RequestedProfile = "auto"
+        )
+        $policy = _windo_resolve_motion_policy
+        if (-not [bool]$policy.enabled) { return "off" }
+
+        if ([string]::IsNullOrWhiteSpace($RequestedProfile)) { $RequestedProfile = "auto" }
+        $requested = _windo_normalize_motion_profile $RequestedProfile
+        if ($requested -ne "auto") { return $requested }
+
+        $hint = if ($Plan -and [string]::IsNullOrWhiteSpace([string]$Plan.motionProfileHint) -eq $false) { [string]$Plan.motionProfileHint } else { "auto" }
+        $hintProfile = _windo_normalize_motion_profile $hint
+        if ($hintProfile -ne "auto") { return $hintProfile }
+
+        $isLong = $false
+        if ($Context -in @("self-update", "elevated-result", "installer-update")) { $isLong = $true }
+        if ($Plan -and [string]$Plan.estimatedDurationClass -eq "long") { $isLong = $true }
+        if ($Plan -and [string]$Plan.motionContext -eq "installer-update") { $isLong = $true }
+
+        if ($isLong) { return "standard" }
+
+        switch ($Context.ToLowerInvariant()) {
+            "surface" { return "burst" }
+            "control" { return "burst" }
+            "studio" { return "burst" }
+            "center" { return "standard" }
+            "motion" { return "rich" }
+            "edition" { return "standard" }
+            "installer-update" { return "cinematic" }
+            default { return "ambient" }
+        }
+    }
+
     function _windo_resolve_motion_policy {
         $pref = _read_windo_prefs
         $prefMode = $null
         if ($pref -and $pref.PSObject.Properties.Name -contains 'motionMode') { $prefMode = [string]$pref.motionMode }
+        $prefProfile = $null
+        if ($pref -and $pref.PSObject.Properties.Name -contains 'motionProfile') { $prefProfile = [string]$pref.motionProfile }
         $envMode = [string]$env:WINDO_MOTION
+        $envProfile = [string]$env:WINDO_MOTION_PROFILE
+        $reducedMotionRaw = [string]$env:WINDO_REDUCED_MOTION
         $raw = "auto"
         $source = "default"
         if (-not [string]::IsNullOrWhiteSpace($prefMode)) {
@@ -3437,12 +4453,26 @@ Use: windo prompt --json   (machine-readable bundle)
             $source = "env"
         }
         $mode = _windo_normalize_motion_mode $raw
+        $profileRaw = "auto"
+        $profileSource = "default"
+        if (-not [string]::IsNullOrWhiteSpace($prefProfile)) {
+            $profileRaw = $prefProfile
+            $profileSource = "prefs"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($envProfile)) {
+            $profileRaw = $envProfile
+            $profileSource = "env"
+        }
+        $motionProfile = _windo_normalize_motion_profile $profileRaw
         $interactive = $false
         try { $interactive = (-not [Console]::IsOutputRedirected) } catch { $interactive = $false }
         $enabled = $false
         if ($mode -eq "on") { $enabled = $true }
-        elseif ($mode -eq "auto") { $enabled = ($interactive -and -not $env:CI -and -not $env:WINDO_NO_SPINNER) }
+        elseif ($mode -eq "auto") { $enabled = ($interactive -and -not $env:CI -and -not $env:WINDO_NO_SPINNER -and -not (_windo_parse_bool_value $reducedMotionRaw $false)) }
         elseif ($mode -eq "quiet") { $enabled = $false }
+        $effectiveProfile = $motionProfile
+        if (-not $enabled) { $effectiveProfile = "off" }
+        if ($mode -eq "off") { $effectiveProfile = "off" }
         [pscustomobject]@{
             mode = $mode
             source = $source
@@ -3450,7 +4480,11 @@ Use: windo prompt --json   (machine-readable bundle)
             interactive = [bool]$interactive
             environmentValue = $(if ([string]::IsNullOrWhiteSpace($envMode)) { $null } else { $envMode.Trim() })
             preferenceValue = $(if ([string]::IsNullOrWhiteSpace($prefMode)) { $null } else { $prefMode.Trim() })
+            motionProfile = [string]$effectiveProfile
+            motionProfileRequested = [string]$motionProfile
+            motionProfileSource = [string]$profileSource
             prefsFile = $PrefsFile
+            reducedMotion = [bool](_windo_parse_bool_value $reducedMotionRaw $false)
             description = $(switch ($mode) {
                 "auto" { "Animate interactive terminal waits only; disabled for CI, redirected output, and WINDO_NO_SPINNER." }
                 "on" { "Use terminal motion when possible, while still respecting non-interactive host failures." }
@@ -3460,35 +4494,41 @@ Use: windo prompt --json   (machine-readable bundle)
         }
     }
 
-    function _windo_motion_pulse([string]$Label = "[windo] motion", [int]$Milliseconds = 850) {
+    function _windo_motion_animate([string]$Label = "[windo] motion", [int]$Milliseconds = 850, [string]$Profile = "ambient", [bool]$UseColors = $false) {
         $policy = _windo_resolve_motion_policy
         if (-not $policy.enabled) { return $false }
-        $frames = @("·  ", "·· ", "···", " ··", "  ·", "   ")
+        if ([string]::IsNullOrWhiteSpace($Label) -or $Milliseconds -le 0) { return $false }
+
+        $effective = _windo_resolve_motion_profile_name -RequestedProfile $Profile
+        $spec = _windo_motion_profile_definition $effective
+        $frames = @($spec.frames)
+        if ($frames.Count -eq 0) { return $false }
+
+        $colors = @($spec.colors)
+        $interval = [Math]::Max(40, [Math]::Min(200, [int]$spec.intervalMs))
+        $clearWidth = [Math]::Max(16, [Math]::Min([int]$spec.clearWidth, 140))
+        if (-not $UseColors) { $UseColors = ($spec.usesColor -and $colors.Count -gt 0) }
+
         $sw = [Diagnostics.Stopwatch]::StartNew()
         $i = 0
         while ($sw.ElapsedMilliseconds -lt $Milliseconds) {
-            [Console]::Write(("`r{0} {1}" -f $Label, $frames[$i % $frames.Length]))
+            $frame = [string]$frames[$i % $frames.Count]
+            if ($UseColors) { Write-Host -NoNewline ("`r{0} {1} " -f $Label, $frame) -ForegroundColor [string]$colors[$i % $colors.Count] }
+            else { [Console]::Write(("`r{0} {1} " -f $Label, $frame)) }
             $i++
-            Start-Sleep -Milliseconds 85
+            Start-Sleep -Milliseconds $interval
         }
-        [Console]::Write("`r$(' ' * ([Math]::Min(120, $Label.Length + 8)))`r")
+
+        [Console]::Write("`r$(' ' * $clearWidth)`r")
         return $true
     }
 
-    function _windo_motion_edition([string]$Label = "[windo] limited edition", [int]$Milliseconds = 1400) {
-        $policy = _windo_resolve_motion_policy
-        if (-not $policy.enabled) { return $false }
-        $frames = @("[=     ]", "[==    ]", "[===   ]", "[ ==== ]", "[  ====]", "[   ===]", "[    ==]", "[     =]")
-        $colors = @("Cyan", "Blue", "Magenta", "DarkCyan")
-        $sw = [Diagnostics.Stopwatch]::StartNew()
-        $i = 0
-        while ($sw.ElapsedMilliseconds -lt $Milliseconds) {
-            Write-Host -NoNewline ("`r{0} {1}" -f $Label, $frames[$i % $frames.Length]) -ForegroundColor $colors[$i % $colors.Length]
-            $i++
-            Start-Sleep -Milliseconds 80
-        }
-        [Console]::Write("`r$(' ' * ([Math]::Min(120, $Label.Length + 14)))`r")
-        return $true
+    function _windo_motion_pulse([string]$Label = "[windo] motion", [int]$Milliseconds = 850, [string]$Profile = "ambient") {
+        return _windo_motion_animate -Label $Label -Milliseconds $Milliseconds -Profile $Profile -UseColors $false
+    }
+
+    function _windo_motion_edition([string]$Label = "[windo] command center", [int]$Milliseconds = 1400) {
+        return _windo_motion_animate -Label $Label -Milliseconds $Milliseconds -Profile "cinematic" -UseColors $true
     }
 
     function _windo_validate_elevated_command([string]$cmdLine) {
@@ -3505,7 +4545,7 @@ Use: windo prompt --json   (machine-readable bundle)
 
     function _windo_spinner_enabled {
         $policy = _windo_resolve_motion_policy
-        return [bool]$policy.enabled
+        return ([bool]$policy.enabled -and [string]$policy.motionProfile -ne "off")
     }
 
     function _windo_clear_spinner_line([int]$Width) {
@@ -3514,22 +4554,33 @@ Use: windo prompt --json   (machine-readable bundle)
         [Console]::Write("`r$(' ' * $w)`r")
     }
 
-    function _windo_spinner_line([string]$Label, [int]$Frame) {
+    function _windo_spinner_line([string]$Label, [int]$Frame, [string]$Profile = "auto") {
         if (-not (_windo_spinner_enabled)) { return }
-        $frames = @('|', '/', '-', '\')
-        $c = $frames[$Frame % $frames.Length]
-        [Console]::Write("`r${Label} ${c} ")
+        $effective = _windo_resolve_motion_profile_name -RequestedProfile $Profile
+        if ($effective -eq "off") { return }
+        $def = _windo_motion_profile_definition $effective
+        $frames = @($def.frames)
+        if ($frames.Count -eq 0) { return }
+        $c = $frames[$Frame % $frames.Count]
+        if ($def.usesColor -and $def.colors.Count -gt 0) {
+            Write-Host -NoNewline ("`r{0} {1} " -f $Label, $c) -ForegroundColor [string]$def.colors[$Frame % $def.colors.Count]
+        } else {
+            [Console]::Write("`r${Label} ${c} ")
+        }
     }
 
     function _windo_invoke_rest_with_spinner {
         param(
             [Parameter(Mandatory)][string]$Uri,
             [Parameter(Mandatory)][string]$OutFile,
-            [Parameter(Mandatory)][string]$Label
+            [Parameter(Mandatory)][string]$Label,
+            [string]$Profile = "standard",
+            [string]$Context = "download"
         )
         $baseLabel = "[windo] $Label"
+        $effectiveProfile = _windo_resolve_motion_profile_name -Context $Context -RequestedProfile $Profile
 
-        if (-not (_windo_spinner_enabled)) {
+        if (-not (_windo_spinner_enabled) -or $effectiveProfile -eq "off") {
             Write-Host $baseLabel -ForegroundColor Cyan
             Invoke-RestMethod -Uri $Uri -OutFile $OutFile
             return
@@ -3554,9 +4605,9 @@ Use: windo prompt --json   (machine-readable bundle)
 
         $frame = 0
         while ((Get-Job -Id $job.Id -ErrorAction SilentlyContinue).State -eq "Running") {
-            _windo_spinner_line $baseLabel $frame
+            _windo_spinner_line $baseLabel $frame $effectiveProfile
             $frame = ($frame + 1) % 4
-            Start-Sleep -Milliseconds 100
+            Start-Sleep -Milliseconds (_windo_motion_interval_ms $effectiveProfile)
         }
 
         _windo_clear_spinner_line ($baseLabel.Length + 4)
@@ -3571,11 +4622,11 @@ Use: windo prompt --json   (machine-readable bundle)
     }
 
     function _windo_installer_raw_url {
-        return "https://raw.githubusercontent.com/l28bit/windo/Exodus/windo_install.ps1"
+        return "https://raw.githubusercontent.com/l28bit/windo/v6/windo_install.ps1"
     }
 
     function _windo_installer_api_url {
-        return "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=Exodus"
+        return "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=v6"
     }
 
     function _windo_extract_installer_version([string]$Text) {
@@ -3630,11 +4681,11 @@ Use: windo prompt --json   (machine-readable bundle)
     }
 
     function _windo_installer_checksum_raw_url {
-        return "https://raw.githubusercontent.com/l28bit/windo/Exodus/checksums/installer.sha256"
+        return "https://raw.githubusercontent.com/l28bit/windo/v6/checksums/installer.sha256"
     }
 
     function _windo_installer_checksum_api_url {
-        return "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=Exodus"
+        return "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=v6"
     }
 
     function _windo_read_checksum_from_github_contents([string]$Url) {
@@ -3680,7 +4731,7 @@ Use: windo prompt --json   (machine-readable bundle)
         if ($null -eq $expect) { return }
         $got = (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToUpperInvariant()
         if ($got -cne $expect) {
-            throw "Installer SHA256 does not match published checksum (branch Exodus). Set `$env:WINDO_SKIP_INSTALLER_SHA256=1 to skip. Expected=$expect Got=$got"
+            throw "Installer SHA256 does not match published checksum (branch v6). Set `$env:WINDO_SKIP_INSTALLER_SHA256=1 to skip. Expected=$expect Got=$got"
         }
     }
 
@@ -3943,7 +4994,7 @@ Use: windo prompt --json   (machine-readable bundle)
             [pscustomobject]@{ title = "Preflight"; command = "windo preflight"; note = "Readiness scan with fix commands." },
             [pscustomobject]@{ title = "Trust Console"; command = "windo trust"; note = "Local trust posture and checksum readiness." },
             [pscustomobject]@{ title = "Dashboard HTML"; command = "windo dashboard --html"; note = "Local visual health report." },
-            [pscustomobject]@{ title = "Launchpad"; command = "windo launchpad --open"; note = "Open the special edition command center." },
+            [pscustomobject]@{ title = "Launchpad"; command = "windo launchpad --open"; note = "Open the V6 command center." },
             [pscustomobject]@{ title = "Integrity"; command = "windo integrity"; note = "Runner and updater file integrity." },
             [pscustomobject]@{ title = "Audit verify"; command = "windo verify"; note = "DPAPI audit line hash and chain verification." },
             [pscustomobject]@{ title = "Keybinding repair"; command = "windo repair"; note = "Safe-reset stuck prefix/keybinding state." },
@@ -4086,9 +5137,9 @@ Use: windo prompt --json   (machine-readable bundle)
         $center = _windo_center_state
         [pscustomobject]@{
             windoVersion = $WindoVersion
-            edition = "Exodus Limited Edition"
+            edition = "WINDO Command Center"
             generatedAt = (Get-Date).ToString("o")
-            branch = "Exodus"
+            branch = "v6"
             assets = $assets
             center = $center
             control = $center.control
@@ -4104,16 +5155,16 @@ Use: windo prompt --json   (machine-readable bundle)
         $banner = _windo_html_img ([string]$Edition.assets.banner) "banner" "WINDO banner"
         $logo = _windo_html_img ([string]$Edition.assets.logo) "logo" "WINDO logo"
         $avatar = _windo_html_img ([string]$Edition.assets.avatar) "avatar" "WINDO avatar"
-        $badge = _windo_html_img ([string]$Edition.assets.editionBadge) "badge" "WINDO limited edition"
-        $null = $sb.AppendLine("<!doctype html><html><head><meta charset='utf-8'><title>WINDO Exodus Limited Edition</title>")
+        $badge = _windo_html_img ([string]$Edition.assets.editionBadge) "badge" "WINDO command center"
+        $null = $sb.AppendLine("<!doctype html><html><head><meta charset='utf-8'><title>WINDO Command Center</title>")
         $null = $sb.AppendLine("<style>body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#070b14;color:#e5e7eb;overflow-x:hidden}.stage{max-width:1320px;margin:0 auto;padding:26px 24px 42px}.hero{position:relative;min-height:330px;border-bottom:1px solid #22314f;display:grid;grid-template-columns:minmax(280px,1fr) 330px;gap:28px;align-items:center}.hero:before{content:'';position:absolute;inset:0;background:linear-gradient(110deg,rgba(14,165,233,.18),transparent 48%,rgba(34,197,94,.10));pointer-events:none}.hero:after{content:'';position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,transparent,#38bdf8,#22c55e,transparent);animation:sweep 2.8s linear infinite}.banner{max-width:760px;width:100%;height:auto;display:block}.logo{max-width:520px;width:82%;height:auto;margin-top:16px}.avatar{max-width:300px;width:100%;height:auto;filter:drop-shadow(0 0 24px rgba(56,189,248,.25))}.badge{max-width:210px;width:62%;height:auto;margin-top:14px}.eyebrow{color:#38bdf8;text-transform:uppercase;font-size:12px;letter-spacing:.12em}.title{font-size:46px;line-height:1.05;font-weight:800;margin:8px 0}.sub{max-width:760px;color:#a7b4c8;font-size:17px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:24px}.card{background:#0f172a;border:1px solid #24324e;border-radius:8px;padding:16px;position:relative;overflow:hidden}.card:before{content:'';position:absolute;inset:0;border-top:1px solid rgba(56,189,248,.38);opacity:.65}.k{font-size:11px;color:#94a3b8;text-transform:uppercase}.v{font-size:28px;font-weight:800;margin-top:4px}.ok{color:#22c55e}.warn{color:#f59e0b}.muted{color:#94a3b8}.lane{margin-top:24px}.row{display:grid;grid-template-columns:180px 1fr;gap:12px;border-top:1px solid #1f2937;padding:10px 0}.cmd{font-family:Consolas,monospace;color:#bfdbfe;background:#020617;border:1px solid #24324e;border-radius:6px;padding:6px 8px;display:inline-block}@keyframes sweep{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}@media(max-width:820px){.hero{grid-template-columns:1fr}.title{font-size:34px}.avatar{max-width:190px}.row{grid-template-columns:1fr}}</style></head><body><div class='stage'>")
-        $null = $sb.AppendLine(("<section class='hero'><div><div class='eyebrow'>{0}</div>{1}{2}<div class='title'>Command Center Limited Edition</div><div class='sub'>A branded Exodus command surface for deliberate elevation, visible action routing, Signal Deck evidence, and native Windows tray flow.</div></div><div>{3}{4}</div></section>" -f (_html_escape $Edition.edition), $banner, $logo, $avatar, $badge))
+        $null = $sb.AppendLine(("<section class='hero'><div><div class='eyebrow'>{0}</div>{1}{2}<div class='title'>Command Center</div><div class='sub'>A local command surface for deliberate elevation, visible action routing, Signal Deck evidence, and native Windows tray flow.</div></div><div>{3}{4}</div></section>" -f (_html_escape $Edition.edition), $banner, $logo, $avatar, $badge))
         $statusClass = if ($Edition.center.status -eq "ready") { "ok" } else { "warn" }
         $null = $sb.AppendLine("<section class='grid'>")
         $null = $sb.AppendLine(("<div class='card'><div class='k'>Center</div><div class='v {0}'>{1}</div><div class='muted'>queue {2} / requests {3}</div></div>" -f $statusClass, (_html_escape $Edition.center.status), $Edition.control.queuedCount, $Edition.control.requestCount))
         $null = $sb.AppendLine(("<div class='card'><div class='k'>Actions</div><div class='v'>{0}</div><div class='muted'>curated visible-shell commands</div></div>" -f @($Edition.control.actions).Count))
         $null = $sb.AppendLine(("<div class='card'><div class='k'>Motion</div><div class='v'>{0}</div><div class='muted'>enabled={1}</div></div>" -f (_html_escape $Edition.motion.mode), $Edition.motion.enabled))
-        $null = $sb.AppendLine(("<div class='card'><div class='k'>Branch</div><div class='v'>Exodus</div><div class='muted'>v{0}</div></div>" -f (_html_escape $Edition.windoVersion)))
+        $null = $sb.AppendLine(("<div class='card'><div class='k'>Branch</div><div class='v'>v6</div><div class='muted'>v{0}</div></div>" -f (_html_escape $Edition.windoVersion)))
         $null = $sb.AppendLine("</section><section class='lane'><h2>Edition Commands</h2>")
         foreach ($cmd in @($Edition.commands)) { $null = $sb.AppendLine(("<div class='row'><div class='muted'>ready</div><div><span class='cmd'>{0}</span></div></div>" -f (_html_escape $cmd))) }
         $null = $sb.AppendLine("</section></div></body></html>")
@@ -4135,7 +5186,7 @@ Add-Type -AssemblyName System.Drawing
 `$actions = @(
     @{ Title = "Center Status"; Command = "windo center status"; Tone = "cyan"; Note = "Current command-center posture." },
     @{ Title = "Open Tray"; Command = "windo center tray"; Tone = "cyan"; Note = "Start the persistent tray surface." },
-    @{ Title = "Edition Console"; Command = "windo edition open"; Tone = "blue"; Note = "Open the Limited Edition visual console." },
+    @{ Title = "Edition Console"; Command = "windo edition open"; Tone = "blue"; Note = "Open the command-center visual console." },
     @{ Title = "Dashboard HTML"; Command = "windo dashboard --html --open"; Tone = "blue"; Note = "Generate the local operator dashboard." },
     @{ Title = "Signal Deck"; Command = "windo signal open"; Tone = "green"; Note = "Open evidence-first diagnostics." },
     @{ Title = "Control Actions"; Command = "windo control actions"; Tone = "green"; Note = "List curated command-center actions." },
@@ -4192,7 +5243,7 @@ function Get-WindoTone([string]`$Tone) {
 `$form.ForeColor = [System.Drawing.Color]::White
 if (-not [string]::IsNullOrWhiteSpace(`$iconPath) -and (Test-Path -LiteralPath `$iconPath)) { `$form.Icon = New-Object System.Drawing.Icon(`$iconPath) }
 `$form.Controls.Add((New-WindoLabel "WINDO Surface Panel" 28 20 560 42 24 ([System.Drawing.Color]::White) `$true))
-`$form.Controls.Add((New-WindoLabel "Exodus Limited Edition - native Windows command surface - v`$version" 32 64 620 24 10 ([System.Drawing.Color]::FromArgb(56, 189, 248)) `$false))
+`$form.Controls.Add((New-WindoLabel "WINDO Command Center - native Windows command surface - v`$version" 32 64 620 24 10 ([System.Drawing.Color]::FromArgb(56, 189, 248)) `$false))
 `$form.Controls.Add((New-WindoLabel "Curated actions only. Commands open in visible PowerShell windows for inspectable output." 32 90 820 24 9 ([System.Drawing.Color]::FromArgb(148, 163, 184)) `$false))
 `$statusPanel = New-Object System.Windows.Forms.Panel
 `$statusPanel.Location = New-Object System.Drawing.Point(28, 126)
@@ -4366,7 +5417,7 @@ function Add-WindoWorkflowRows([System.Windows.Forms.TabPage]`$Tab, [object[]]`$
 `$form.ForeColor = [System.Drawing.Color]::White
 if (-not [string]::IsNullOrWhiteSpace(`$iconPath) -and (Test-Path -LiteralPath `$iconPath)) { `$form.Icon = New-Object System.Drawing.Icon(`$iconPath) }
 `$form.Controls.Add((New-WindoStudioLabel "WINDO Power Studio" 28 18 520 42 25 ([System.Drawing.Color]::White) `$true))
-`$form.Controls.Add((New-WindoStudioLabel "Exodus Limited Edition - modern guided Windows operator workflows - v`$version" 32 62 780 24 10 ([System.Drawing.Color]::FromArgb(56, 189, 248)) `$false))
+`$form.Controls.Add((New-WindoStudioLabel "WINDO Command Center - modern guided Windows operator workflows - v`$version" 32 62 780 24 10 ([System.Drawing.Color]::FromArgb(56, 189, 248)) `$false))
 `$form.Controls.Add((New-WindoStudioLabel "Preview, queue, or run curated actions. No arbitrary hidden execution; PowerShell output remains visible." 32 88 900 24 9 ([System.Drawing.Color]::FromArgb(148, 163, 184)) `$false))
 `$halo = New-Object System.Windows.Forms.ProgressBar
 `$halo.Location = New-Object System.Drawing.Point(826, 46)
@@ -4450,7 +5501,7 @@ foreach (`$group in @("Start", "Trust", "Repair", "Security", "Developer", "Pack
             '    @{ Text = "Control Prime"; Command = "windo control prime" },',
             '    @{ Text = "Control History"; Command = "windo control history" },',
             '    @{ Text = "Run Next Queued"; Command = "windo control execute-next" },',
-            '    @{ Text = "Limited Edition Console"; Command = "windo edition open" },',
+            '    @{ Text = "Command Center Console"; Command = "windo edition open" },',
             '    @{ Text = "Open Control Folder"; Command = "Invoke-Item (Join-Path $HOME ''.pwsh_secure\control'')" },',
             '    @{ Text = "Last Control Result"; Command = "windo signal last" },',
             '    @{ Text = "Signal Deck"; Command = "windo signal timeline" },',
@@ -4486,7 +5537,7 @@ foreach (`$group in @("Start", "Trust", "Repair", "Security", "Developer", "Pack
             '    $toast.StartPosition = "CenterScreen"',
             '    $toast.BackColor = [System.Drawing.Color]::FromArgb(8, 13, 24)',
             '    $toast.Controls.Add($(New-WindoLabel "WINDO Command Center" 22 18 390 28 15 ([System.Drawing.Color]::White) $true))',
-            '    $toast.Controls.Add($(New-WindoLabel "Exodus Limited Edition is running in the tray." 22 50 390 24 10 ([System.Drawing.Color]::FromArgb(148, 163, 184)) $false))',
+            '    $toast.Controls.Add($(New-WindoLabel "WINDO command center is running in the tray." 22 50 390 24 10 ([System.Drawing.Color]::FromArgb(148, 163, 184)) $false))',
             '    $toast.Controls.Add($(New-WindoLabel "Next useful actions" 22 86 180 22 10 ([System.Drawing.Color]::FromArgb(56, 189, 248)) $true))',
             '    $toast.Controls.Add($(New-WindoLabel "windo edition open" 22 112 380 20 9 ([System.Drawing.Color]::FromArgb(191, 219, 254)) $false))',
             '    $toast.Controls.Add($(New-WindoLabel "windo center actions" 22 136 380 20 9 ([System.Drawing.Color]::FromArgb(191, 219, 254)) $false))',
@@ -4503,7 +5554,7 @@ foreach (`$group in @("Start", "Trust", "Repair", "Security", "Developer", "Pack
             '    $form.BackColor = [System.Drawing.Color]::FromArgb(8, 13, 24)',
             '    $form.ForeColor = [System.Drawing.Color]::White',
             '    $form.Controls.Add($(New-WindoLabel "WINDO Command Center" 24 20 470 36 22 ([System.Drawing.Color]::White) $true))',
-            '    $form.Controls.Add($(New-WindoLabel "Exodus Limited Edition - v$version" 28 62 450 24 10 ([System.Drawing.Color]::FromArgb(56, 189, 248)) $false))',
+            '    $form.Controls.Add($(New-WindoLabel "WINDO Command Center - v$version" 28 62 450 24 10 ([System.Drawing.Color]::FromArgb(56, 189, 248)) $false))',
             '    $form.Controls.Add($(New-WindoLabel "Actions open in visible PowerShell windows so output stays inspectable." 28 88 700 22 9 ([System.Drawing.Color]::FromArgb(148, 163, 184)) $false))',
             '    $panel = New-Object System.Windows.Forms.FlowLayoutPanel',
             '    $panel.Location = New-Object System.Drawing.Point(24, 126)',
@@ -4573,7 +5624,7 @@ foreach (`$group in @("Start", "Trust", "Repair", "Security", "Developer", "Pack
             '$toastItem = $menu.Items.Add("Show Status Notification")',
             '$toastItem.Add_Click({',
             '    $notify.BalloonTipTitle = "WINDO Command Center"',
-            '    $notify.BalloonTipText = "Exodus Limited Edition is ready. Use the tray menu for center actions, Signal Deck, repair, and update."',
+            '    $notify.BalloonTipText = "WINDO command center is ready. Use the tray menu for center actions, Signal Deck, repair, and update."',
             '    $notify.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info',
             '    $notify.ShowBalloonTip(6000)',
             '    Show-WindoStatusToast',
@@ -4587,7 +5638,7 @@ foreach (`$group in @("Start", "Trust", "Repair", "Security", "Developer", "Pack
             '$notify.ContextMenuStrip = $menu',
             '$notify.Add_DoubleClick({ Show-WindoLaunchpadWindow })',
             '$notify.BalloonTipTitle = "WINDO Command Center"',
-            '$notify.BalloonTipText = "Exodus Limited Edition is running. Double-click for the command center or right-click for quick actions."',
+            '$notify.BalloonTipText = "WINDO command center is running. Double-click for the command center or right-click for quick actions."',
             '$notify.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info',
             '$notify.ShowBalloonTip(7000)',
             '[System.Windows.Forms.Application]::Run()'
@@ -5072,7 +6123,7 @@ foreach (`$group in @("Start", "Trust", "Repair", "Security", "Developer", "Pack
             [pscustomobject]@{ id = "center-status"; title = "Center Status"; command = "windo center status"; group = "native"; execution = "visible-shell"; description = "Inspect unified command-center status." },
             [pscustomobject]@{ id = "launchpad-tray"; title = "Start Tray"; command = "windo launchpad --tray"; group = "native"; execution = "visible-shell"; description = "Start the browser-independent tray command center." },
             [pscustomobject]@{ id = "workbench-html"; title = "Open Workbench"; command = "windo mesh workbench --open"; group = "visual"; execution = "visible-shell"; description = "Render and open the local visual operator workbench." },
-            [pscustomobject]@{ id = "edition-open"; title = "Open Limited Edition"; command = "windo edition open"; group = "visual"; execution = "visible-shell"; description = "Render and open the branded Exodus Limited Edition command surface." },
+            [pscustomobject]@{ id = "edition-open"; title = "Open Command Center"; command = "windo edition open"; group = "visual"; execution = "visible-shell"; description = "Render and open the WINDO command surface." },
             [pscustomobject]@{ id = "motion-pulse"; title = "Motion Pulse"; command = "windo motion pulse"; group = "visual"; execution = "visible-shell"; description = "Render the configured terminal pulse animation when allowed." },
             [pscustomobject]@{ id = "source-status"; title = "Source Status"; command = "windo source"; group = "trust"; execution = "visible-shell"; description = "Inspect published installer source, version, and checksum alignment." },
             [pscustomobject]@{ id = "verify-audit"; title = "Verify Audit"; command = "windo verify"; group = "trust"; execution = "visible-shell"; description = "Validate encrypted audit log format and hash chain." },
@@ -5088,7 +6139,7 @@ foreach (`$group in @("Start", "Trust", "Repair", "Security", "Developer", "Pack
             [pscustomobject]@{ id = "recipes-list"; title = "Recipes"; command = "windo recipes"; group = "developer"; execution = "visible-shell"; description = "List built-in operator recipes." },
             [pscustomobject]@{ id = "pkg-status"; title = "Package Managers"; command = "windo pkg status"; group = "lifecycle"; execution = "visible-shell"; description = "Inspect winget, choco, and scoop availability." },
             [pscustomobject]@{ id = "preflight"; title = "Preflight"; command = "windo preflight"; group = "trust"; execution = "visible-shell"; description = "Run local readiness checks before privileged work." },
-            [pscustomobject]@{ id = "install-latest"; title = "Install Latest"; command = "windo install-latest"; group = "lifecycle"; execution = "visible-shell"; description = "Run the Exodus installer/update handoff." }
+            [pscustomobject]@{ id = "install-latest"; title = "Install Latest"; command = "windo install-latest"; group = "lifecycle"; execution = "visible-shell"; description = "Run the WINDO V6 installer/update handoff." }
         )
     }
 
@@ -5546,7 +6597,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Name        = "install-latest"
                 Aliases     = @("upgrade")
                 Category    = "Core"
-                Summary     = "Download and run latest installer from Exodus."
+                Summary     = "Download and run latest installer from v6."
                 Syntax      = @("windo install-latest [--force] [--non-interactive] [--timeout <seconds|ms>] [--preserve-env [ALL|name1,name2]]", "windo upgrade [same options]")
                 Description = "Upgrade path with non-elevated download, optional verification prompt, and optional non-interactive automation mode."
                 Notes       = "Non-interactive requires --force in current shell; WINDO_INSTALL_NONINTERACTIVE / CI auto-skips confirm."
@@ -5558,7 +6609,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Category    = "Core"
                 Summary     = "Run elevated uninstaller (tasks, profile block, WINDO secure files)."
                 Syntax      = @("windo uninstall [--keep-snapshots] [--confirm] [--download-fresh]", "windo remove [same options]")
-                Description = "Uses the bundled local uninstaller when present, otherwise downloads it from Exodus, then starts an elevated uninstall."
+                Description = "Uses the bundled local uninstaller when present, otherwise downloads it from v6, then starts an elevated uninstall."
                 Notes       = "Profile helper after load: windo-uninstall [-KeepSnapshots] [-Confirm] (alias: windoremove)."
                 Examples    = @("windo uninstall", "windo uninstall --keep-snapshots", "windo remove --download-fresh", "windo-uninstall -KeepSnapshots")
             },
@@ -5613,7 +6664,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Category    = "Planning"
                 Summary     = "Show the release runway."
                 Syntax      = @("windo roadmap [--json]")
-                Description = "Displays the current 3.x hardening train and V4 platform preparation without exposing future major-package details."
+                Description = "Displays the current V6 platform train and upcoming feature priorities without exposing future major-package details."
                 Notes       = "Roadmap output is local, static, and intentionally non-binding; it is a product/platform planning aid shipped with the installer."
                 Examples    = @("windo roadmap", "windo roadmap --json")
             },
@@ -5634,6 +6685,81 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Description = "Scans files and directories locally without remote signatures. Reports hashes, Mark-of-the-Web, launchable extensions, and common suspicious script patterns."
                 Notes       = "This is WINDO posture scanning, not a replacement for Defender or full antivirus engines."
                 Examples    = @("windo scan .", "windo scan $HOME\\Downloads --recurse", "windo scan .\\script.ps1 --json")
+            },
+            [pscustomobject]@{
+                Name        = "net-scan"
+                Category    = "Security"
+                Summary     = "Network posture: adapters, ARP, DNS, ICMP sweep, TCP probe, nmap, RDP/VNC controls, WSL."
+                Syntax      = @(
+                    "windo net-scan [status] [--json]",
+                    "windo net-scan resolve <host...> [--host-tags <path>] [--json]",
+                    "windo net-scan arp [--interface <alias>] [--include-stale] [--host-tags <path>] [--json]",
+                    "windo net-scan ping <cidr|host...> [--host-tags <path>] [--timeout <secs>] [--host-limit N] [--ports <port,...>] [--json]",
+                    "windo net-scan probe <host> <port[,port,port-range,...]> [--timeout <secs>] [--json]",
+                    "windo net-scan nmap [nmap args...]",
+                    "windo net-scan rdp [status|enable|disable|nla [status|enable|disable]] [--json]",
+                    "windo net-scan vnc [status|stop] [--json]",
+                    "windo net-scan wsl [--json]"
+                )
+                Description = "Read-only local network inspection plus optional RDP/VNC apply controls. status shows adapter/gateway/DNS. resolve does forward A/AAAA and reverse PTR for one or more hosts. arp reads the live neighbour table via Get-NetNeighbor with arp.exe fallback. ping sweeps a CIDR or host list with parallel ICMP; add --ports for per-host TCP probes on alive hosts. resolve/arp/ping support --host-tags <json-path> for identity enrichment and tagging. probe is a dedicated non-blocking TCP port prober (netcat-style). nmap delegates to nmap.exe. rdp reads or writes fDenyTSConnections and UserAuthentication registry keys; apply operations need elevation. vnc checks for RealVNC/TightVNC/UltraVNC services and listeners on 5900/5901; stop needs elevation. wsl reports distros, WSL version, and network adapters."
+                Notes       = "All read operations are non-elevated. Apply controls (rdp enable/disable, rdp nla enable/disable, vnc stop) check for Administrator role and emit exit-code 3 with a windo run -- re-run hint when elevation is absent. ICMP sweeps use System.Net.NetworkInformation.Ping via a runspace pool (PS5.1 and PS7 compatible). TCP probes use BeginConnect/AsyncWaitHandle for non-blocking checks. Subnet scans are capped at --host-limit (default 254). Port ranges are limited to spans of 100."
+                Examples    = @(
+                    "windo net-scan",
+                    "windo net-scan status --json",
+                    "windo net-scan resolve dc01.corp.local --json",
+                    "windo net-scan arp --include-stale --json",
+                    "windo net-scan arp --host-tags .\\host-tags.json --json",
+                    "windo net-scan ping 192.168.1.0/24 --ports 22,80,443 --json",
+                    "windo net-scan ping 10.0.0.0/24 --host-limit 50 --timeout 1.5 --json",
+                    "windo net-scan probe webserver.local 80,443,8080-8090",
+                    "windo net-scan nmap -sV -p 22,80,443 192.168.1.1",
+                    "windo net-scan rdp status --json",
+                    "windo run -- windo net-scan rdp enable",
+                    "windo run -- windo net-scan rdp nla enable",
+                    "windo net-scan vnc status --json",
+                    "windo net-scan wsl --json"
+                )
+            },
+            [pscustomobject]@{
+                Name        = "rdp"
+                Category    = "Remote Access"
+                Summary     = "Inspect RDP local enablement, firewall rule matching, and optional host diagnostics."
+                Syntax      = @(
+                    "windo rdp [status] [--json]",
+                    "windo rdp firewall [status] [--ports 3389] [--json]",
+                    "windo rdp config [--enable|--disable] [--nla on|off] [--security-layer 0|1|2] [--restart] [--json]",
+                    "windo rdp troubleshoot [--host localhost] [--ports 3389,3390] [--credential vault-name] [--json]"
+                )
+                Description = "Reads/writes RDP registry flags and checks service state and firewall posture for remote desktop operations. Status mode is read-only."
+                Notes       = "Mutating operations (`config`) should be run elevated (or via `windo run`) and are blocked in non-admin shells."
+                Examples    = @(
+                    "windo rdp status --json",
+                    "windo rdp firewall status --json",
+                    "windo rdp config --enable --nla on --json",
+                    "windo rdp config --disable --json",
+                    "windo rdp troubleshoot --host localhost --ports 3389 --json"
+                )
+            },
+            [pscustomobject]@{
+                Name        = "vnc"
+                Category    = "Remote Access"
+                Summary     = "Inspect VNC service/listener state and validate port reachability."
+                Syntax      = @(
+                    "windo vnc [status] [--json]",
+                    "windo vnc firewall [status] [--ports 5900,5901] [--json]",
+                    "windo vnc stop [serviceName...] [--json]",
+                    "windo vnc test <host> [--ports 5900,5901] [--timeout 3] [--json]",
+                    "windo vnc troubleshoot [--host localhost] [--ports 5900,5901] [--credential vault-name] [--json]"
+                )
+                Description = "Inspects common VNC services and checks for reachable listener ports locally or against a target host."
+                Notes       = "Service stop operations require administrator privileges. Vault preview requires matching DPAPI-protected vault entry in current user context."
+                Examples    = @(
+                    "windo vnc status --json",
+                    "windo vnc firewall status --json",
+                    "windo vnc stop winvnc4 --json",
+                    "windo vnc test localhost --ports 5900,5901 --json",
+                    "windo vnc troubleshoot --host localhost --ports 5900 --json"
+                )
             },
             [pscustomobject]@{
                 Name        = "vault"
@@ -5721,9 +6847,9 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Name        = "motion"
                 Category    = "Shell Experience"
                 Summary     = "Control terminal motion and small WINDO animations."
-                Syntax      = @("windo motion [status]", "windo motion auto|on|quiet|off|reset [--json]", "windo motion pulse")
-                Description = "Saves the motion policy used by spinners, pulses, and native-surface warmup effects."
-                Notes       = "Auto mode animates only in interactive terminals and stays quiet for CI, redirected output, or WINDO_NO_SPINNER."
+            Syntax      = @("windo motion [status]", "windo motion auto|on|quiet|off|reset [--json]", "windo motion profile ambient|subtle|steady|standard|rich|burst|cinematic|off [--json]", "windo motion pulse")
+            Description = "Controls terminal motion policy and profile. Animation profile can be changed independently from ON/OFF policy."
+            Notes       = "Auto mode animates only in interactive terminals and stays quiet for CI, redirected output, WINDO_NO_SPINNER, or WINDO_REDUCED_MOTION."
                 Examples    = @("windo motion", "windo motion auto", "windo motion off", "windo motion pulse")
             },
             [pscustomobject]@{
@@ -5759,7 +6885,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Summary     = "PowerShell-native WINDO Command Center."
                 Syntax      = @("windo center [status] [--json]", "windo center open|tray|panel|studio", "windo center actions|signal|history", "windo center preview|run|queue <action-id>", "windo center execute-next|next", "windo center execute <request-id>")
                 Description = "Unifies tray, Power Studio, control plane, Signal Deck, native surface, motion, trust, recipes, modules, extras, audit, and export into a native-feeling Windows command center."
-                Notes       = "The first V5 center is PowerShell-native. A compiled companion helper is scaffolded for a later special release but is not required."
+                Notes       = "The first V6 center is PowerShell-native. A compiled companion helper is scaffolded for a later major release but is not required."
                 Examples    = @("windo center", "windo center studio", "windo center panel", "windo center actions", "windo center preview power-studio", "windo center queue surface-prime", "windo center execute-next", "windo center signal")
             },
             [pscustomobject]@{
@@ -5784,9 +6910,9 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             [pscustomobject]@{
                 Name        = "edition"
                 Category    = "Shell Experience"
-                Summary     = "Open the branded Exodus Limited Edition surface."
-                Syntax      = @("windo edition [status] [--json]", "windo edition open [--output path]", "windo edition html [--output path]", "windo edition pulse")
-                Description = "Renders the Limited Edition visual command surface with final brand assets, animated HTML, Command Center status, curated action posture, and Exodus release identity."
+            Summary     = "Open the branded WINDO command surface."
+            Syntax      = @("windo edition [status] [--json]", "windo edition open [--output path]", "windo edition html [--output path]", "windo edition pulse")
+            Description = "Renders the command surface with official WINDO assets, animated HTML, Command Center status, curated action posture, and release metadata."
                 Notes       = "The edition surface is local-only. It writes an HTML artifact under Documents\\windo and does not run elevated commands."
                 Examples    = @("windo edition", "windo edition open", "windo edition pulse", "windo center queue edition-open")
             },
@@ -5901,7 +7027,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             [pscustomobject]@{
                 Name        = "launchpad"
                 Category    = "Reporting"
-                Summary     = "Open the Special Edition operator command center."
+                Summary     = "Open the WINDO command center."
             Syntax      = @("windo launchpad [--json]", "windo launchpad --tray", "windo launchpad --html [--output path|--output=path]", "windo launchpad --open")
                 Description = "Generates a local command center with health checks, copy-ready recovery/update commands, recipes, modules, and current paths. --tray starts a native Windows task-tray command center."
                 Notes       = "Launchpad is read-only and local-only; tray mode uses Windows Forms and runs until you exit it from the tray icon."
@@ -5911,7 +7037,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Name        = "export"
                 Category    = "Reporting"
                 Summary     = "Bundle manifest, config payload, and log excerpt."
-                Syntax      = @("windo export [-o zip] [-n N] [--redact] [--json]", "windo --json export …")
+                Syntax      = @("windo export [-o zip] [-n N] [--redact] [--json]", "windo --json export â€¦")
                 Description = "Creates an audit bundle for handoff to support/debug workflows."
                 Notes       = "Use --redact to mask path-like strings in JSON payloads. With --json, prints a machine-readable summary after the zip is written (path, size, audit counts)."
                 Examples    = @("windo export", "windo export -o .\\bundle.zip --redact", "windo --json export -n 50")
@@ -5973,6 +7099,47 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Examples    = @("windo pkg status", "windo pkg winget install Microsoft.PowerShell", "windo pkg choco install git -y", "windo pkg scoop install ripgrep")
             },
             [pscustomobject]@{
+                Name        = "container"
+                Category    = "Operators"
+                Summary     = "Run container actions through docker or podman locally."
+                Syntax      = @("windo container [ps|images|status|logs|restart|start|stop|rmi|rm|pull] [--runtime docker|podman|auto] [args...]", "windo container ps --runtime podman", "windo container logs --runtime docker <id> [--tail 100]", "windo container pull --runtime auto <image>")
+                Description = "Provides a minimal-risk local wrapper that validates runtime selection, verifies requested subcommand and arguments, and can print structured JSON output."
+                Notes       = "Supported subcommands are explicitly validated. In --runtime auto mode, WINDO prefers docker when both are available."
+                Examples    = @("windo container ps", "windo container images --runtime podman --json", "windo container status --runtime docker", "windo container --runtime docker logs <id>", "windo container --dry-run pull nginx:latest")
+            },
+            [pscustomobject]@{
+                Name        = "wsl"
+                Category    = "Operators"
+                Summary     = "WSL distro status, conversion, checks, inspection, command forwarding, path conversions, import/export checks, and safe execution."
+                Syntax      = @(
+                    "windo wsl status|list|ls [--json]",
+                    "windo wsl check install|distro|import|export [--json]",
+                    "windo wsl check distro --distro <name> [--json]",
+                    "windo wsl check import --name <distro> --tar <file> --path <installPath> [--version 1|2] [--json]",
+                    "windo wsl check export --name <distro> --out <tar> [--json]",
+                    "windo wsl install --distro <name> [--apply] [--dry-run] [--json]",
+                    "windo wsl version",
+                    "windo wsl convert --distro <name> --to 1|2 --apply [--dry-run] [--json]",
+                    "windo wsl inspect --distro <name> [--json]",
+                    "windo wsl exec [--distro <name>] -- <command...>",
+                    "windo wsl launch <distro> [--user <name>] [--command <cmd>] [--json]",
+                    "windo wsl path to-wsl|to-win --path <value> [--distro <name>] [--json]",
+                    "windo wsl import --name <distro> --tar <file> --path <installPath> --apply [--dry-run] [--json]",
+                    "windo wsl export --name <distro> --out <tar> --apply [--dry-run] [--json]"
+                )
+                Description = "Read/write-friendly entry points for WSL operators. Install/convert/import/export require --apply (and pass confirmation in interactive mode)."
+                Notes       = "Use --dry-run for command preview without execution. `wsl exec` forwards raw command arguments to WSL after `--`."
+                Examples    = @(
+                    "windo wsl status --json",
+                    "windo wsl check distro --distro Ubuntu-22.04",
+                    "windo wsl inspect --distro Ubuntu-22.04 --json",
+                    "windo wsl convert --distro Ubuntu-22.04 --to 2 --apply",
+                    "windo wsl path to-wsl --path C:\\Users\\You",
+                    "windo wsl launch Ubuntu-22.04 --command bash -lc 'ls /'",
+                    "windo wsl import --name mydistro --tar .\\backup.tar --path C:\\WSL\\mydistro --apply"
+                )
+            },
+            [pscustomobject]@{
                 Name        = "mesh"
                 Category    = "Planning"
                 Summary     = "Operator Mesh inventory, doctor, cockpit, and workbench."
@@ -5995,7 +7162,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Category    = "Shell Experience"
                 Summary     = "Curated optional extras index (read-only catalog + verified fetch)."
                 Syntax      = @("windo extras search [query] [--json]", "windo extras fetch <id> [--force]")
-                Description = "Downloads the published extras index from GitHub (Exodus) and searches entries. Fetch downloads artifacts only from a non-elevated shell and verifies SHA256 when published."
+                Description = "Downloads the published extras index from GitHub (v6) and searches entries. Fetch downloads artifacts only from a non-elevated shell and verifies SHA256 when published."
                 Notes       = "Override index URL with WINDO_EXTRAS_INDEX_URL for forks or air-gapped mirrors."
                 Examples    = @("windo extras search sample", "windo extras fetch sample-hello")
             },
@@ -6032,7 +7199,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Summary     = "Quick recovery: keybindings safe-reset + hints for profile refresh and install-latest."
                 Syntax      = @("windo repair [all|keybindings] [--json]")
                 Description = "Runs the same keybindings path as 'windo keybindings safe-reset' (Alt+w, clears legacy WINDO PSReadLine chords in-session). Use when upgrading from older WINDO or when the prefix/w key feels stuck. Does not download the installer."
-                Notes       = "For a full profile refresh from Exodus, run 'windo install-latest' from a non-elevated shell after repair."
+                Notes       = "For a full profile refresh from v6, run 'windo install-latest' from a non-elevated shell after repair."
                 Examples    = @("windo repair", "windo repair keybindings --json")
             }
         )
@@ -6231,6 +7398,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
         if ($sub -eq "reset") {
             $map = _windo_read_windo_prefs_map
             if ($map.Contains('motionMode')) { $map.Remove('motionMode') }
+            if ($map.Contains('motionProfile')) { $map.Remove('motionProfile') }
             $map['schemaVersion'] = "1.0"
             if (-not (_windo_save_windo_prefs $map)) {
                 if ($JsonOutput) { _emit_json "motion" @{ error = "could not write prefs"; prefsFile = $PrefsFile; exitCode = 2 } }
@@ -6241,6 +7409,44 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             $policy = _windo_resolve_motion_policy
             if ($JsonOutput) { _emit_json "motion" @{ reset = $true; motion = $policy; exitCode = 0 } }
             else { Write-Host "[windo] motion reset to default: $($policy.mode)" -ForegroundColor Green }
+            _windo_set_exit 0
+            return
+        }
+        if ($sub -eq "profile") {
+            if ($Command.Count -lt 3 -and -not $Command.Contains("--json")) {
+                if ($JsonOutput) { _emit_json "motion" @{ error = "missing profile"; expected = "ambient|subtle|steady|standard|rich|burst|cinematic|off"; exitCode = 2 } }
+                else { Write-Host "[windo] motion profile: expected ambient|subtle|steady|standard|rich|burst|cinematic|off" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $newProfile = if ($Command.Count -ge 3) { [string]$Command[2] } else { "ambient" }
+            $normalized = _windo_normalize_motion_profile $newProfile
+            if ($normalized -eq "auto" -or $normalized -eq "off") {
+                if ($normalized -eq "auto" -and -not [string]::IsNullOrWhiteSpace($newProfile)) {
+                    if ($JsonOutput) { _emit_json "motion" @{ error = "invalid profile"; expected = "ambient|subtle|steady|standard|rich|burst|cinematic|off"; exitCode = 2 } }
+                    else { Write-Host "[windo] motion profile: expected ambient|subtle|steady|standard|rich|burst|cinematic|off" -ForegroundColor Yellow }
+                    _windo_set_exit 2
+                    return
+                }
+                $normalized = "off"
+            }
+            $map = _windo_read_windo_prefs_map
+            $map['schemaVersion'] = "1.0"
+            $map['motionProfile'] = $normalized
+            if (-not $map.Contains('motionMode')) { $map['motionMode'] = "auto" }
+            if (-not (_windo_save_windo_prefs $map)) {
+                if ($JsonOutput) { _emit_json "motion" @{ error = "could not write prefs"; prefsFile = $PrefsFile; exitCode = 2 } }
+                else { Write-Host "[windo] motion profile: could not write $PrefsFile" -ForegroundColor Red }
+                _windo_set_exit 2
+                return
+            }
+            $policy = _windo_resolve_motion_policy
+            if ($JsonOutput) { _emit_json "motion" @{ saved = $true; motionProfile = $normalized; motion = $policy; exitCode = 0 } }
+            else {
+                Write-Host "[windo] motion profile saved: $normalized" -ForegroundColor Green
+                Write-Host "  Mode        : $($policy.mode)" -ForegroundColor DarkGray
+                Write-Host "  Effect      : $($policy.description)" -ForegroundColor DarkGray
+            }
             _windo_set_exit 0
             return
         }
@@ -6255,9 +7461,9 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             _windo_set_exit 0
             return
         }
-        if ($sub -ne "status" -and $sub -ne "") {
-            if ($JsonOutput) { _emit_json "motion" @{ error = "expected status | auto | on | quiet | off | reset | pulse"; exitCode = 2 } }
-            else { Write-Host "[windo] motion: expected status | auto | on | quiet | off | reset | pulse" -ForegroundColor Yellow }
+            if ($sub -ne "status" -and $sub -ne "") {
+                if ($JsonOutput) { _emit_json "motion" @{ error = "expected status | auto | on | quiet | off | reset | profile | pulse | demo"; exitCode = 2 } }
+                else { Write-Host "[windo] motion: expected status | auto | on | quiet | off | reset | profile | pulse | demo" -ForegroundColor Yellow }
             _windo_set_exit 2
             return
         }
@@ -6793,10 +7999,10 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
         }
         if ($sub -eq "pulse") {
             $edition = _windo_edition_state
-            $ran = _windo_motion_edition "[windo] Exodus Limited Edition" 1500
+            $ran = _windo_motion_edition "[windo] WINDO Command Center" 1500
             if ($JsonOutput) { _emit_json "edition" @{ subcommand = "pulse"; edition = $edition; pulseRendered = [bool]$ran; exitCode = 0 } }
             else {
-                Write-Host "[windo] Exodus Limited Edition pulse" -ForegroundColor Cyan
+                Write-Host "[windo] WINDO Command Center pulse" -ForegroundColor Cyan
                 Write-Host "  Motion : $($edition.motion.mode) enabled=$($edition.motion.enabled)" -ForegroundColor DarkGray
             }
             _windo_set_exit 0
@@ -6807,7 +8013,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             $edition = _windo_edition_state
             $htmlPath = _windo_write_edition_html $edition $outPath $openHtml
             if ($JsonOutput) { _emit_json "edition" @{ subcommand = $(if ($openHtml) { "open" } else { "html" }); edition = $edition; htmlPath = $htmlPath; exitCode = 0 } }
-            else { Write-Host "[windo] limited edition console: $htmlPath" -ForegroundColor Green }
+            else { Write-Host "[windo] command center console: $htmlPath" -ForegroundColor Green }
             _windo_set_exit 0
             return
         }
@@ -6820,7 +8026,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
         $edition = _windo_edition_state
         if ($JsonOutput) { _emit_json "edition" @{ subcommand = "status"; edition = $edition; exitCode = $edition.exitCode } }
         else {
-            Write-Host "[windo] Exodus Limited Edition" -ForegroundColor Cyan
+            Write-Host "[windo] Command Center" -ForegroundColor Cyan
             Write-Host "  Version : $($edition.windoVersion)" -ForegroundColor DarkGray
             Write-Host "  Center  : $($edition.center.status)" -ForegroundColor $(if ($edition.center.status -eq "ready") { "Green" } else { "Yellow" })
             Write-Host "  Visual  : windo edition open" -ForegroundColor DarkGray
@@ -7343,7 +8549,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             [pscustomobject]@{ name = "WINDO_RUNNER_TIMEOUT_MS"; environmentValue = $(if ($env:WINDO_RUNNER_TIMEOUT_MS) { [string]$env:WINDO_RUNNER_TIMEOUT_MS } else { $null }); effectiveNote = "${tmo} ms (clamped 1..86400000; default 7200000)" }
             [pscustomobject]@{ name = "WINDO_RUNNER_MAX_OUTPUT_BYTES"; environmentValue = $(if ($env:WINDO_RUNNER_MAX_OUTPUT_BYTES) { [string]$env:WINDO_RUNNER_MAX_OUTPUT_BYTES } else { $null }); effectiveNote = "per-stream capture cap ${mcs} chars (derived from env total bytes; see runner)" }
             [pscustomobject]@{ name = "WINDO_MAX_COMMAND_CHARS"; environmentValue = $(if ($env:WINDO_MAX_COMMAND_CHARS) { [string]$env:WINDO_MAX_COMMAND_CHARS } else { $null }); effectiveNote = "${mcc} chars (max 8191)" }
-            [pscustomobject]@{ name = "WINDO_SKIP_INSTALLER_SHA256"; environmentValue = $(if ($env:WINDO_SKIP_INSTALLER_SHA256) { [string]$env:WINDO_SKIP_INSTALLER_SHA256 } else { $null }); effectiveNote = $(if ($env:WINDO_SKIP_INSTALLER_SHA256) { "bootstrap/upgrade checksum check skipped" } else { "checksum enforced when published on Exodus" }) }
+            [pscustomobject]@{ name = "WINDO_SKIP_INSTALLER_SHA256"; environmentValue = $(if ($env:WINDO_SKIP_INSTALLER_SHA256) { [string]$env:WINDO_SKIP_INSTALLER_SHA256 } else { $null }); effectiveNote = $(if ($env:WINDO_SKIP_INSTALLER_SHA256) { "bootstrap/upgrade checksum check skipped" } else { "checksum enforced when published on v6" }) }
             [pscustomobject]@{ name = "SUDO_TIMEOUT"; environmentValue = $(if ($env:SUDO_TIMEOUT) { [string]$env:SUDO_TIMEOUT } else { $null }); effectiveNote = "defaults runner timeout for --timeout when omitted (seconds or ms; clamped 1..86400000)" }
             [pscustomobject]@{ name = "WINDO_INSTALL_NONINTERACTIVE"; environmentValue = $(if ($env:WINDO_INSTALL_NONINTERACTIVE) { [string]$env:WINDO_INSTALL_NONINTERACTIVE } else { $null }); effectiveNote = "installer confirmation bypass for install-latest" }
             [pscustomobject]@{ name = "SUDO_PROMPT"; environmentValue = $(if ($env:SUDO_PROMPT) { [string]$env:SUDO_PROMPT } else { $null }); effectiveNote = "custom prompt text for install-latest confirmation" }
@@ -7887,7 +9093,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             } else {
                 Write-Host "[windo] JSON envelope theme saved: $sub  ($PrefsFile)" -ForegroundColor Green
                 Write-Host "  Effective --json: schemaVersion=$($eff.schemaLabel), meta=$(if ($eff.includeMeta) { 'on' } else { 'off' })" -ForegroundColor DarkGray
-                Write-Host "  (Runner, tasks, and audit security are unchanged—only CLI JSON shape.)" -ForegroundColor DarkGray
+                Write-Host "  (Runner, tasks, and audit security are unchangedâ€”only CLI JSON shape.)" -ForegroundColor DarkGray
             }
             _windo_set_exit 0
             return
@@ -7914,7 +9120,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             Write-Host "[windo] JSON envelope theme (CLI --json output only)" -ForegroundColor Cyan
             Write-Host "  WINDO $WindoVersion  embedded schema: $SchemaVersion" -ForegroundColor DarkGray
             Write-Host "  Prefs file    : $PrefsFile" -ForegroundColor DarkGray
-            Write-Host "  Saved preset  : $(if ($fileMode) { $fileMode } else { '(none → auto)' })"
+            Write-Host "  Saved preset  : $(if ($fileMode) { $fileMode } else { '(none â†’ auto)' })"
             Write-Host "  Env override  : $(if ($env:WINDO_JSON_ENVELOPE) { $env:WINDO_JSON_ENVELOPE } else { '(none)' })  (wins over file)"
             Write-Host "  Effective now : schemaVersion=$($eff.schemaLabel), meta=$(if ($eff.includeMeta) { 'on' } else { 'off' })"
             Write-Host "  Set: windo theme classic | modern | auto" -ForegroundColor DarkGray
@@ -8114,6 +9320,1107 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             foreach ($e in @($result.errors)) { Write-Host ("  ERROR {0}: {1}" -f $e.path, $e.error) -ForegroundColor Red }
         }
         _windo_set_exit ([int]$result.exitCode)
+        return
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "net-scan") {
+        $sub = "status"
+        $argStart = 1
+        if ($Command.Count -ge 2 -and -not ([string]$Command[1]).StartsWith("--")) {
+            $sub = [string]$Command[1].Trim().ToLowerInvariant()
+            $argStart = 2
+        }
+        $defaultTimeoutSeconds = 1
+        if ($null -ne $CommandTimeoutOverrideMs -and $CommandTimeoutOverrideMs -ge 1) {
+            $defaultTimeoutSeconds = [Math]::Max(1, [int][Math]::Ceiling($CommandTimeoutOverrideMs / 1000))
+        }
+        if ($defaultTimeoutSeconds -lt 1) { $defaultTimeoutSeconds = 1 }
+        if ($defaultTimeoutSeconds -gt 900) { $defaultTimeoutSeconds = 900 }
+
+        if ($sub -eq "status" -or $sub -eq "") {
+            $status = _windo_net_scan_status
+            $statusPayload = [ordered]@{
+                subcommand = "status"
+                scannedAt = (Get-Date -Format "o")
+                status = $status
+                discovery = @{
+                    methods = @("Get-NetAdapter", "Get-NetIPConfiguration")
+                    description = "Local-only network state readers; no network writes are performed."
+                }
+                exitCode = [int]$status.exitCode
+            }
+            if ($JsonOutput) { _emit_json "net-scan" $statusPayload }
+            else {
+                Write-Host "[windo] net-scan status" -ForegroundColor Cyan
+                Write-Host "  Discovery methods: Get-NetAdapter, Get-NetIPConfiguration" -ForegroundColor DarkGray
+                if ($status.adapters.Count -eq 0) {
+                    Write-Host "  No active adapters found." -ForegroundColor Yellow
+                } else {
+                    foreach ($a in @($status.adapters)) {
+                        Write-Host ("  {0}  IPv4: {1}  IPv6: {2}  Gateway: {3}  MAC: {4}" -f $a.alias, ($a.ipv4 -join ", "), ($a.ipv6 -join ", "), $a.gateway, $(if ($a.macAddress) { $a.macAddress } else { "-" })) -ForegroundColor DarkGray
+                    }
+                }
+                if ($status.exitCode -ne 0) {
+                    Write-Host "  Warning: status collection reported one or more errors." -ForegroundColor Yellow
+                }
+            }
+            _windo_set_exit $statusPayload.exitCode
+            return
+        }
+
+        if ($sub -eq "resolve") {
+            $hosts = [System.Collections.ArrayList]@()
+            $hostTagsFile = $null
+            $hostTagRules = @()
+            for ($si = $argStart; $si -lt $Command.Count; $si++) {
+                $a = [string]$Command[$si]
+                if ($a -like "--*") {
+                    if ($a -eq "--host-tags") {
+                        if ($si + 1 -ge $Command.Count) {
+                            if ($JsonOutput) {
+                                _emit_json "net-scan" @{ subcommand = "resolve"; scannedAt = (Get-Date -Format "o"); error = "--host-tags requires a value"; exitCode = 2 }
+                            } else {
+                                Write-Host "[windo] net-scan resolve: --host-tags requires a value." -ForegroundColor Yellow
+                            }
+                            _windo_set_exit 2
+                            return
+                        }
+                        $hostTagsFile = [string]$Command[$si + 1]
+                        $si++
+                        continue
+                    }
+                    if ($JsonOutput) {
+                        _emit_json "net-scan" @{ subcommand = "resolve"; scannedAt = (Get-Date -Format "o"); error = "unknown option '$a'"; exitCode = 2 }
+                    } else {
+                        Write-Host "[windo] net-scan resolve: unknown option $a" -ForegroundColor Yellow
+                    }
+                    _windo_set_exit 2
+                    return
+                }
+                [void]$hosts.Add($a)
+            }
+            if ($hosts.Count -eq 0) {
+                if ($JsonOutput) {
+                    _emit_json "net-scan" @{ subcommand = "resolve"; scannedAt = (Get-Date -Format "o"); error = "resolve requires at least one host"; exitCode = 2 }
+                } else {
+                    Write-Host "[windo] net-scan resolve requires at least one host." -ForegroundColor Yellow
+                }
+                _windo_set_exit 2
+                return
+            }
+            if ($hostTagsFile -or $env:WINDO_NET_SCAN_HOST_TAGS) {
+                try {
+                    $hostTagRules = _windo_net_scan_load_host_tags -TagFilePath $hostTagsFile
+                } catch {
+                    if ($JsonOutput) {
+                        _emit_json "net-scan" @{ subcommand = "resolve"; scannedAt = (Get-Date -Format "o"); error = $_.Exception.Message; exitCode = 2 }
+                    } else {
+                        Write-Host ("[windo] net-scan resolve: " + $_.Exception.Message) -ForegroundColor Red
+                    }
+                    _windo_set_exit 2
+                    return
+                }
+            }
+            $resolved = _windo_net_scan_resolve -HostList @($hosts) -TagRules @($hostTagRules)
+            if ($JsonOutput) {
+                _emit_json "net-scan" @{
+                    subcommand = "resolve"
+                    scannedAt = (Get-Date -Format "o")
+                    requested = @($hosts)
+                    hosts = $resolved.hosts
+                    resolvedCount = $resolved.resolvedCount
+                    errorCount = $resolved.errorCount
+                    errors = @($resolved.errors)
+                    discovery = @{ methods = @("Resolve-DnsName", "System.Net.Dns::GetHostAddresses") }
+                    exitCode = [int]$resolved.exitCode
+                }
+            } else {
+                Write-Host "[windo] net-scan resolve" -ForegroundColor Cyan
+                Write-Host "  Discovery methods: Resolve-DnsName, System.Net.Dns::GetHostAddresses" -ForegroundColor DarkGray
+                if ($hostTagsFile -or $env:WINDO_NET_SCAN_HOST_TAGS) { Write-Host "  Host tags: enabled" -ForegroundColor DarkGray }
+                foreach ($r in @($resolved.hosts)) {
+                    if ($r.addresses.Count -gt 0) {
+                        Write-Host ("  {0}: {1}" -f $r.host, ($r.addresses -join ", ")) -ForegroundColor DarkGray
+                        if ($r.reverseHostnames.Count -gt 0) {
+                            $flat = [System.Collections.ArrayList]@()
+                            foreach ($entry in @($r.reverseHostnames)) { foreach ($n in @($entry)) { [void]$flat.Add([string]$n) } }
+                            Write-Host ("    reverse: {0}" -f ($flat -join ", ")) -ForegroundColor DarkGray
+                        }
+                        if ($r.identityTags.Count -gt 0) {
+                            Write-Host ("    tags: {0}" -f (($r.identityTags | ForEach-Object { [string]$_.tags.label }) -join ", ")) -ForegroundColor DarkGray
+                        }
+                    } else {
+                        Write-Host ("  {0}: (failed) {1}" -f $r.host, $(if ($r.error) { $r.error } else { "no address found" })) -ForegroundColor Yellow
+                    }
+                }
+            }
+            _windo_set_exit $resolved.exitCode
+            return
+        }
+
+        if ($sub -eq "arp") {
+            $ifAlias = $null
+            $includeStale = $false
+            $hostTagsFile = $null
+            $hostTagRules = @()
+            for ($si = $argStart; $si -lt $Command.Count; $si++) {
+                $a = [string]$Command[$si]
+                if ($a -eq "--interface") {
+                    if ($si + 1 -ge $Command.Count) {
+                        if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "arp"; scannedAt = (Get-Date -Format "o"); error = "--interface requires a value"; exitCode = 2 } }
+                        else { Write-Host "[windo] net-scan arp --interface requires a value." -ForegroundColor Yellow }
+                        _windo_set_exit 2
+                        return
+                    }
+                    $ifAlias = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -eq "--include-stale") { $includeStale = $true; continue }
+                if ($a -eq "--host-tags") {
+                    if ($si + 1 -ge $Command.Count) {
+                        if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "arp"; scannedAt = (Get-Date -Format "o"); error = "--host-tags requires a value"; exitCode = 2 } }
+                        else { Write-Host "[windo] net-scan arp: --host-tags requires a value." -ForegroundColor Yellow }
+                        _windo_set_exit 2
+                        return
+                    }
+                    $hostTagsFile = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -like "--*") {
+                    if ($JsonOutput) {
+                        _emit_json "net-scan" @{ subcommand = "arp"; scannedAt = (Get-Date -Format "o"); error = "unknown option '$a'"; exitCode = 2 }
+                    } else {
+                        Write-Host "[windo] net-scan arp: unknown option $a" -ForegroundColor Yellow
+                    }
+                    _windo_set_exit 2
+                    return
+                }
+            }
+            if ($ifAlias) {
+                $aliasFound = $false
+                try { $aliasFound = ((Get-NetAdapter -Name $ifAlias -ErrorAction Stop) -or (Get-NetAdapter -InterfaceAlias $ifAlias -ErrorAction SilentlyContinue)) } catch { $aliasFound = $false }
+                if (-not $aliasFound) {
+                    if ($JsonOutput) {
+                        _emit_json "net-scan" @{ subcommand = "arp"; scannedAt = (Get-Date -Format "o"); error = "unknown interface '$ifAlias'"; exitCode = 2 }
+                    } else {
+                        Write-Host "[windo] net-scan arp: unknown interface '$ifAlias'." -ForegroundColor Yellow
+                    }
+                    _windo_set_exit 2
+                    return
+                }
+            }
+            if ($hostTagsFile -or $env:WINDO_NET_SCAN_HOST_TAGS) {
+                try { $hostTagRules = _windo_net_scan_load_host_tags -TagFilePath $hostTagsFile } catch {
+                    if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "arp"; scannedAt = (Get-Date -Format "o"); error = $_.Exception.Message; exitCode = 2 } }
+                    else { Write-Host ("[windo] net-scan arp: " + $_.Exception.Message) -ForegroundColor Red }
+                    _windo_set_exit 2
+                    return
+                }
+            }
+            $neighbors = _windo_net_scan_arp -Interface $ifAlias -IncludeStale $includeStale
+            $neighborsToEmit = @()
+            if ($hostTagRules -and $hostTagRules.Count -gt 0) {
+                $neighborsToEmit = [System.Collections.ArrayList]@()
+                foreach ($n in @($neighbors.neighbors)) {
+                    $ip = [string]$n.ip
+                    $hostnames = if ($ip) { _windo_net_scan_resolve_reverse_dns -IpAddress $ip } else { @() }
+                    $tags = _windo_net_scan_apply_host_tags -Ip $ip -HostNames @($hostnames) -Mac ([string]$n.mac) -InterfaceAlias ([string]$n.interfaceAlias) -Type "arp" -TagRules $hostTagRules
+                    [void]$neighborsToEmit.Add([ordered]@{
+                        ip = [string]$ip
+                        mac = [string]$n.mac
+                        state = [string]$n.state
+                        interfaceAlias = [string]$n.interfaceAlias
+                        hostnames = @($hostnames)
+                        identityTags = @($tags)
+                    })
+                }
+            } else {
+                $neighborsToEmit = @($neighbors.neighbors)
+            }
+            if ($JsonOutput) {
+                _emit_json "net-scan" @{
+                    subcommand = "arp"
+                    scannedAt = (Get-Date -Format "o")
+                    interface = $ifAlias
+                    includeStale = [bool]$includeStale
+                    neighbors = @($neighborsToEmit)
+                    discovery = @{ methods = @("Get-NetNeighbor", "arp.exe -a"); source = $neighbors.source }
+                    errorCount = @($neighbors.errors).Count
+                    errors = @($neighbors.errors)
+                    exitCode = [int]$neighbors.exitCode
+                }
+            } else {
+                Write-Host "[windo] net-scan arp" -ForegroundColor Cyan
+                Write-Host "  Discovery: Get-NetNeighbor (primary), arp.exe -a (fallback)" -ForegroundColor DarkGray
+                if ($ifAlias) { Write-Host "  Interface: $ifAlias" -ForegroundColor DarkGray }
+                if ($hostTagsFile -or $env:WINDO_NET_SCAN_HOST_TAGS) { Write-Host "  Host tags: enabled" -ForegroundColor DarkGray }
+                if ($neighbors.neighbors.Count -eq 0) {
+                    Write-Host "  No matching ARP entries." -ForegroundColor Yellow
+                } else {
+                    foreach ($n in @($neighbors.neighbors)) {
+                        Write-Host ("  {0} {1} {2} {3}" -f $n.ip, $n.mac, $n.state, $n.interfaceAlias) -ForegroundColor DarkGray
+                        if ($hostTagRules.Count -gt 0) {
+                            $detail = $neighborsToEmit | Where-Object { $_.ip -eq $n.ip } | Select-Object -First 1
+                            if ($detail.hostnames.Count -gt 0) { Write-Host ("    hostnames: {0}" -f ($detail.hostnames -join ", ")) -ForegroundColor DarkGray }
+                            if ($detail.identityTags.Count -gt 0) { Write-Host ("    tags: {0}" -f ($detail.identityTags | ForEach-Object { [string]$_.label } -join ", ")) -ForegroundColor DarkGray }
+                        }
+                    }
+                }
+            }
+            _windo_set_exit [int]$neighbors.exitCode
+            return
+        }
+
+        if ($sub -eq "ping") {
+            $timeoutSource = "global-default"
+            $timeout = $defaultTimeoutSeconds
+            $hostLimit = 254
+            $portsRaw = $null
+            $hostTagsFile = $null
+            $hostTagRules = @()
+            $targets = [System.Collections.ArrayList]@()
+            for ($si = $argStart; $si -lt $Command.Count; $si++) {
+                $a = [string]$Command[$si]
+                if ($a -eq "--timeout") {
+                    if ($si + 1 -ge $Command.Count) {
+                        if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "--timeout requires a value"; exitCode = 2 } } else { Write-Host "[windo] --timeout requires a value." -ForegroundColor Yellow }
+                        _windo_set_exit 2
+                        return
+                    }
+                    $rawTimeout = [string]$Command[$si + 1]
+                    $timeoutMs = _windo_parse_timeout_override_ms $rawTimeout
+                    if ($null -eq $timeoutMs -or $timeoutMs -lt 1) {
+                        if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "invalid --timeout value"; exitCode = 2 } } else { Write-Host "[windo] --timeout must be 1..900." -ForegroundColor Yellow }
+                        _windo_set_exit 2
+                        return
+                    }
+                    $timeout = [Math]::Min(900, [Math]::Max(1, [int][Math]::Ceiling($timeoutMs / 1000)))
+                    $timeoutSource = "--timeout"
+                    $si++
+                    continue
+                }
+                if ($a -like "--timeout=*") {
+                    $rawTimeout = $a.Substring(10)
+                    $timeoutMs = _windo_parse_timeout_override_ms $rawTimeout
+                    if ($null -eq $timeoutMs -or $timeoutMs -lt 1) {
+                        if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "invalid --timeout value"; exitCode = 2 } } else { Write-Host "[windo] --timeout must be 1..900." -ForegroundColor Yellow }
+                        _windo_set_exit 2
+                        return
+                    }
+                    $timeout = [Math]::Min(900, [Math]::Max(1, [int][Math]::Ceiling($timeoutMs / 1000)))
+                    $timeoutSource = "--timeout"
+                    continue
+                }
+                if ($a -eq "--host-limit") {
+                    if ($si + 1 -ge $Command.Count) {
+                        if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "--host-limit requires a value"; exitCode = 2 } } else { Write-Host "[windo] --host-limit requires a value." -ForegroundColor Yellow }
+                        _windo_set_exit 2
+                        return
+                    }
+                    if (-not [int]::TryParse([string]$Command[$si + 1], [ref]$hostLimit) -or $hostLimit -lt 1 -or $hostLimit -gt 10000) {
+                        if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "invalid --host-limit value"; exitCode = 2 } } else { Write-Host "[windo] --host-limit must be 1..10000." -ForegroundColor Yellow }
+                        _windo_set_exit 2
+                        return
+                    }
+                    $si++
+                    continue
+                }
+                if ($a -like "--host-limit=*") {
+                    if (-not [int]::TryParse($a.Substring(13), [ref]$hostLimit) -or $hostLimit -lt 1 -or $hostLimit -gt 10000) {
+                        if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "invalid --host-limit value"; exitCode = 2 } } else { Write-Host "[windo] --host-limit must be 1..10000." -ForegroundColor Yellow }
+                        _windo_set_exit 2
+                        return
+                    }
+                    continue
+                }
+                if ($a -eq "--ports") {
+                    if ($si + 1 -ge $Command.Count) {
+                        if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "--ports requires a comma list"; exitCode = 2 } } else { Write-Host "[windo] --ports requires a value." -ForegroundColor Yellow }
+                        _windo_set_exit 2
+                        return
+                    }
+                    $portsRaw = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -like "--ports=*") {
+                    $portsRaw = $a.Substring(8)
+                    continue
+                }
+                if ($a -like "--*") {
+                    if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "unknown option '$a'"; exitCode = 2 } } else { Write-Host "[windo] net-scan ping: unknown option $a" -ForegroundColor Yellow }
+                    _windo_set_exit 2
+                    return
+                }
+                [void]$targets.Add($a)
+            }
+
+            if ($targets.Count -eq 0) {
+                if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "ping requires at least one CIDR or host"; exitCode = 2 } } else { Write-Host "[windo] net-scan ping requires a CIDR or at least one host." -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            try {
+                $ports = if ([string]::IsNullOrWhiteSpace($portsRaw)) { @() } else { _windo_net_scan_parse_ports -PortsRaw $portsRaw }
+            } catch {
+                if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = $_.Exception.Message; exitCode = 2 } } else { Write-Host ("[windo] invalid --ports: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            if ($ports.Count -eq 0) { $ports = @() }
+
+            $cidr = $null
+            $expandedFromCidr = $false
+            $pingTargets = [System.Collections.ArrayList]@()
+            foreach ($t in @($targets)) {
+                $trimmed = [string]$t.Trim()
+                if (-not $trimmed) { continue }
+                if ($trimmed -match "^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$") {
+                    if ($pingTargets.Count -gt 0 -or $expandedFromCidr) {
+                        if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "only one CIDR target is supported per invocation"; exitCode = 2 } } else { Write-Host "[windo] net-scan ping: only one CIDR target is supported." -ForegroundColor Yellow }
+                        _windo_set_exit 2
+                        return
+                    }
+                    try {
+                        $expanded = _windo_net_scan_expand_subnet -Cidr $trimmed -HostLimit $hostLimit
+                        $cidr = $trimmed
+                        $expandedFromCidr = $true
+                        foreach ($ip in @($expanded)) { [void]$pingTargets.Add($ip) }
+                    } catch {
+                        if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = $_.Exception.Message; exitCode = 2 } } else { Write-Host "[windo] net-scan ping: $($_.Exception.Message)" -ForegroundColor Yellow }
+                        _windo_set_exit 2
+                        return
+                    }
+                    continue
+                }
+                [void]$pingTargets.Add($trimmed)
+            }
+            if ($pingTargets.Count -eq 0) {
+                if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "ping"; scannedAt = (Get-Date -Format "o"); error = "no valid targets"; exitCode = 2 } } else { Write-Host "[windo] net-scan ping: no valid targets." -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $unique = @{}
+            $orderedTargets = [System.Collections.ArrayList]@()
+            foreach ($p in @($pingTargets)) {
+                if (-not $unique.ContainsKey([string]$p)) {
+                    $unique[[string]$p] = $true
+                    [void]$orderedTargets.Add([string]$p)
+                }
+            }
+            $probeTargets = @($orderedTargets)
+            if ($probeTargets.Count -gt $hostLimit) { $probeTargets = $probeTargets[0..($hostLimit - 1)] }
+
+            $nmapMap = $null
+            if ($ports.Count -eq 0 -and $probeTargets.Count -gt 64) {
+                $allIp = $true
+                foreach ($p in @($probeTargets)) { if (-not _windo_net_scan_is_ipv4 $p) { $allIp = $false; break } }
+                if ($allIp) { $nmapMap = _windo_net_scan_nmap_reachable -Targets $probeTargets -TimeoutSeconds $timeout }
+            }
+
+            $hostRows = [System.Collections.ArrayList]@()
+            $errors = [System.Collections.ArrayList]@()
+            $reachable = 0
+            $unreachable = 0
+            $errorCount = 0
+            foreach ($host in @($probeTargets)) {
+                if ($nmapMap -and $nmapMap.ContainsKey($host)) {
+                    $icmp = @{ reachable = $true; rttMs = $null; error = $null }
+                } elseif ($nmapMap -isnot $null -and -not $nmapMap.ContainsKey($host)) {
+                    $icmp = @{ reachable = $false; rttMs = $null; error = "unreachable" }
+                } else {
+                    $icmp = _windo_net_scan_probe_icmp -Target $host -TimeoutSeconds $timeout
+                }
+
+                $hostError = $null
+                if ($icmp.error) {
+                    $errorCount++
+                    $hostError = $icmp.error
+                    [void]$errors.Add([ordered]@{ ip = $host; error = $icmp.error })
+                }
+                $portMap = [ordered]@{}
+                if ($icmp.reachable -and $ports.Count -gt 0) {
+                    foreach ($p in @($ports)) {
+                        $pProbe = _windo_net_scan_probe_tcp -Host $host -Port $p -TimeoutSeconds $timeout
+                        $portMap[[string]$p] = [bool]$pProbe.open
+                        if ($pProbe.error) {
+                            $errorCount++
+                            $hostError = $(if ($hostError) { "$hostError; $($pProbe.error)" } else { $pProbe.error })
+                            [void]$errors.Add([ordered]@{ ip = $host; error = $pProbe.error })
+                        }
+                    }
+                }
+                if ($icmp.reachable) { $reachable++ } else { $unreachable++ }
+                [void]$hostRows.Add([ordered]@{
+                    ip = $host
+                    reachable = [bool]$icmp.reachable
+                    rttMs = if ($icmp.rttMs -eq $null) { $null } else { [int]$icmp.rttMs }
+                    ports = if ($ports.Count -eq 0) { @{} } else { [ordered]$portMap }
+                })
+            }
+
+            $pingPayload = [ordered]@{
+                subcommand = "ping"
+                scannedAt = (Get-Date -Format "o")
+                targets = $(if ($cidr) { @($targets | ForEach-Object { [string]$_ }) } else { @($probeTargets) })
+                rawTargets = @($targets | ForEach-Object { [string]$_ })
+                cidr = $cidr
+                hostLimit = $hostLimit
+                hostLimitApplied = $probeTargets.Count
+                timeoutSeconds = $timeout
+                timeoutSource = $timeoutSource
+                ports = @($ports)
+                discovery = @{
+                    methods = $(if ($nmapMap -ne $null) { @("nmap -sn", "Test-Connection (fallback)") } else { @("Test-Connection") })
+                    note = "TCP ports are probed only when ICMP is reachable."
+                }
+                hostTags = if ($hostTagRules.Count -gt 0) { @("windo") } else { @() }
+                hosts = @($hostRows)
+                reachableCount = [int]$reachable
+                unreachableCount = [int]$unreachable
+                errorCount = [int]$errorCount
+                probedCount = @($probeTargets).Count
+                errors = @($errors | Select-Object -Unique)
+                exitCode = $(if ($errorCount -gt 0 -or $unreachable -gt 0) { 3 } else { 0 })
+            }
+            _windo_net_scan_ping_report -Payload $pingPayload -JsonOutput $JsonOutput
+            _windo_set_exit $pingPayload.exitCode
+            return
+        }
+
+        # probe — dedicated non-blocking TCP port probe (netcat-style, no ICMP required)
+        if ($sub -eq "probe") {
+            $probeHost = ""; $probePortSpec = ""; $probeTimeoutMs = 800
+            $pi = $argStart
+            while ($pi -lt $Command.Count) {
+                $pa = [string]$Command[$pi]
+                if ($pa -eq "--timeout" -and $pi + 1 -lt $Command.Count) {
+                    $tv = 0; if ([double]::TryParse([string]$Command[$pi + 1], [ref]$tv)) { $probeTimeoutMs = [int]($tv * 1000) }; $pi += 2; continue
+                }
+                if ($pa -like "--timeout=*") {
+                    $tv = 0; if ([double]::TryParse($pa.Substring(10), [ref]$tv)) { $probeTimeoutMs = [int]($tv * 1000) }; $pi++; continue
+                }
+                if (-not $pa.StartsWith("-")) {
+                    if ([string]::IsNullOrWhiteSpace($probeHost)) { $probeHost = $pa } elseif ([string]::IsNullOrWhiteSpace($probePortSpec)) { $probePortSpec = $pa }
+                }
+                $pi++
+            }
+            if ([string]::IsNullOrWhiteSpace($probeHost) -or [string]::IsNullOrWhiteSpace($probePortSpec)) {
+                if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "probe"; scannedAt = (Get-Date -Format "o"); error = "usage: windo net-scan probe <host> <port[,port,port-range,...]>"; exitCode = 2 } }
+                else { Write-Host "[windo] net-scan probe <host> <port[,port,port-range,...]> [--timeout secs]" -ForegroundColor Yellow }
+                _windo_set_exit 2; return
+            }
+            $probePortNums = @()
+            try {
+                foreach ($tok in $probePortSpec.Split(",")) {
+                    $tok = $tok.Trim()
+                    if ($tok -match '^(\d+)-(\d+)$') {
+                        $plo = [int]$Matches[1]; $phi2 = [int]$Matches[2]
+                        if ($phi2 - $plo -gt 100) { throw "Port range $tok exceeds 100-port limit." }
+                        $plo..$phi2 | ForEach-Object { $probePortNums += $_ }
+                    } elseif ($tok -match '^\d+$') {
+                        $n = [int]$tok; if ($n -lt 1 -or $n -gt 65535) { throw "Port $n is out of range." }
+                        $probePortNums += $n
+                    } elseif (-not [string]::IsNullOrWhiteSpace($tok)) { throw "Invalid port token: $tok" }
+                }
+            } catch {
+                if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "probe"; scannedAt = (Get-Date -Format "o"); error = $_.Exception.Message; exitCode = 2 } }
+                else { Write-Host ("[windo] net-scan probe: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
+                _windo_set_exit 2; return
+            }
+            if ($probePortNums.Count -eq 0) {
+                if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "probe"; scannedAt = (Get-Date -Format "o"); error = "no valid ports in: $probePortSpec"; exitCode = 2 } }
+                else { Write-Host ("[windo] net-scan probe: no valid ports in: {0}" -f $probePortSpec) -ForegroundColor Yellow }
+                _windo_set_exit 2; return
+            }
+            $probeResults = @()
+            foreach ($p in $probePortNums) {
+                $r = _windo_net_scan_probe_tcp -Host $probeHost -Port $p -TimeoutSeconds ([Math]::Max(1, [int][Math]::Ceiling($probeTimeoutMs / 1000)))
+                $probeResults += [pscustomobject]@{ port = $p; open = $r.open; error = $r.error }
+            }
+            $probeOpen   = ($probeResults | Where-Object { $_.open }).Count
+            $probeClosed = $probeResults.Count - $probeOpen
+            $probeCode   = if ($probeOpen -gt 0) { 0 } else { 3 }
+            if ($JsonOutput) {
+                _emit_json "net-scan" @{ subcommand = "probe"; scannedAt = (Get-Date -Format "o"); host = $probeHost; open = $probeOpen; closed = $probeClosed; results = $probeResults; exitCode = $probeCode }
+            } else {
+                Write-Host ("[windo] net-scan probe :: {0} :: {1} open / {2} closed" -f $probeHost, $probeOpen, $probeClosed) -ForegroundColor Cyan
+                foreach ($r in $probeResults) {
+                    Write-Host ("  :{0,-6} {1}" -f $r.port, $(if ($r.open) { "OPEN  " } else { "closed" })) -ForegroundColor $(if ($r.open) { "Green" } else { "DarkGray" })
+                }
+            }
+            _windo_set_exit $probeCode; return
+        }
+
+        # nmap — pass-through to nmap.exe with availability guard
+        if ($sub -eq "nmap") {
+            $nmapExe = Get-Command nmap -ErrorAction SilentlyContinue
+            if (-not $nmapExe) {
+                if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "nmap"; scannedAt = (Get-Date -Format "o"); error = "nmap not found in PATH; install with: winget install Insecure.Nmap"; exitCode = 2 } }
+                else { Write-Host "[windo] nmap not found.  Install: winget install Insecure.Nmap" -ForegroundColor Yellow }
+                _windo_set_exit 2; return
+            }
+            $nmapPassArgs = @()
+            for ($si = $argStart; $si -lt $Command.Count; $si++) { $nmapPassArgs += [string]$Command[$si] }
+            if ($nmapPassArgs.Count -eq 0) {
+                if ($JsonOutput) { _emit_json "net-scan" @{ subcommand = "nmap"; scannedAt = (Get-Date -Format "o"); error = "no nmap arguments supplied"; exitCode = 2 } }
+                else { Write-Host "[windo] net-scan nmap [nmap args...]" -ForegroundColor Yellow }
+                _windo_set_exit 2; return
+            }
+            & nmap @nmapPassArgs
+            _windo_set_exit $(if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 })
+            return
+        }
+
+        # rdp — delegate to the windo rdp verb (read posture; apply requires elevation)
+        if ($sub -eq "rdp") {
+            $rdpFwdArgs = @("rdp")
+            for ($si = $argStart; $si -lt $Command.Count; $si++) { $rdpFwdArgs += [string]$Command[$si] }
+            $Command = [object[]]$rdpFwdArgs
+            # fall through to the rdp verb below
+        }
+
+        # vnc — delegate to the windo vnc verb (read posture; stop requires elevation)
+        if ($sub -eq "vnc") {
+            $vncFwdArgs = @("vnc")
+            for ($si = $argStart; $si -lt $Command.Count; $si++) { $vncFwdArgs += [string]$Command[$si] }
+            $Command = [object[]]$vncFwdArgs
+            # fall through to the vnc verb below
+        }
+
+        # wsl — delegate to the windo wsl verb
+        if ($sub -eq "wsl") {
+            $wslFwdArgs = @("wsl")
+            for ($si = $argStart; $si -lt $Command.Count; $si++) { $wslFwdArgs += [string]$Command[$si] }
+            $Command = [object[]]$wslFwdArgs
+            # fall through to the wsl verb below
+        }
+
+        if ($sub -notin @("rdp", "vnc", "wsl")) {
+            if ($JsonOutput) {
+                _emit_json "net-scan" @{ subcommand = $sub; scannedAt = (Get-Date -Format "o"); error = "unknown subcommand"; exitCode = 2 }
+            } else {
+                Write-Host "[windo] net-scan: expected status | resolve | arp | ping | probe | nmap | rdp | vnc | wsl (got: $sub)" -ForegroundColor Yellow
+            }
+            _windo_set_exit 2
+            return
+        }
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "rdp") {
+        $sub = "status"
+        $argStart = 1
+        if ($Command.Count -ge 2 -and -not ([string]$Command[1]).StartsWith("--")) {
+            $sub = [string]$Command[1].Trim().ToLowerInvariant()
+            $argStart = 2
+        }
+        if ($sub -eq "" -or $sub -eq "status") {
+            $config = _windo_remote_rdp_config_snapshot
+            $rules = _windo_firewall_rules_for_patterns @("RDP", "Remote Desktop", "Terminal Services", "Remote Assistance") @()
+            $payload = [ordered]@{
+                subcommand = "status"
+                scannedAt = (Get-Date -Format "o")
+                service = $config.service
+                config = $config.registry
+                firewall = @{
+                    count = @($rules).Count
+                    rules = @($rules)
+                }
+                exitCode = 0
+            }
+            if ($JsonOutput) {
+                _emit_json "rdp" $payload
+            } else {
+                Write-Host "[windo] rdp status" -ForegroundColor Cyan
+                $enabledText = if (($config.registry.terminalServerFq -eq 0)) { "enabled" } else { "disabled" }
+                $nlaText = if ($config.registry.userAuthentication -eq 1) { "on" } else { "off" }
+                Write-Host "  service=$($config.service.status)  enabled=$enabledText  nla=$nlaText  securityLayer=$($config.registry.securityLayer)" -ForegroundColor DarkGray
+                Write-Host "  firewallRules=$(@($rules).Count)  serviceExists=$($config.service.exists)" -ForegroundColor DarkGray
+                if (-not $config.service.exists) { Write-Host "  TermService was not found; check permissions and OS edition." -ForegroundColor Yellow }
+            }
+            _windo_set_exit 0
+            return
+        }
+
+        if ($sub -eq "firewall") {
+            $action = "status"
+            $portsRaw = $null
+            for ($si = $argStart; $si -lt $Command.Count; $si++) {
+                $a = [string]$Command[$si]
+                if ($a -notlike "--*" -and $action -eq "status") {
+                    if ($a -in @("status", "enable", "disable")) { $action = $a.ToLowerInvariant(); continue }
+                }
+                if ($a -eq "--ports") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); error = "--ports requires a value"; exitCode = 2 } } else { Write-Host "[windo] rdp firewall --ports requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $portsRaw = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -like "--ports=*") { $portsRaw = $a.Substring(8); continue }
+                if ($a -like "--*") {
+                    if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); error = "unknown option '$a'"; exitCode = 2 } } else { Write-Host "[windo] rdp firewall: unknown option $a" -ForegroundColor Yellow }
+                    _windo_set_exit 2
+                    return
+                }
+            }
+            if (-not $action) { $action = "status" }
+            $ports = @()
+            if (-not [string]::IsNullOrWhiteSpace($portsRaw)) {
+                try { $ports = _windo_parse_ports_raw $portsRaw } catch { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); error = $_.Exception.Message; exitCode = 2 } } else { Write-Host ("[windo] invalid --ports: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            }
+            $rules = _windo_firewall_rules_for_patterns @("RDP", "Remote Desktop", "Terminal Services", "Remote Assistance") @($ports)
+            if ($action -eq "status") {
+                if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); action = "status"; requestedPorts = @($ports); rules = @($rules); exitCode = 0 } }
+                else {
+                    Write-Host "[windo] rdp firewall status" -ForegroundColor Cyan
+                    Write-Host "  matchedRules=$($rules.Count)" -ForegroundColor DarkGray
+                    foreach ($r in @($rules)) {
+                        Write-Host ("  {0} [{1}] enabled={2} profile={3}" -f $r.displayName, $r.name, $r.enabled, $r.profile) -ForegroundColor DarkGray
+                    }
+                }
+                _windo_set_exit 0
+                return
+            }
+            if ($action -in @("enable", "disable")) {
+                if ($DryRun) {
+                    if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); action = $action; dryRun = $true; requestedPorts = @($ports); exitCode = 0; estimatedEffect = "read-only preview" } }
+                    else { Write-Host "[windo] rdp firewall $action (dry-run)" -ForegroundColor Yellow }
+                    _windo_set_exit 0
+                    return
+                }
+                if (-not (_windo_is_process_elevated)) {
+                    if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); action = $action; error = "elevation required"; exitCode = 3; next = "windo run -- windo rdp firewall $action" } }
+                    else { Write-Host "[windo] rdp firewall $action requires elevation. Use windo run -- windo rdp firewall $action." -ForegroundColor Yellow }
+                    _windo_set_exit 3
+                    return
+                }
+                $names = @(@($rules) | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+                if ($names.Count -eq 0) {
+                    if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); error = "no matching firewall rule found"; exitCode = 2 } } else { Write-Host "[windo] rdp firewall: no matching rule was found." -ForegroundColor Yellow }
+                    _windo_set_exit 2
+                    return
+                }
+                $result = _windo_firewall_apply_rules $names ($action -eq "enable")
+                if ($JsonOutput) {
+                    _emit_json "rdp" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); action = $action; requestedPorts = @($ports); updates = @($result); exitCode = $(if (@(@($result) | Where-Object { -not $_.success }).Count -gt 0) { 2 } else { 0 }) }
+                } else {
+                    Write-Host "[windo] rdp firewall $action" -ForegroundColor Cyan
+                    foreach ($u in @($result)) {
+                        if ($u.success) { Write-Host ("  [ok] {0}" -f $u.name) -ForegroundColor Green } else { Write-Host ("  [fail] {0} ({1})" -f $u.name, $u.error) -ForegroundColor Red }
+                    }
+                }
+                _windo_set_exit $(if (@($result | Where-Object { -not $_.success }).Count -gt 0) { 2 } else { 0 })
+                return
+            }
+            if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); error = "expected status|enable|disable"; exitCode = 2 } } else { Write-Host "[windo] rdp firewall: expected status|enable|disable" -ForegroundColor Yellow }
+            _windo_set_exit 2
+            return
+        }
+
+        if ($sub -eq "config") {
+            $rdpEnable = $null
+            $rdpNla = $null
+            $rdpSecurityLayer = $null
+            $restart = $false
+            for ($si = $argStart; $si -lt $Command.Count; $si++) {
+                $a = [string]$Command[$si]
+                if ($a -eq "--enable") { $rdpEnable = $true; continue }
+                if ($a -eq "--disable") { $rdpEnable = $false; continue }
+                if ($a -eq "--restart") { $restart = $true; continue }
+                if ($a -eq "--nla") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; error = "--nla requires a value"; exitCode = 2 } } else { Write-Host "[windo] --nla requires a value (on|off)." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $rdpNlaText = [string]$Command[$si + 1]
+                    switch ($rdpNlaText.Trim().ToLowerInvariant()) {
+                        '1' { $rdpNla = $true }
+                        'true' { $rdpNla = $true }
+                        'yes' { $rdpNla = $true }
+                        'on' { $rdpNla = $true }
+                        'enabled' { $rdpNla = $true }
+                        '0' { $rdpNla = $false }
+                        'false' { $rdpNla = $false }
+                        'no' { $rdpNla = $false }
+                        'off' { $rdpNla = $false }
+                        'disabled' { $rdpNla = $false }
+                        default {
+                            if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; error = "--nla must be on|off|true|false|yes|no|1|0"; exitCode = 2 } else { Write-Host "[windo] --nla must be one of: on, off, true, false, yes, no, 1, 0." -ForegroundColor Yellow }
+                            _windo_set_exit 2
+                            return
+                        }
+                    }
+                    $si++
+                    continue
+                }
+                if ($a -like "--nla=*") {
+                    $rdpNlaText = $a.Substring(6)
+                    switch ($rdpNlaText.Trim().ToLowerInvariant()) {
+                        '1' { $rdpNla = $true }
+                        'true' { $rdpNla = $true }
+                        'yes' { $rdpNla = $true }
+                        'on' { $rdpNla = $true }
+                        'enabled' { $rdpNla = $true }
+                        '0' { $rdpNla = $false }
+                        'false' { $rdpNla = $false }
+                        'no' { $rdpNla = $false }
+                        'off' { $rdpNla = $false }
+                        'disabled' { $rdpNla = $false }
+                        default {
+                            if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; error = "--nla must be on|off|true|false|yes|no|1|0"; exitCode = 2 } else { Write-Host "[windo] --nla must be one of: on, off, true, false, yes, no, 1, 0." -ForegroundColor Yellow }
+                            _windo_set_exit 2
+                            return
+                        }
+                    }
+                    continue
+                }
+                if ($a -eq "--security-layer") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; error = "--security-layer requires a value"; exitCode = 2 } } else { Write-Host "[windo] --security-layer requires a value (0|1|2)." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $rawLayer = [string]$Command[$si + 1]
+                    $tmp = 0
+                    if (-not [int]::TryParse($rawLayer, [ref]$tmp) -or $tmp -lt 0 -or $tmp -gt 2) { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; error = "--security-layer must be 0|1|2"; exitCode = 2 } } else { Write-Host "[windo] --security-layer must be 0, 1, or 2." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $rdpSecurityLayer = $tmp
+                    $si++
+                    continue
+                }
+                if ($a -like "--security-layer=*") {
+                    $rawLayer = $a.Substring(16)
+                    $tmp = 0
+                    if (-not [int]::TryParse($rawLayer, [ref]$tmp) -or $tmp -lt 0 -or $tmp -gt 2) { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; error = "--security-layer must be 0|1|2"; exitCode = 2 } } else { Write-Host "[windo] --security-layer must be 0, 1, or 2." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $rdpSecurityLayer = $tmp
+                    continue
+                }
+                if ($a -like "--*") { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; error = "unknown option '$a'"; exitCode = 2 } } else { Write-Host "[windo] rdp config: unknown option $a" -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; error = "unexpected argument '$a'"; exitCode = 2 } } else { Write-Host "[windo] rdp config: unexpected argument '$a'" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            if ($rdpEnable -eq $null -and $rdpNla -eq $null -and $rdpSecurityLayer -eq $null) {
+                if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; scannedAt = (Get-Date -Format "o"); error = "provide --enable|--disable and/or --nla/--security-layer"; exitCode = 2 } } else { Write-Host "[windo] rdp config requires at least one mutation flag." -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            if ($DryRun) {
+                $payload = [ordered]@{
+                    subcommand = "config"
+                    scannedAt = (Get-Date -Format "o")
+                    dryRun = $true
+                    requested = @{
+                        enable = $rdpEnable
+                        nla = $rdpNla
+                        securityLayer = $rdpSecurityLayer
+                        restart = $restart
+                    }
+                    exitCode = 0
+                }
+                if ($JsonOutput) { _emit_json "rdp" $payload } else { Write-Host "[windo] rdp config (dry-run) -- no changes written." -ForegroundColor Yellow }
+                _windo_set_exit 0
+                return
+            }
+            if (-not (_windo_is_process_elevated)) {
+                $runArgs = [System.Collections.ArrayList]@()
+                if ($rdpEnable -eq $true) { [void]$runArgs.Add("--enable") }
+                if ($rdpEnable -eq $false) { [void]$runArgs.Add("--disable") }
+                if ($rdpNla -ne $null) { [void]$runArgs.Add("--nla"); [void]$runArgs.Add($(if ($rdpNla) { "on" } else { "off" })) }
+                if ($rdpSecurityLayer -ne $null) { [void]$runArgs.Add("--security-layer"); [void]$runArgs.Add([string]$rdpSecurityLayer) }
+                if ($restart) { [void]$runArgs.Add("--restart") }
+                $runCommand = "windo run -- windo rdp config $($runArgs -join ' ')"
+                if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "config"; scannedAt = (Get-Date -Format "o"); error = "elevation required"; exitCode = 3; next = $runCommand } } else { Write-Host "[windo] rdp config requires elevation. Use: $runCommand" -ForegroundColor Yellow }
+                _windo_set_exit 3
+                return
+            }
+            $result = _windo_remote_set_rdp_config -Enable $rdpEnable -Nla $rdpNla -SecurityLayer $rdpSecurityLayer -RestartService:$restart
+            if ($JsonOutput) {
+                _emit_json "rdp" @{ subcommand = "config"; scannedAt = (Get-Date -Format "o"); requested = @{ enable = $rdpEnable; nla = $rdpNla; securityLayer = $rdpSecurityLayer; restart = $restart }; result = $result; exitCode = $(if ($result.success) { 0 } else { 2 }) }
+            } else {
+                if ($result.success) { Write-Host "[windo] rdp config updated." -ForegroundColor Green } else { Write-Host "[windo] rdp config failed: $($result.error)" -ForegroundColor Red }
+                if ($result.changes.Count -gt 0) { foreach ($c in @($result.changes)) { Write-Host "  $($c.key) -> $($c.value)" -ForegroundColor DarkGray } }
+            }
+            _windo_set_exit $(if ($result.success) { 0 } else { 2 })
+            return
+        }
+
+        if ($sub -eq "troubleshoot") {
+            $host = "localhost"
+            $portsRaw = "3389"
+            $timeoutSeconds = 3
+            $credName = $null
+            for ($si = $argStart; $si -lt $Command.Count; $si++) {
+                $a = [string]$Command[$si]
+                if ($a -eq "--host") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "troubleshoot"; error = "--host requires a value"; exitCode = 2 } } else { Write-Host "[windo] --host requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $host = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -like "--host=*") { $host = $a.Substring(7); continue }
+                if ($a -eq "--ports") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "troubleshoot"; error = "--ports requires a value"; exitCode = 2 } } else { Write-Host "[windo] --ports requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $portsRaw = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -like "--ports=*") { $portsRaw = $a.Substring(8); continue }
+                if ($a -eq "--timeout") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "troubleshoot"; error = "--timeout requires a value"; exitCode = 2 } } else { Write-Host "[windo] --timeout requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $rawTimeout = [string]$Command[$si + 1]
+                    $timeoutSec = 0
+                    if (-not [int]::TryParse($rawTimeout, [ref]$timeoutSec) -or $timeoutSec -lt 1 -or $timeoutSec -gt 900) { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "troubleshoot"; error = "invalid --timeout value"; exitCode = 2 } } else { Write-Host "[windo] --timeout must be 1..900." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $timeoutSeconds = $timeoutSec
+                    $si++
+                    continue
+                }
+                if ($a -like "--timeout=*") {
+                    $rawTimeout = $a.Substring(10)
+                    $timeoutSec = 0
+                    if (-not [int]::TryParse($rawTimeout, [ref]$timeoutSec) -or $timeoutSec -lt 1 -or $timeoutSec -gt 900) { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "troubleshoot"; error = "invalid --timeout value"; exitCode = 2 } } else { Write-Host "[windo] --timeout must be 1..900." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $timeoutSeconds = $timeoutSec
+                    continue
+                }
+                if ($a -eq "--credential") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "troubleshoot"; error = "--credential requires a value"; exitCode = 2 } } else { Write-Host "[windo] --credential requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $credName = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -like "--credential=*") { $credName = $a.Substring(13); continue }
+                if ($a -like "--*") { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "troubleshoot"; error = "unknown option '$a'"; exitCode = 2 } } else { Write-Host "[windo] rdp troubleshoot: unknown option $a" -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            }
+            try { $ports = _windo_parse_ports_raw $portsRaw } catch { if ($JsonOutput) { _emit_json "rdp" @{ subcommand = "troubleshoot"; scannedAt = (Get-Date -Format "o"); error = $_.Exception.Message; exitCode = 2 } } else { Write-Host ("[windo] invalid --ports: " + $_.Exception.Message) -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            $status = _windo_remote_rdp_config_snapshot
+            $probeRows = [System.Collections.ArrayList]@()
+            foreach ($p in @($ports)) { $probe = _windo_net_scan_probe_tcp -Host $host -Port $p -TimeoutSeconds $timeoutSeconds; [void]$probeRows.Add([ordered]@{ port = [int]$p; reachable = [bool]$probe.open; error = $probe.error }) }
+            $rules = _windo_firewall_rules_for_patterns @("RDP", "Remote Desktop", "Terminal Services", "Remote Assistance") @($ports)
+            $cred = if ($credName) { _windo_remote_credential_preview $credName } else { $null }
+            $payload = [ordered]@{
+                subcommand = "troubleshoot"
+                scannedAt = (Get-Date -Format "o")
+                host = $host
+                timeoutSeconds = $timeoutSeconds
+                config = $status
+                firewall = @{
+                    rules = @($rules)
+                    matchedCount = @($rules).Count
+                }
+                portChecks = @($probeRows)
+                credential = $cred
+                exitCode = 0
+            }
+            if ($JsonOutput) { _emit_json "rdp" $payload }
+            else {
+                Write-Host "[windo] rdp troubleshoot" -ForegroundColor Cyan
+                Write-Host "  Host: $host Timeout: $timeoutSeconds sec" -ForegroundColor DarkGray
+                Write-Host "  Service: $($status.service.status)" -ForegroundColor DarkGray
+                foreach ($p in @($probeRows)) { Write-Host ("  Port {0}: {1}" -f $p.port, $(if ($p.reachable) { "open" } else { "closed/filtered" })) -ForegroundColor $(if ($p.reachable) { "Green" } else { "Yellow" }) }
+                if ($credName) { if ($cred -and $cred.exists) { Write-Host ("  Credential preview: {0} / {1}" -f $cred.username, $cred.passwordPreview) -ForegroundColor DarkGray } else { Write-Host "  Credential entry not found." -ForegroundColor Yellow } }
+            }
+            _windo_set_exit 0
+            return
+        }
+
+        if ($JsonOutput) { _emit_json "rdp" @{ subcommand = $sub; scannedAt = (Get-Date -Format "o"); error = "unknown subcommand"; exitCode = 2 } } else { Write-Host "[windo] rdp: expected status|firewall|config|troubleshoot (got: $sub)" -ForegroundColor Yellow }
+        _windo_set_exit 2
+        return
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "vnc") {
+        $sub = "status"
+        $argStart = 1
+        if ($Command.Count -ge 2 -and -not ([string]$Command[1]).StartsWith("--")) {
+            $sub = [string]$Command[1].Trim().ToLowerInvariant()
+            $argStart = 2
+        }
+        if ($sub -eq "" -or $sub -eq "status") {
+            $vncServices = _windo_remote_vnc_services
+            $firewallRules = _windo_firewall_rules_for_patterns @("vnc", "ultravnc", "tightvnc", "realvnc", "winvnc", "x11", "vncserver") @()
+            $probeRows = [System.Collections.ArrayList]@()
+            foreach ($p in @(5900,5901)) { $probe = _windo_net_scan_probe_tcp -Host "localhost" -Port $p -TimeoutSeconds 2; [void]$probeRows.Add([ordered]@{ port = $p; reachable = [bool]$probe.open; error = $probe.error }) }
+            if ($JsonOutput) {
+                _emit_json "vnc" @{
+                    subcommand = "status"
+                    scannedAt = (Get-Date -Format "o")
+                    services = @($vncServices)
+                    firewall = @{ count = @($firewallRules).Count; rules = @($firewallRules) }
+                    localProbes = @($probeRows)
+                    exitCode = 0
+                }
+            } else {
+                Write-Host "[windo] vnc status" -ForegroundColor Cyan
+                Write-Host ("  services={0} firewallRules={1}" -f @($vncServices).Count, @($firewallRules).Count) -ForegroundColor DarkGray
+                foreach ($s in @($vncServices)) { Write-Host ("  service {0} ({1}) status={2}" -f $s.name, $s.displayName, $s.status) -ForegroundColor DarkGray }
+                foreach ($p in @($probeRows)) { Write-Host ("  localhost:{0} {1}" -f $p.port, $(if ($p.reachable) { "open" } else { "closed" })) -ForegroundColor DarkGray }
+            }
+            _windo_set_exit 0
+            return
+        }
+
+        if ($sub -eq "firewall") {
+            $fwSub = "status"
+            $portsRaw = $null
+            for ($si = $argStart; $si -lt $Command.Count; $si++) {
+                $a = [string]$Command[$si]
+                if ($a -notlike "--*" -and $fwSub -eq "status") {
+                    if ($a -in @("status", "enable", "disable")) { $fwSub = $a.ToLowerInvariant(); continue }
+                }
+                if ($a -eq "--ports") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "firewall"; error = "--ports requires a value"; exitCode = 2 } } else { Write-Host "[windo] --ports requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $portsRaw = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -like "--ports=*") { $portsRaw = $a.Substring(8); continue }
+                if ($a -like "--*") { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "firewall"; error = "unknown option '$a'"; exitCode = 2 } } else { Write-Host "[windo] vnc firewall: unknown option $a" -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            }
+            $ports = @()
+            if (-not [string]::IsNullOrWhiteSpace($portsRaw)) { try { $ports = _windo_parse_ports_raw $portsRaw } catch { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "firewall"; error = $_.Exception.Message; exitCode = 2 } } else { Write-Host ("[windo] invalid --ports: " + $_.Exception.Message) -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            }
+            $rules = _windo_firewall_rules_for_patterns @("vnc", "ultravnc", "tightvnc", "realvnc", "winvnc", "x11", "vncserver") @($ports)
+            if ($fwSub -eq "status") {
+                if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); rules = @($rules); action = "status"; exitCode = 0 } } else { Write-Host "[windo] vnc firewall status" -ForegroundColor Cyan; foreach ($r in @($rules)) { Write-Host ("  {0}" -f $r.displayName) -ForegroundColor DarkGray } }
+                _windo_set_exit 0
+                return
+            }
+            if ($DryRun) {
+                if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); action = $fwSub; dryRun = $true; exitCode = 0 } } else { Write-Host "[windo] vnc firewall $fwSub (dry-run)" -ForegroundColor Yellow }
+                _windo_set_exit 0
+                return
+            }
+            if (-not (_windo_is_process_elevated)) {
+                if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "firewall"; error = "elevation required"; exitCode = 3; next = "windo run -- windo vnc firewall $fwSub" } } else { Write-Host "[windo] vnc firewall requires elevation. Use windo run -- windo vnc firewall $fwSub." -ForegroundColor Yellow }
+                _windo_set_exit 3
+                return
+            }
+            $names = @(@($rules) | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+            if ($names.Count -eq 0) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "firewall"; error = "no matching firewall rules"; exitCode = 2 } } else { Write-Host "[windo] vnc firewall: no matching rules." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            $result = _windo_firewall_apply_rules $names ($fwSub -eq "enable")
+            if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "firewall"; scannedAt = (Get-Date -Format "o"); action = $fwSub; updates = @($result); exitCode = $(if (@(@($result) | Where-Object { -not $_.success }).Count -gt 0) { 2 } else { 0 }) } } else { Write-Host "[windo] vnc firewall $fwSub" -ForegroundColor Cyan; foreach ($u in @($result)) { Write-Host ("  {0}: {1}" -f $u.name, $(if ($u.success) { "ok" } else { "failed" })) -ForegroundColor $(if ($u.success) { "Green" } else { "Red" }) } }
+            _windo_set_exit $(if (@($result | Where-Object { -not $_.success }).Count -gt 0) { 2 } else { 0 })
+            return
+        }
+
+        if ($sub -eq "test") {
+            $host = $null
+            if ($Command.Count -ge ($argStart + 1)) { $host = [string]$Command[$argStart] } else { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "test"; error = "missing host"; exitCode = 2 } } else { Write-Host "[windo] vnc test requires a host argument." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            $portsRaw = "5900,5901"
+            $timeoutSeconds = 2
+            for ($si = $argStart + 1; $si -lt $Command.Count; $si++) {
+                $a = [string]$Command[$si]
+                if ($a -eq "--ports") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "test"; error = "--ports requires a value"; exitCode = 2 } } else { Write-Host "[windo] --ports requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $portsRaw = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -like "--ports=*") { $portsRaw = $a.Substring(8); continue }
+                if ($a -eq "--timeout") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "test"; error = "--timeout requires a value"; exitCode = 2 } } else { Write-Host "[windo] --timeout requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    if (-not [int]::TryParse([string]$Command[$si + 1], [ref]$timeoutSeconds) -or $timeoutSeconds -lt 1 -or $timeoutSeconds -gt 900) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "test"; error = "invalid --timeout value"; exitCode = 2 } } else { Write-Host "[windo] --timeout must be 1..900." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $si++
+                    continue
+                }
+                if ($a -like "--timeout=*") {
+                    $tmp = 0
+                    if (-not [int]::TryParse($a.Substring(10), [ref]$timeoutSeconds) -or $timeoutSeconds -lt 1 -or $timeoutSeconds -gt 900) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "test"; error = "invalid --timeout value"; exitCode = 2 } } else { Write-Host "[windo] --timeout must be 1..900." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    continue
+                }
+                if ($a -like "--*") { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "test"; error = "unknown option '$a'"; exitCode = 2 } } else { Write-Host "[windo] vnc test: unknown option $a" -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            }
+            try { $ports = _windo_parse_ports_raw $portsRaw } catch { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "test"; error = $_.Exception.Message; exitCode = 2 } } else { Write-Host ("[windo] invalid --ports: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            $rows = [System.Collections.ArrayList]@()
+            foreach ($p in @($ports)) { $probe = _windo_net_scan_probe_tcp -Host $host -Port $p -TimeoutSeconds $timeoutSeconds; [void]$rows.Add([ordered]@{ port = [int]$p; open = [bool]$probe.open; error = $probe.error }) }
+            if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "test"; host = $host; scannedAt = (Get-Date -Format "o"); timeoutSeconds = $timeoutSeconds; rows = @($rows); exitCode = $(if (@(@($rows) | Where-Object { -not $_.open }).Count -eq @($ports).Count) { 3 } else { 0 }) } } else { Write-Host "[windo] vnc test $host" -ForegroundColor Cyan; foreach ($r in @($rows)) { Write-Host ("  $host : {0} -> {1}" -f $r.port, $(if ($r.open) { "open" } else { "closed" })) -ForegroundColor $(if ($r.open) { "Green" } else { "Yellow" }) } }
+            _windo_set_exit $(if (@(@($rows) | Where-Object { -not $_.open }).Count -eq @($ports).Count) { 3 } else { 0 })
+            return
+        }
+
+        if ($sub -eq "stop") {
+            $serviceNames = [System.Collections.ArrayList]@()
+            for ($si = $argStart; $si -lt $Command.Count; $si++) {
+                $a = [string]$Command[$si]
+                if ($a -eq "--") { continue }
+                if ($a -like "--*") { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "stop"; error = "unknown option '$a'"; exitCode = 2 } } else { Write-Host "[windo] vnc stop: unknown option $a" -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                [void]$serviceNames.Add($a)
+            }
+            if ($serviceNames.Count -eq 0) {
+                $serviceNames = @(@($(_windo_remote_vnc_services) | ForEach-Object { [string]$_.name }))
+            }
+            if ($serviceNames.Count -eq 0) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "stop"; error = "no VNC services found"; exitCode = 2 } } else { Write-Host "[windo] vnc stop: no VNC service found." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            if ($DryRun) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "stop"; dryRun = $true; services = @($serviceNames); exitCode = 0 } } else { Write-Host "[windo] vnc stop (dry-run) no action" -ForegroundColor Yellow }; _windo_set_exit 0; return }
+            if (-not (_windo_is_process_elevated)) {
+                if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "stop"; error = "elevation required"; exitCode = 3; next = "windo run -- windo vnc stop $(($serviceNames -join ' '))" } } else { Write-Host "[windo] vnc stop requires elevation. Use windo run -- windo vnc stop <services>." -ForegroundColor Yellow }
+                _windo_set_exit 3
+                return
+            }
+            $rows = [System.Collections.ArrayList]@()
+            foreach ($svc in @($serviceNames)) {
+                try { Stop-Service -Name $svc -ErrorAction Stop; [void]$rows.Add([ordered]@{ name = [string]$svc; status = "stopped"; success = $true }) } catch { [void]$rows.Add([ordered]@{ name = [string]$svc; success = $false; error = $_.Exception.Message }) }
+            }
+            if ($JsonOutput) {
+                _emit_json "vnc" @{ subcommand = "stop"; scannedAt = (Get-Date -Format "o"); services = @($rows); exitCode = $(if (@(@($rows) | Where-Object { -not $_.success }).Count -gt 0) { 2 } else { 0 }) }
+            } else {
+                Write-Host "[windo] vnc stop" -ForegroundColor Cyan
+                foreach ($r in @($rows)) { if ($r.success) { Write-Host ("  [ok] {0}" -f $r.name) -ForegroundColor Green } else { Write-Host ("  [fail] {0}: {1}" -f $r.name, $r.error) -ForegroundColor Red } }
+            }
+            _windo_set_exit $(if (@(@($rows) | Where-Object { -not $_.success }).Count -gt 0) { 2 } else { 0 })
+            return
+        }
+
+        if ($sub -eq "troubleshoot") {
+            $host = "localhost"
+            $portsRaw = "5900,5901"
+            $timeoutSeconds = 2
+            $credName = $null
+            for ($si = $argStart; $si -lt $Command.Count; $si++) {
+                $a = [string]$Command[$si]
+                if ($a -eq "--host") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "troubleshoot"; error = "--host requires a value"; exitCode = 2 } } else { Write-Host "[windo] --host requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $host = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -like "--host=*") { $host = $a.Substring(7); continue }
+                if ($a -eq "--ports") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "troubleshoot"; error = "--ports requires a value"; exitCode = 2 } } else { Write-Host "[windo] --ports requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $portsRaw = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -like "--ports=*") { $portsRaw = $a.Substring(8); continue }
+                if ($a -eq "--timeout") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "troubleshoot"; error = "--timeout requires a value"; exitCode = 2 } } else { Write-Host "[windo] --timeout requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    if (-not [int]::TryParse([string]$Command[$si + 1], [ref]$timeoutSeconds) -or $timeoutSeconds -lt 1 -or $timeoutSeconds -gt 900) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "troubleshoot"; error = "invalid --timeout value"; exitCode = 2 } } else { Write-Host "[windo] --timeout must be 1..900." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $si++
+                    continue
+                }
+                if ($a -like "--timeout=*") { if (-not [int]::TryParse($a.Substring(10), [ref]$timeoutSeconds) -or $timeoutSeconds -lt 1 -or $timeoutSeconds -gt 900) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "troubleshoot"; error = "invalid --timeout value"; exitCode = 2 } } else { Write-Host "[windo] --timeout must be 1..900." -ForegroundColor Yellow }; _windo_set_exit 2; return }; continue }
+                if ($a -eq "--credential") {
+                    if ($si + 1 -ge $Command.Count) { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "troubleshoot"; error = "--credential requires a value"; exitCode = 2 } } else { Write-Host "[windo] --credential requires a value." -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                    $credName = [string]$Command[$si + 1]
+                    $si++
+                    continue
+                }
+                if ($a -like "--credential=*") { $credName = $a.Substring(13); continue }
+                if ($a -like "--*") { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "troubleshoot"; error = "unknown option '$a'"; exitCode = 2 } } else { Write-Host "[windo] vnc troubleshoot: unknown option $a" -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            }
+            try { $ports = _windo_parse_ports_raw $portsRaw } catch { if ($JsonOutput) { _emit_json "vnc" @{ subcommand = "troubleshoot"; error = $_.Exception.Message; exitCode = 2 } } else { Write-Host ("[windo] invalid --ports: " + $_.Exception.Message) -ForegroundColor Yellow }; _windo_set_exit 2; return }
+            $services = _windo_remote_vnc_services
+            $firewall = _windo_firewall_rules_for_patterns @("vnc", "ultravnc", "tightvnc", "realvnc", "winvnc", "x11", "vncserver") @($ports)
+            $rows = [System.Collections.ArrayList]@()
+            foreach ($p in @($ports)) { $probe = _windo_net_scan_probe_tcp -Host $host -Port $p -TimeoutSeconds $timeoutSeconds; [void]$rows.Add([ordered]@{ port = [int]$p; open = [bool]$probe.open; error = $probe.error }) }
+            $cred = if ($credName) { _windo_remote_credential_preview $credName } else { $null }
+            if ($JsonOutput) {
+                _emit_json "vnc" @{ subcommand = "troubleshoot"; scannedAt = (Get-Date -Format "o"); host = $host; services = @($services); firewall = @{ count = @($firewall).Count; rules = @($firewall) }; timeoutSeconds = $timeoutSeconds; ports = @($rows); credential = $cred; exitCode = 0 }
+            } else {
+                Write-Host "[windo] vnc troubleshoot" -ForegroundColor Cyan
+                Write-Host "  services=$(@($services).Count) firewallRules=$(@($firewall).Count)" -ForegroundColor DarkGray
+                foreach ($r in @($rows)) { Write-Host ("  {0}:{1} {2}" -f $host, $r.port, $(if ($r.open) { "open" } else { "closed/filtered" })) -ForegroundColor $(if ($r.open) { "Green" } else { "Yellow" }) }
+                if ($credName) { if ($cred -and $cred.exists) { Write-Host ("  credential={0} ({1})" -f $cred.username, $cred.passwordPreview) -ForegroundColor DarkGray } else { Write-Host "  credential not found." -ForegroundColor Yellow } }
+            }
+            _windo_set_exit 0
+            return
+        }
+
+        if ($JsonOutput) { _emit_json "vnc" @{ subcommand = $sub; error = "unknown subcommand"; exitCode = 2 } } else { Write-Host "[windo] vnc: expected status|firewall|test|stop|troubleshoot (got: $sub)" -ForegroundColor Yellow }
+        _windo_set_exit 2
         return
     }
 
@@ -8430,6 +10737,761 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
         $Command = @($managerPath) + @($pkgArgs)
     }
 
+    if ($Command.Count -ge 1 -and $Command[0] -eq "container") {
+        $sub = $null
+        $runtimePreference = "auto"
+        $runtimeArgs = [System.Collections.ArrayList]@()
+        $i = 1
+        while ($i -lt $Command.Count) {
+            $current = [string]$Command[$i]
+            if ($current -eq '--runtime') {
+                if (($i + 1) -ge $Command.Count) {
+                    if ($JsonOutput) { _emit_json "container" @{ error = "--runtime requires a value (docker|podman|auto)"; exitCode = 2 } }
+                    else { Write-Host "[windo] container: --runtime requires a value (docker|podman|auto)" -ForegroundColor Yellow }
+                    _windo_set_exit 2
+                    return
+                }
+                $runtimePreference = [string]$Command[$i + 1]
+                $i += 2
+                continue
+            }
+            if ($current -like '--runtime=*') {
+                $runtimePreference = $current.Substring(10)
+                $i++
+                continue
+            }
+            if (($current -eq '--') -or ($i -eq 1 -and [string]::IsNullOrWhiteSpace($current))) {
+                $i++
+                break
+            }
+            if (($current -like '--*') -and ($null -eq $sub)) {
+                if ($JsonOutput) { _emit_json "container" @{ error = "unknown container option: $current"; exitCode = 2 } }
+                else { Write-Host "[windo] container: unknown option before subcommand: $current" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            if ($null -eq $sub) {
+                $sub = [string]$current.ToLowerInvariant()
+            } else {
+                [void]$runtimeArgs.Add($current)
+            }
+            $i++
+        }
+        while ($i -lt $Command.Count) {
+            [void]$runtimeArgs.Add([string]$Command[$i])
+            $i++
+        }
+        if ($null -eq $sub) { $sub = "ps" }
+
+        $known = @("ps", "images", "status", "logs", "restart", "start", "stop", "rmi", "rm", "pull")
+        if ($known -notcontains $sub) {
+            if ($JsonOutput) { _emit_json "container" @{ error = "unknown container subcommand"; subcommand = $sub; exitCode = 2 } }
+            else { Write-Host "[windo] container: expected ps, images, status, logs, restart, start, stop, rmi, rm, pull" -ForegroundColor Yellow }
+            _windo_set_exit 2
+            return
+        }
+
+        $runtimeId = [string]$runtimePreference.ToLowerInvariant().Trim()
+        if ($runtimeId -notin @("auto", "docker", "podman")) {
+            if ($JsonOutput) { _emit_json "container" @{ error = "invalid --runtime value"; runtime = $runtimePreference; exitCode = 2 } }
+            else { Write-Host "[windo] container: --runtime supports docker, podman, or auto" -ForegroundColor Yellow }
+            _windo_set_exit 2
+            return
+        }
+
+        $runtimeCmd = $null
+        if ($runtimeId -eq "docker") {
+            $runtimeFound = Get-Command docker -ErrorAction SilentlyContinue
+            if ($runtimeFound) { $runtimeCmd = [string]$runtimeFound.Source; $runtimeUsed = "docker" } else {
+                if ($JsonOutput) { _emit_json "container" @{ error = "runtime not found: docker"; exitCode = 2 } }
+                else { Write-Host "[windo] container: docker binary was not found in PATH" -ForegroundColor Red }
+                _windo_set_exit 2
+                return
+            }
+        } elseif ($runtimeId -eq "podman") {
+            $runtimeFound = Get-Command podman -ErrorAction SilentlyContinue
+            if ($runtimeFound) { $runtimeCmd = [string]$runtimeFound.Source; $runtimeUsed = "podman" } else {
+                if ($JsonOutput) { _emit_json "container" @{ error = "runtime not found: podman"; exitCode = 2 } }
+                else { Write-Host "[windo] container: podman binary was not found in PATH" -ForegroundColor Red }
+                _windo_set_exit 2
+                return
+            }
+        } else {
+            $podmanFound = Get-Command podman -ErrorAction SilentlyContinue
+            $dockerFound = Get-Command docker -ErrorAction SilentlyContinue
+            if ($dockerFound) { $runtimeUsed = "docker"; $runtimeCmd = [string]$dockerFound.Source }
+            elseif ($podmanFound) { $runtimeUsed = "podman"; $runtimeCmd = [string]$podmanFound.Source }
+            else {
+                if ($JsonOutput) { _emit_json "container" @{ error = "runtime not found: docker or podman"; exitCode = 2 } }
+                else { Write-Host "[windo] container: no docker or podman found in PATH" -ForegroundColor Red }
+                _windo_set_exit 2
+                return
+            }
+        }
+
+        if ($sub -eq "status") { $runtimeSub = "info" } else { $runtimeSub = $sub }
+        if (($sub -in @("logs", "restart", "start", "stop", "rmi", "rm", "pull")) -and $runtimeArgs.Count -eq 0) {
+            $hint = "container id or image name argument required"
+            if ($JsonOutput) { _emit_json "container" @{ subcommand = $sub; runtime = $runtimeUsed; command = @($runtimeSub); error = $hint; exitCode = 2 } } else { Write-Host "[windo] container $sub requires an identifier argument." -ForegroundColor Yellow; Write-Host "  Example: windo container $sub <id-or-name>" -ForegroundColor DarkGray }
+            _windo_set_exit 2
+            return
+        }
+
+        $runtimeArgList = @($runtimeSub) + @($runtimeArgs)
+        $renderCommand = @($runtimeUsed, @($runtimeArgList) -join ' ') -join ' '
+        if ($DryRun) {
+            if ($JsonOutput) {
+                _emit_json "container" @{
+                    runtime = $runtimeUsed
+                    subcommand = $sub
+                    runtimeCommand = $runtimeArgList
+                    dryRun = $true
+                    commandLine = $renderCommand
+                    exitCode = 0
+                }
+            } else {
+                Write-Host "[windo] DRY-RUN container command (no execution)" -ForegroundColor Yellow
+                Write-Host "  Runtime : $runtimeUsed"
+                Write-Host "  Command : $renderCommand"
+                Write-Host "  Full cmd: $runtimeCmd " + [string]::Join(" ", @($runtimeArgList | ForEach-Object { _windo_quote_argument $_ }))
+            }
+            _windo_set_exit 0
+            return
+        }
+
+        try {
+            $output = @(& $runtimeCmd @runtimeArgList 2>&1 | ForEach-Object { if ($null -ne $_) { [string]$_ } })
+            $exitCode = if ($LASTEXITCODE -is [int]) { [int]$LASTEXITCODE } else { 0 }
+            if ($exitCode -eq 0) {
+                if ($JsonOutput) { _emit_json "container" @{ runtime = $runtimeUsed; subcommand = $sub; command = $runtimeArgList; exitCode = $exitCode; output = $output } }
+                else { if ($output.Count -gt 0) { Write-Host ($output -join "`r`n") } }
+            } else {
+                if ($JsonOutput) { _emit_json "container" @{ runtime = $runtimeUsed; subcommand = $sub; command = $runtimeArgList; error = "command failed"; exitCode = $exitCode; output = $output } }
+                else { Write-Host "[windo] container $sub failed with exit code $exitCode" -ForegroundColor Red; if ($output.Count -gt 0) { Write-Host ($output -join "`r`n") -ForegroundColor Yellow } }
+            }
+            _windo_set_exit $exitCode
+            return
+        } catch {
+            if ($JsonOutput) { _emit_json "container" @{ runtime = $runtimeUsed; subcommand = $sub; command = $runtimeArgList; error = $_.Exception.Message; exitCode = 1 } }
+            else { Write-Host "[windo] container: failed to execute $runtimeUsed" -ForegroundColor Red; Write-Host "  $($_.Exception.Message)" -ForegroundColor DarkGray }
+            _windo_set_exit 1
+            return
+        }
+    }
+
+    if ($Command.Count -ge 1 -and $Command[0] -eq "wsl") {
+        function _windo_wsl_exec {
+            param([string[]]$Args)
+            $r = [ordered]@{
+                args     = @("wsl") + @($Args)
+                exitCode = 0
+                output   = @()
+            }
+            try {
+                $raw = @(& wsl.exe @Args 2>&1 | ForEach-Object { [string]$_ })
+                $r.output = @($raw)
+                if ($LASTEXITCODE -is [int]) { $r.exitCode = [int]$LASTEXITCODE }
+                return [pscustomobject]$r
+            } catch {
+                return [pscustomobject]@{
+                    args     = @("wsl") + @($Args)
+                    exitCode = 1
+                    output   = @([string]$_.Exception.Message)
+                }
+            }
+        }
+
+        function _windo_wsl_distros {
+            $status = _windo_wsl_exec @("--list","--verbose")
+            if ($status.exitCode -ne 0) {
+                return @{
+                    found       = $false
+                    exitCode    = [int]$status.exitCode
+                    error       = if ($status.output.Count -gt 0) { [string]($status.output -join " ") } else { "wsl list failed" }
+                    distros     = @()
+                    defaultName = $null
+                }
+            }
+            $distros = [System.Collections.ArrayList]@()
+            $header = $false
+            $defaultName = $null
+            foreach ($line in @($status.output)) {
+                if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                if ($line -match '^\s*NAME\s+STATE\s+VERSION') { $header = $true; continue }
+                if (-not $header) {
+                    if ($line -match '(?i)^Windows Subsystem for Linux has no installed distributions') {
+                        break
+                    }
+                    continue
+                }
+                $trim = [string]$line.Trim()
+                if ($trim -notmatch '^(?<name>.+?)\s+(?<state>[A-Za-z]+)\s+(?<version>\d+)\s*$') { continue }
+                $rawName  = $Matches['name']
+                $state    = [string]$Matches['state']
+                $version  = [int][string]$Matches['version']
+                $isDefault = $rawName.TrimStart().StartsWith("*")
+                $name = $rawName.Trim().TrimStart("*").Trim()
+                if ([string]::IsNullOrWhiteSpace($name)) { continue }
+                if ($isDefault) { $defaultName = $name }
+                [void]$distros.Add([pscustomobject]@{ name = $name; state = $state; version = $version; default = [bool]$isDefault })
+            }
+            return @{ found = $true; exitCode = 0; error = $null; distros = @($distros); defaultName = $defaultName }
+        }
+
+        function _windo_wsl_find_distro {
+            param([string]$Name)
+            $rows = _windo_wsl_distros
+            if (-not $rows.found) { return $rows }
+            $row = @($rows.distros | Where-Object { $_.name -ieq $Name })[0]
+            if ($null -eq $row) {
+                return @{ found = $false; error = "distro '$Name' was not found"; exitCode = 2; distros = @($rows.distros); defaultName = $rows.defaultName }
+            }
+            return @{ found = $true; distro = $row; exitCode = 0; distros = @($rows.distros); defaultName = $rows.defaultName }
+        }
+
+        function _windo_parse_kv {
+            param([string[]]$Tokens, [int]$Start = 0)
+            $result = @{}
+            $i = $Start
+            while ($i -lt $Tokens.Count) {
+                $current = [string]$Tokens[$i]
+                if ($current -eq '--') { break }
+                if ($current -like '--*=*') {
+                    $idx = $current.IndexOf('=')
+                    $k = $current.Substring(2, $idx - 2).ToLowerInvariant()
+                    $v = $current.Substring($idx + 1)
+                    $result[$k] = $v
+                    $i++
+                    continue
+                }
+                if ($current -like '--*') {
+                    $key = $current.ToLowerInvariant()
+                    if ($key -eq '--distro' -or $key -eq '--distribution' -or $key -eq '--name' -or $key -eq '--tar' -or $key -eq '--path' -or $key -eq '--out' -or $key -eq '--output' -or $key -eq '--user' -or $key -eq '--version' -or $key -eq '--to' -or $key -eq '--command') {
+                        if (($i + 1) -ge $Tokens.Count) { return @{ error = "$key requires a value"; exitCode = 2 } }
+                        $result[$key.TrimStart('-')] = [string]$Tokens[$i + 1]
+                        $i += 2
+                        continue
+                    }
+                    if ($key -eq '--apply' -or $key -eq '--dry-run' -or $key -eq '--overwrite' -or $key -eq '--json') {
+                        $result[$key.TrimStart('-')] = $true
+                        $i++
+                        continue
+                    }
+                    if (-not $result.ContainsKey('_args')) { $result._args = @() }
+                    [void]$result._args.Add($key)
+                    $i++
+                    continue
+                }
+                if (-not $result.ContainsKey('_args')) { $result._args = @() }
+                [void]$result._args.Add($current)
+                $i++
+            }
+            return $result
+        }
+
+        function _windo_wsl_confirm {
+            param([string]$Message, [string]$CommandLine, [switch]$AutoApprove)
+            if ($AutoApprove -or $NonInteractive -or -not [Environment]::UserInteractive) {
+                return $true
+            }
+            Write-Host "[windo] $Message" -ForegroundColor Yellow
+            $prompt = "Proceed with: $CommandLine [y/N]"
+            if (-not $prompt.Contains('[y/N]')) { $prompt += " [y/N]" }
+            $ans = Read-Host $prompt
+            return ($ans -eq 'y' -or $ans -eq 'Y' -or $ans -eq 'yes')
+        }
+
+        $wslExe = Get-Command wsl.exe -ErrorAction SilentlyContinue
+        if (-not $wslExe) {
+            if ($JsonOutput) { _emit_json "wsl" @{ error = "wsl.exe is not available"; exitCode = 2 } }
+            else { Write-Host "[windo] wsl.exe was not found in PATH." -ForegroundColor Red }
+            _windo_set_exit 2
+            return
+        }
+
+        $sub = "status"
+        if ($Command.Count -ge 2) { $sub = [string]$Command[1].ToLowerInvariant() }
+        $argMap = @{ }
+        if ($Command.Count -gt 2) { $argMap = _windo_parse_kv -Tokens $Command -Start 2 }
+        if ($argMap.ContainsKey('error')) {
+            if ($JsonOutput) { _emit_json "wsl" @{ error = $argMap.error; exitCode = [int]$argMap.exitCode } }
+            else { Write-Host "[windo] wsl: $($argMap.error)" -ForegroundColor Yellow }
+            _windo_set_exit [int]$argMap.exitCode
+            return
+        }
+
+        if ($sub -eq "status" -or $sub -eq "list" -or $sub -eq "ls") {
+            $status = _windo_wsl_exec @("--status")
+            $distros = _windo_wsl_distros
+            if ($JsonOutput) {
+                _emit_json "wsl" @{
+                    command      = "status"
+                    wslAvailable = [bool]$wslExe
+                    wslStatus    = @($status.output)
+                    wslExitCode  = [int]$status.exitCode
+                    distros      = @($distros.distros)
+                    default      = $distros.defaultName
+                    exitCode     = [int]$(if ($status.exitCode -ne 0 -or -not $distros.found) { 2 } else { 0 })
+                }
+                _windo_set_exit $(if ($status.exitCode -ne 0 -or -not $distros.found) { 2 } else { 0 })
+                return
+            }
+            Write-Host "[windo] WSL availability" -ForegroundColor Cyan
+            if ($status.exitCode -ne 0) {
+                Write-Host "  wsl --status failed. Exit=$($status.exitCode)" -ForegroundColor Red
+                foreach ($l in @($status.output)) { Write-Host "  $l" -ForegroundColor DarkGray }
+                _windo_set_exit 2
+                return
+            }
+            foreach ($l in @($status.output)) { Write-Host "  $l" -ForegroundColor DarkGray }
+            if ($distros.found) {
+                Write-Host "  Distros:" -ForegroundColor Cyan
+                if ($distros.distros.Count -eq 0) { Write-Host "    none" -ForegroundColor Yellow }
+                foreach ($d in @($distros.distros)) {
+                    Write-Host ("  {0,-22} {1,-8} v{2}{3}" -f $d.name, $d.state, $d.version, $(if ($d.default) { " *" } else { "" })) -ForegroundColor $(if ($d.state -eq "Running") { "Green" } else { "DarkGray" })
+                }
+            }
+            _windo_set_exit 0
+            return
+        }
+
+        if ($sub -eq "check") {
+            $check = "install"
+            if ($argMap.ContainsKey('_args') -and $argMap._args.Count -gt 0) { $check = [string]$argMap._args[0].ToLowerInvariant() }
+            $ok = $true
+            $notes = [System.Collections.ArrayList]@()
+            if ($check -in @("install", "inst", "")) {
+                $status = _windo_wsl_exec @("--status")
+                if ($status.exitCode -ne 0) {
+                    $ok = $false
+                    [void]$notes.Add("wsl --status returned $($status.exitCode)")
+                } else {
+                    [void]$notes.Add("wsl command is executable")
+                }
+                $d = _windo_wsl_distros
+                $payload = @{
+                    command   = "check install"
+                    ok        = [bool]$ok
+                    wslStatus = @($status.output)
+                    distros   = @($d.distros)
+                    default   = $d.defaultName
+                    exitCode  = $(if ($ok) { 0 } else { 2 })
+                    notes     = @($notes)
+                }
+                if ($JsonOutput) { _emit_json "wsl" $payload; _windo_set_exit $payload.exitCode; return }
+                if (-not $ok) { Write-Host "[windo] WSL install check failed: $($notes[0])" -ForegroundColor Red; _windo_set_exit 2; return }
+                Write-Host "[windo] WSL install check passed." -ForegroundColor Green
+                _windo_set_exit 0
+                return
+            }
+            if ($check -eq "distro") {
+                $name = if ($argMap.ContainsKey('distro')) { [string]$argMap['distro'] } elseif ($argMap.ContainsKey('name')) { [string]$argMap['name'] } elseif ($argMap.ContainsKey('_args') -and $argMap._args.Count -gt 1) { [string]$argMap._args[1] } else { $null }
+                if ([string]::IsNullOrWhiteSpace($name)) {
+                    if ($JsonOutput) { _emit_json "wsl" @{ command = "check distro"; error = "missing distro name"; exitCode = 2 } } else { Write-Host "[windo] wsl check distro requires --distro <name>" -ForegroundColor Yellow }
+                    _windo_set_exit 2
+                    return
+                }
+                $found = _windo_wsl_find_distro $name
+                if (-not $found.found -or -not $found.distro) { if ($JsonOutput) { _emit_json "wsl" @{ command = "check distro"; distro = $name; exists = $false; exitCode = 2 } } else { Write-Host "[windo] Distro not found: $name" -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "check distro"; distro = $found.distro; exists = $true; exitCode = 0 } }
+                else { Write-Host "[windo] Distro '$name' is present. State=$($found.distro.state), Version=$($found.distro.version), Default=$($found.distro.default)" -ForegroundColor Green }
+                _windo_set_exit 0
+                return
+            }
+            if ($check -eq "import") {
+                $name = if ($argMap.ContainsKey('name')) { [string]$argMap['name'] } elseif ($argMap.ContainsKey('distro')) { [string]$argMap['distro'] } else { $null }
+                $tar  = if ($argMap.ContainsKey('tar')) { [string]$argMap['tar'] } else { $null }
+                $path = if ($argMap.ContainsKey('path')) { [string]$argMap['path'] } else { $null }
+                $ver  = if ($argMap.ContainsKey('version')) { [string]$argMap['version'] } else { "2" }
+                $errors = [System.Collections.ArrayList]@()
+                if ([string]::IsNullOrWhiteSpace($name))  { [void]$errors.Add("missing --name") }
+                if ([string]::IsNullOrWhiteSpace($tar))   { [void]$errors.Add("missing --tar") }
+                if ([string]::IsNullOrWhiteSpace($path))  { [void]$errors.Add("missing --path") }
+                if (-not ($ver -in @("1","2")))           { [void]$errors.Add("version must be 1 or 2") }
+                if ($tar -and !(Test-Path -LiteralPath $tar)) { [void]$errors.Add("tar file not found: $tar") }
+                if ($path -and !(Test-Path -LiteralPath $path)) { [void]$errors.Add("install location not found: $path") }
+                $importWillCreate = $false
+                if ($name -and ($null -eq $errors)) {
+                    $d = _windo_wsl_find_distro $name
+                    if ($d.found -and $d.distro) { [void]$errors.Add("distribution '$name' already exists; choose --distro-new or remove first") }
+                    else { $importWillCreate = $true }
+                }
+                if ($errors.Count -gt 0) {
+                    if ($JsonOutput) { _emit_json "wsl" @{ command = "check import"; errors = @($errors); exitCode = 2 } }
+                    else { Write-Host "[windo] import check failed: $($errors -join '; ')" -ForegroundColor Yellow }
+                    _windo_set_exit 2
+                    return
+                }
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "check import"; distribution = $name; tar = $tar; path = $path; version = $ver; safeToApply = [bool]$importWillCreate; applyRequired = $true; exitCode = 0 } }
+                else { Write-Host "[windo] import check passed: would import '$name' from '$tar' into '$path' as WSL $ver." -ForegroundColor Green; Write-Host "  This is a dry-preflight check. Add --apply to run." -ForegroundColor DarkGray }
+                _windo_set_exit 0
+                return
+            }
+            if ($check -eq "export") {
+                $name = if ($argMap.ContainsKey('name')) { [string]$argMap['name'] } elseif ($argMap.ContainsKey('distro')) { [string]$argMap['distro'] } else { $null }
+                $out  = if ($argMap.ContainsKey('out')) { [string]$argMap['out'] } elseif ($argMap.ContainsKey('output')) { [string]$argMap['output'] } else { $null }
+                if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($out)) {
+                    if ($JsonOutput) { _emit_json "wsl" @{ command = "check export"; error = "missing --name or --out"; exitCode = 2 } }
+                    else { Write-Host "[windo] wsl check export requires --name <distro> and --out <path>" -ForegroundColor Yellow }
+                    _windo_set_exit 2
+                    return
+                }
+                $d = _windo_wsl_find_distro $name
+                if (-not $d.found -or -not $d.distro) {
+                    if ($JsonOutput) { _emit_json "wsl" @{ command = "check export"; distribution = $name; exists = $false; exitCode = 2 } } else { Write-Host "[windo] Distro not found: $name" -ForegroundColor Yellow }
+                    _windo_set_exit 2
+                    return
+                }
+                $parent = Split-Path $out -Parent
+                if ([string]::IsNullOrWhiteSpace($parent)) { $parent = "." }
+                if (-not (Test-Path -LiteralPath $parent)) { if ($JsonOutput) { _emit_json "wsl" @{ command = "check export"; error = "output directory not found: $parent"; exitCode = 2 } } else { Write-Host "[windo] Output directory not found: $parent" -ForegroundColor Yellow }; _windo_set_exit 2; return }
+                if ((Test-Path -LiteralPath $out) -and -not $argMap.ContainsKey('overwrite')) {
+                    if ($JsonOutput) { _emit_json "wsl" @{ command = "check export"; distribution = $name; out = $out; exists = $true; error = "output file exists; use --overwrite"; exitCode = 2 } } else { Write-Host "[windo] Output already exists: $out. Add --overwrite" -ForegroundColor Yellow }; _windo_set_exit 2; return
+                }
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "check export"; distribution = $name; out = $out; exists = $true; safeToApply = $true; applyRequired = $true; exitCode = 0 } } else { Write-Host "[windo] export check passed: would export '$name' -> '$out'." -ForegroundColor Green; Write-Host "  This is a dry-preflight check. Add --apply to run." -ForegroundColor DarkGray }
+                _windo_set_exit 0
+                return
+            }
+            if ($JsonOutput) { _emit_json "wsl" @{ command = "check"; error = "unknown check target"; exitCode = 2 } } else { Write-Host "[windo] Unknown check target '$check'. Expected install|distro|import|export." -ForegroundColor Yellow }
+            _windo_set_exit 2
+            return
+        }
+
+        if ($sub -eq "version") {
+            $res = _windo_wsl_exec @("--version")
+            $lines = @($res.output)
+            if ($JsonOutput) {
+                _emit_json "wsl" @{
+                    command = "version"
+                    output = $lines
+                    exitCode = [int]$res.exitCode
+                }
+            } else {
+                Write-Host "[windo] wsl --version" -ForegroundColor Cyan
+                foreach ($l in $lines) { Write-Host "  $l" -ForegroundColor DarkGray }
+            }
+            _windo_set_exit [int]$res.exitCode
+            return
+        }
+
+        if ($sub -eq "install") {
+            $distro = if ($argMap.ContainsKey('distro')) { [string]$argMap['distro'] } elseif ($argMap.ContainsKey('distribution')) { [string]$argMap['distribution'] } elseif ($argMap.ContainsKey('_args') -and $argMap._args.Count -gt 0) { [string]$argMap._args[0] } else { $null }
+            if ([string]::IsNullOrWhiteSpace($distro)) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "install"; error = "missing --distro"; exitCode = 2 } } else { Write-Host "[windo] wsl install requires --distro <name>" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $apply = $argMap.ContainsKey('apply')
+            if (-not $apply -and -not $DryRun) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "install"; error = "install requires --apply to execute"; exitCode = 2 } } else { Write-Host "[windo] install is dry-preview by default. Add --apply to execute." -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $args = @('--install', '--distribution', $distro)
+            $commandLine = "wsl " + ($args -join " ")
+            if ($DryRun -and -not $argMap.ContainsKey('dry-run')) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "install"; distribution = $distro; dryRun = $true; commandLine = $commandLine; exitCode = 0 } } else { Write-Host "[windo] DRY-RUN install: $commandLine" -ForegroundColor Yellow }
+                _windo_set_exit 0
+                return
+            }
+            if (-not (_windo_wsl_confirm -Message "Run wsl install" -CommandLine $commandLine -AutoApprove:$apply)) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "install"; distribution = $distro; cancelled = $true; exitCode = 0 } } else { Write-Host "[windo] install cancelled." -ForegroundColor DarkGray }
+                _windo_set_exit 0
+                return
+            }
+            $res = _windo_wsl_exec @($args)
+            if ($JsonOutput) { _emit_json "wsl" @{ command = "install"; distribution = $distro; apply = $true; commandLine = $commandLine; output = @($res.output); exitCode = [int]$res.exitCode } } else { if ($res.exitCode -eq 0) { Write-Host "[windo] Install requested for '$distro'." -ForegroundColor Green } else { Write-Host "[windo] install failed: $($res.output -join ""`r`n"")" -ForegroundColor Red } }
+            _windo_set_exit [int]$res.exitCode
+            return
+        }
+
+        if ($sub -eq "convert") {
+            $distro = if ($argMap.ContainsKey('distro')) { [string]$argMap['distro'] } elseif ($argMap.ContainsKey('distribution')) { [string]$argMap['distribution'] } else { $null }
+            $to = if ($argMap.ContainsKey('to')) { [string]$argMap['to'] } elseif ($argMap.ContainsKey('version')) { [string]$argMap['version'] } else { $null }
+            if ([string]::IsNullOrWhiteSpace($distro) -or [string]::IsNullOrWhiteSpace($to)) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "convert"; error = "missing --distro and --to"; exitCode = 2 } } else { Write-Host "[windo] wsl convert requires --distro <name> --to 1|2" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            if ($to -notin @("1","2")) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "convert"; error = "to must be 1 or 2"; exitCode = 2 } } else { Write-Host "[windo] --to must be 1 or 2" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $apply = $argMap.ContainsKey('apply')
+            if (-not $apply -and -not $DryRun) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "convert"; error = "convert requires --apply to execute"; exitCode = 2 } } else { Write-Host "[windo] convert is dry-preview by default. Add --apply to execute." -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $args = @('--set-version', $distro, $to)
+            $commandLine = "wsl " + ($args -join " ")
+            if ($DryRun -and -not $argMap.ContainsKey('dry-run')) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "convert"; distribution = $distro; to = $to; dryRun = $true; commandLine = $commandLine; exitCode = 0 } } else { Write-Host "[windo] DRY-RUN convert: $commandLine" -ForegroundColor Yellow }
+                _windo_set_exit 0
+                return
+            }
+            if (-not (_windo_wsl_confirm -Message "Run wsl convert" -CommandLine $commandLine -AutoApprove:$apply)) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "convert"; distribution = $distro; to = $to; cancelled = $true; exitCode = 0 } } else { Write-Host "[windo] convert cancelled." -ForegroundColor DarkGray }
+                _windo_set_exit 0
+                return
+            }
+            $res = _windo_wsl_exec @($args)
+            if ($JsonOutput) { _emit_json "wsl" @{ command = "convert"; distribution = $distro; to = $to; apply = $true; commandLine = $commandLine; output = @($res.output); exitCode = [int]$res.exitCode } } else { if ($res.exitCode -eq 0) { Write-Host "[windo] Converted '$distro' to version $to." -ForegroundColor Green } else { Write-Host "[windo] convert failed: $($res.output -join ""`r`n"")" -ForegroundColor Red } }
+            _windo_set_exit [int]$res.exitCode
+            return
+        }
+
+        if ($sub -eq "inspect") {
+            $distro = if ($argMap.ContainsKey('distro')) { [string]$argMap['distro'] } elseif ($argMap.ContainsKey('_args') -and $argMap._args.Count -gt 0) { [string]$argMap._args[0] } else { $null }
+            if ([string]::IsNullOrWhiteSpace($distro)) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "inspect"; error = "missing --distro"; exitCode = 2 } } else { Write-Host "[windo] wsl inspect requires --distro <name>" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $d = _windo_wsl_find_distro $distro
+            if (-not $d.found -or -not $d.distro) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "inspect"; distro = $distro; exists = $false; exitCode = 2 } } else { Write-Host "[windo] Unknown distro: $distro" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $uname = _windo_wsl_exec @('-d', $distro, '--exec', 'uname', '-a')
+            $os   = _windo_wsl_exec @('-d', $distro, '--exec', 'cat', '/etc/os-release')
+            $ip   = _windo_wsl_exec @('-d', $distro, '--exec', 'hostname', '-I')
+            $payload = @{
+                command = "inspect"
+                distribution = [ordered]@{
+                    name = $distro
+                    state = [string]$d.distro.state
+                    default = [bool]$d.distro.default
+                    version = [string]$d.distro.version
+                    kernel = if ($uname.exitCode -eq 0) { [string]($uname.output -join " ") } else { "" }
+                    ip = if ($ip.exitCode -eq 0) { [string]($ip.output -join " ").Trim() } else { "" }
+                }
+                osRelease = if ($os.exitCode -eq 0) { @($os.output) } else { @() }
+                exitCode = 0
+            }
+            if ($uname.exitCode -ne 0 -or $os.exitCode -ne 0 -or $ip.exitCode -ne 0) { $payload.exitCode = 2 }
+            if ($uname.exitCode -ne 0) { $payload['unameExitCode'] = [int]$uname.exitCode }
+            if ($os.exitCode -ne 0) { $payload['osReleaseExitCode'] = [int]$os.exitCode }
+            if ($ip.exitCode -ne 0) { $payload['ipExitCode'] = [int]$ip.exitCode }
+            if ($JsonOutput) { _emit_json "wsl" $payload; _windo_set_exit [int]$payload.exitCode; return }
+            Write-Host "[windo] Inspect '$distro':" -ForegroundColor Cyan
+            Write-Host ("  state: {0}" -f $payload.distribution.state) -ForegroundColor DarkGray
+            if ($payload.distribution.kernel) { Write-Host ("  kernel: {0}" -f $payload.distribution.kernel) -ForegroundColor DarkGray }
+            if ($payload.distribution.ip) { Write-Host ("  ip: {0}" -f $payload.distribution.ip) -ForegroundColor DarkGray }
+            if ($payload.osRelease.Count -gt 0) {
+                Write-Host "  os-release:" -ForegroundColor DarkGray
+                foreach ($line in @($payload.osRelease)) { Write-Host ("    {0}" -f $line) -ForegroundColor DarkGray }
+            }
+            _windo_set_exit [int]$payload.exitCode
+            return
+        }
+
+        if ($sub -eq "exec") {
+            $distro = if ($argMap.ContainsKey('distro')) { [string]$argMap['distro'] } elseif ($argMap.ContainsKey('distribution')) { [string]$argMap['distribution'] } else { $null }
+            if (-not $distro) {
+                if ($argMap.ContainsKey('_args') -and $argMap._args.Count -gt 0 -and $argMap._args[0] -notlike '--') {
+                    $distro = [string]$argMap._args[0]
+                }
+            }
+            $runIdx = $Command.IndexOf('--')
+            if ($runIdx -lt 0 -or $runIdx -ge ($Command.Count - 1)) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "exec"; error = "wsl exec requires -- and command args"; exitCode = 2 } } else { Write-Host "[windo] wsl exec requires: -- d command..." -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $payload = if ($distro) { @('-d', $distro) } else { @() }
+            $cmdArgs = $Command[($runIdx + 1)..($Command.Count - 1)]
+            $payload += @('--exec') + $cmdArgs
+            $res = _windo_wsl_exec @($payload)
+            if ($JsonOutput) { _emit_json "wsl" @{ command = "exec"; distro = $distro; command = @($cmdArgs); output = @($res.output); exitCode = [int]$res.exitCode } } else { if ($res.output.Count -gt 0) { Write-Host ($res.output -join "`r`n") } }
+            if ($res.exitCode -ne 0 -and -not $JsonOutput) { Write-Host "[windo] exec failed." -ForegroundColor Red }
+            _windo_set_exit [int]$res.exitCode
+            return
+        }
+
+        if ($sub -eq "launch") {
+            $distro = if ($argMap.ContainsKey('distro')) { [string]$argMap['distro'] } elseif ($argMap.ContainsKey('_args') -and $argMap._args.Count -gt 0) { [string]$argMap._args[0] } else { $null }
+            if ([string]::IsNullOrWhiteSpace($distro)) {
+                $d = _windo_wsl_distros
+                if (-not $d.found -and $d.defaultName) { $distro = $d.defaultName }
+            }
+            if ([string]::IsNullOrWhiteSpace($distro)) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "launch"; error = "missing distro name"; exitCode = 2 } } else { Write-Host "[windo] wsl launch requires <distro> or --distro" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $present = _windo_wsl_find_distro $distro
+            if (-not $present.found -or -not $present.distro) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "launch"; distro = $distro; error = "distro not found"; exitCode = 2 } } else { Write-Host "[windo] Unknown distro: $distro" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $user = if ($argMap.ContainsKey('user')) { [string]$argMap['user'] } else { $null }
+            $commandText = if ($argMap.ContainsKey('command')) { [string]$argMap['command'] } else { $null }
+            if (-not $commandText -and $argMap.ContainsKey('_args') -and $argMap._args.Count -gt 1) {
+                $commandText = [string]($argMap._args[1..($argMap._args.Count - 1)] -join " ")
+            }
+            $runArgs = @('-d', $distro)
+            if ($user) { [void]$runArgs.Add("--user"); [void]$runArgs.Add($user) }
+            if ($commandText) { [void]$runArgs.Add("--exec"); $runArgs += @($commandText) }
+            if ($DryRun -and -not $argMap.ContainsKey('dry-run')) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "launch"; distro = $distro; args = @($runArgs); dryRun = $true; commandLine = "wsl " + ($runArgs -join " "); exitCode = 0 } } else { Write-Host "[windo] DRY-RUN launch command: wsl " + ($runArgs -join " "); Write-Host "  Add --apply to execute launch." -ForegroundColor DarkGray }
+                _windo_set_exit 0
+                return
+            }
+            $full = @("wsl") + @($runArgs)
+            try {
+                if ($JsonOutput) {
+                    if ($commandText) {
+                        $res = _windo_wsl_exec @($runArgs)
+                        _emit_json "wsl" @{ command = "launch"; distro = $distro; command = @($runArgs); output = @($res.output); exitCode = [int]$res.exitCode }
+                        _windo_set_exit [int]$res.exitCode
+                        return
+                    }
+                    $p = Start-Process -FilePath $wslExe.Source -ArgumentList $runArgs -PassThru -ErrorAction Stop
+                    _emit_json "wsl" @{ command = "launch"; distro = $distro; processId = [int]$p.Id; commandLine = ($full -join " "); dryRun = $false; exitCode = 0 }
+                    _windo_set_exit 0
+                    return
+                }
+                if ($commandText) {
+                    $res = _windo_wsl_exec @($runArgs)
+                    if ($res.exitCode -eq 0 -and $res.output.Count -gt 0) { Write-Host ($res.output -join "`r`n") } else { if ($res.output.Count -gt 0) { Write-Host ($res.output -join "`r`n") } }
+                    _windo_set_exit [int]$res.exitCode
+                } else {
+                    $p = Start-Process -FilePath $wslExe.Source -ArgumentList $runArgs -PassThru -ErrorAction Stop
+                    Write-Host "[windo] wsl launch started: pid=$($p.Id), distro=$distro" -ForegroundColor Green
+                    _windo_set_exit 0
+                }
+            } catch {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "launch"; distro = $distro; error = $_.Exception.Message; exitCode = 1 } } else { Write-Host "[windo] launch failed: $($_.Exception.Message)" -ForegroundColor Red }
+                _windo_set_exit 1
+            }
+            return
+        }
+
+        if ($sub -eq "path") {
+            $direction = if ($argMap.ContainsKey('_args') -and $argMap._args.Count -gt 0) { [string]$argMap._args[0].ToLowerInvariant() } else { $null }
+            $targetPath = if ($argMap.ContainsKey('path')) { [string]$argMap['path'] } elseif ($argMap.ContainsKey('_args') -and $argMap._args.Count -gt 1) { [string]$argMap._args[1] } else { $null }
+            $distro = if ($argMap.ContainsKey('distro')) { [string]$argMap['distro'] } else { $null }
+            if ($direction -notin @("to-wsl","to-win")) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "path"; error = "expected to-wsl or to-win"; exitCode = 2 } } else { Write-Host "[windo] wsl path requires 'to-wsl' or 'to-win'." -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            if ([string]::IsNullOrWhiteSpace($targetPath)) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "path"; direction = $direction; error = "missing path"; exitCode = 2 } } else { Write-Host "[windo] wsl path $direction requires --path <value>" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $convert = if ($direction -eq "to-wsl") { "-u" } else { "-w" }
+            $toolArgs = @()
+            if ($distro) { $toolArgs += @('-d', $distro) }
+            $toolArgs += @('--exec','wslpath',$convert,$targetPath)
+            if ($DryRun -and -not $argMap.ContainsKey('dry-run')) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "path"; direction = $direction; path = $targetPath; distro = $distro; converted = $null; dryRun = $true; command = "wsl " + ($toolArgs -join " "); exitCode = 0 } } else { Write-Host "[windo] DRY-RUN path convert command: wsl " + ($toolArgs -join " ") }
+                _windo_set_exit 0
+                return
+            }
+            $res = _windo_wsl_exec @($toolArgs)
+            if ($res.exitCode -ne 0) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "path"; direction = $direction; path = $targetPath; distro = $distro; error = "path conversion failed"; output = @($res.output); exitCode = [int]$res.exitCode } } else { Write-Host "[windo] wslpath failed: $($res.output -join "`r`n")" -ForegroundColor Red }
+                _windo_set_exit [int]$res.exitCode
+                return
+            }
+            $converted = if ($res.output.Count -gt 0) { [string]$res.output[0] } else { "" }
+            if ($JsonOutput) { _emit_json "wsl" @{ command = "path"; direction = $direction; path = $targetPath; distro = $distro; converted = $converted; exitCode = 0 } }
+            else { Write-Host ("[windo] {0} -> {1}" -f $targetPath, $converted) -ForegroundColor Cyan }
+            _windo_set_exit 0
+            return
+        }
+
+        if ($sub -eq "import") {
+            $name = if ($argMap.ContainsKey('name')) { [string]$argMap['name'] } elseif ($argMap.ContainsKey('distro')) { [string]$argMap['distro'] } else { $null }
+            $tar  = if ($argMap.ContainsKey('tar')) { [string]$argMap['tar'] } else { $null }
+            $path = if ($argMap.ContainsKey('path')) { [string]$argMap['path'] } else { $null }
+            $ver  = if ($argMap.ContainsKey('version')) { [string]$argMap['version'] } else { "2" }
+            if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($tar) -or [string]::IsNullOrWhiteSpace($path)) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "import"; error = "missing --name, --tar, or --path"; exitCode = 2 } } else { Write-Host "[windo] wsl import requires --name <distro> --tar <source> --path <target>" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $check = _windo_parse_kv -Tokens $Command -Start 2
+            $apply = $check.ContainsKey('apply')
+            if (-not $apply -and -not $DryRun) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "import"; error = "--apply is required for execution"; exitCode = 2 } } else { Write-Host "[windo] import is preview-only by default. Add --apply to run." -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $pre = @{}
+            $pre.command = "import"
+            $pre.distribution = $name
+            $pre.tar = $tar
+            $pre.path = $path
+            $pre.version = $ver
+            if ($argMap.ContainsKey('_args')) { $pre.notes = @($argMap._args) }
+            $args = @('--import', $name, $path, $tar, '--version', $ver)
+            if ($DryRun -and -not $argMap.ContainsKey('dry-run')) { if ($JsonOutput) { $pre.dryRun = $true; $pre.commandLine = "wsl " + ($args -join " "); _emit_json "wsl" $pre } else { Write-Host "[windo] DRY-RUN import: wsl " + ($args -join " "); Write-Host "  Add --apply to execute." -ForegroundColor DarkGray }; _windo_set_exit 0; return }
+            $commandLine = "wsl " + ($args -join " ")
+            $apply = $argMap.ContainsKey('apply')
+            if (-not (_windo_wsl_confirm -Message "Run wsl import" -CommandLine $commandLine -AutoApprove:$apply)) {
+                if ($JsonOutput) { $pre.cancelled = $true; $pre.exitCode = 0; _emit_json "wsl" $pre } else { Write-Host "[windo] import cancelled." -ForegroundColor DarkGray }
+                _windo_set_exit 0
+                return
+            }
+            $res = _windo_wsl_exec @($args)
+            if ($JsonOutput) { _emit_json "wsl" @{ command = "import"; distribution = $name; version = $ver; apply = $true; exitCode = [int]$res.exitCode; output = @($res.output) } } else { if ($res.exitCode -eq 0) { Write-Host "[windo] Import command completed for '$name'." -ForegroundColor Green } else { Write-Host "[windo] Import failed: $($res.output -join "`r`n")" -ForegroundColor Red } }
+            _windo_set_exit [int]$res.exitCode
+            return
+        }
+
+        if ($sub -eq "export") {
+            $name = if ($argMap.ContainsKey('name')) { [string]$argMap['name'] } elseif ($argMap.ContainsKey('distro')) { [string]$argMap['distro'] } else { $null }
+            $out  = if ($argMap.ContainsKey('out')) { [string]$argMap['out'] } elseif ($argMap.ContainsKey('output')) { [string]$argMap['output'] } else { $null }
+            if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($out)) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "export"; error = "missing --name or --out"; exitCode = 2 } } else { Write-Host "[windo] wsl export requires --name <distro> --out <tar>" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $existing = _windo_wsl_find_distro $name
+            if (-not $existing.found -or -not $existing.distro) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "export"; distribution = $name; exists = $false; exitCode = 2 } } else { Write-Host "[windo] Unknown distro: $name" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $overwrite = $argMap.ContainsKey('overwrite')
+            if ((Test-Path -LiteralPath $out) -and -not $overwrite) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "export"; distribution = $name; out = $out; error = "output exists; add --overwrite"; exitCode = 2 } } else { Write-Host "[windo] Output exists and --overwrite was not used: $out" -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $apply = $argMap.ContainsKey('apply')
+            if (-not $apply -and -not $DryRun) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "export"; error = "--apply is required for execution"; exitCode = 2 } } else { Write-Host "[windo] export is preview-only by default. Add --apply to run." -ForegroundColor Yellow }
+                _windo_set_exit 2
+                return
+            }
+            $args = @('--export', $name, $out)
+            if ($DryRun -and -not $argMap.ContainsKey('dry-run')) { if ($JsonOutput) { _emit_json "wsl" @{ command = "export"; distribution = $name; out = $out; dryRun = $true; commandLine = "wsl " + ($args -join " "); exitCode = 0 } } else { Write-Host "[windo] DRY-RUN export: wsl " + ($args -join " "); Write-Host "  Add --apply to execute." -ForegroundColor DarkGray }; _windo_set_exit 0; return }
+            $commandLine = "wsl " + ($args -join " ")
+            $apply = $argMap.ContainsKey('apply')
+            if (-not (_windo_wsl_confirm -Message "Run wsl export" -CommandLine $commandLine -AutoApprove:$apply)) {
+                if ($JsonOutput) { _emit_json "wsl" @{ command = "export"; distribution = $name; out = $out; cancelled = $true; exitCode = 0 } } else { Write-Host "[windo] export cancelled." -ForegroundColor DarkGray }
+                _windo_set_exit 0
+                return
+            }
+            $res = _windo_wsl_exec @($args)
+            if ($JsonOutput) { _emit_json "wsl" @{ command = "export"; distribution = $name; out = $out; apply = $true; exitCode = [int]$res.exitCode; output = @($res.output) } } else { if ($res.exitCode -eq 0) { Write-Host "[windo] Export completed: $out" -ForegroundColor Green } else { Write-Host "[windo] Export failed: $($res.output -join "`r`n")" -ForegroundColor Red } }
+            _windo_set_exit [int]$res.exitCode
+            return
+        }
+
+            if ($JsonOutput) { _emit_json "wsl" @{ command = "wsl"; error = "unknown subcommand '$sub'"; exitCode = 2 } }
+        else { Write-Host "[windo] wsl: expected status|list|check|version|install|convert|inspect|exec|launch|path|import|export" -ForegroundColor Yellow }
+        _windo_set_exit 2
+    }
+
     if ($Command.Count -ge 1 -and $Command[0] -eq "recipes" -and -not ($Command.Count -ge 2 -and $Command[1] -ieq "run")) {
         $sub = "list"
         if ($Command.Count -ge 2) { $sub = [string]$Command[1].Trim().ToLowerInvariant() }
@@ -8499,7 +11561,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 background = "#1e1e1e"
                 leading_diamond = " "
                 trailing_diamond = ""
-                template = " WINDO {{ if .Env.WINDO_VERSION }}v{{ .Env.WINDO_VERSION }}{{ end }}{{ if .Env.WINDO_LAST_REQUEST_ID }} · {{ .Env.WINDO_LAST_REQUEST_ID }}{{ end }} "
+                template = " WINDO {{ if .Env.WINDO_VERSION }}v{{ .Env.WINDO_VERSION }}{{ end }}{{ if .Env.WINDO_LAST_REQUEST_ID }} Â· {{ .Env.WINDO_LAST_REQUEST_ID }}{{ end }} "
             }
             exitCode = 0
         }
@@ -8674,7 +11736,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
 }
 "@
         $lp = @"
-# WINDO module $mid — loaded after WINDO core (non-fatal on error)
+# WINDO module $mid â€” loaded after WINDO core (non-fatal on error)
 `$WindoModuleId = '$mid'
 Write-Host "[WINDO module $mid] loaded." -ForegroundColor DarkGray
 "@
@@ -9033,7 +12095,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
                 $brandImg = "<img class='brand' alt='WINDO' src='$(_html_escape ([uri]$brandLogoPath).AbsoluteUri)'>"
             }
             $markImg = _windo_html_img ([string]$assets.avatar) "mark" "WINDO"
-            $null = $sb.AppendLine(("<div class='hero'><div>{0}<div class='title'>WINDO Launchpad</div><div class='sub'>Exodus Limited Edition command center generated {1}. Local-only; command text may be sensitive.</div></div><div>{2}</div></div>" -f $brandImg, (_html_escape (Get-Date -Format "yyyy-MM-dd HH:mm:ss")), $markImg))
+            $null = $sb.AppendLine(("<div class='hero'><div>{0}<div class='title'>WINDO Launchpad</div><div class='sub'>WINDO Command Center launchpad generated {1}. Local-only; command text may be sensitive.</div></div><div>{2}</div></div>" -f $brandImg, (_html_escape (Get-Date -Format "yyyy-MM-dd HH:mm:ss")), $markImg))
             $cls = $status.ToLowerInvariant()
             $null = $sb.AppendLine(("<div class='grid'><div class='card'><div class='k'>Status</div><div class='v {0}'>{1}</div></div><div class='card'><div class='k'>Score</div><div class='v'>{2}/100</div></div><div class='card'><div class='k'>Checks</div><div class='v'>{3}</div><div class='muted'>{4} need attention</div></div></div>" -f $cls, $status, [int]$score, $checks.Count, $failed.Count))
             $null = $sb.AppendLine("<div class='section'><h2>Quick actions</h2><div class='card'>")
@@ -9132,14 +12194,14 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             exitCode = $(if ($sub -eq "status") { 0 } else { $exitPayload })
         }
         if ($JsonOutput) { _emit_json "ai" $pl } else {
-            Write-Host "[windo] ai $sub — AI / local env names only (values never shown)" -ForegroundColor Cyan
+            Write-Host "[windo] ai $sub â€” AI / local env names only (values never shown)" -ForegroundColor Cyan
             Write-Host "  Elevated         : $($snap.elevated)" -ForegroundColor DarkGray
             Write-Host "  Ollama (set)     : $(if ($snap.ollamaSetNames.Count) { $snap.ollamaSetNames -join ', ' } else { '(none)' })" -ForegroundColor DarkGray
             Write-Host "  Process (set)    : $(if ($snap.processSetNames.Count) { $snap.processSetNames -join ', ' } else { '(none)' })"
             Write-Host "  User scope (set) : $(if ($snap.userSetNames.Count) { $snap.userSetNames -join ', ' } else { '(none)' })"
             Write-Host "  Machine (set)    : $(if ($snap.machineSetNames.Count) { $snap.machineSetNames -join ', ' } else { '(none)' })"
             foreach ($iss in $issues) { Write-Host "  ! $iss" -ForegroundColor Yellow }
-            if ($sub -eq "doctor") { foreach ($r in $rec) { Write-Host "  → $r" -ForegroundColor DarkGray } }
+            if ($sub -eq "doctor") { foreach ($r in $rec) { Write-Host "  â†’ $r" -ForegroundColor DarkGray } }
         }
         _windo_set_exit $(if ($sub -eq "status") { 0 } else { $exitPayload })
         return
@@ -9161,8 +12223,8 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
         }
         $pol = $res.policy
         $hints = @(
-            "Open a new terminal or run:  . `$PROFILE  — so your profile block matches prefs.",
-            "From a normal (non-elevated) window:  windo install-latest  — refreshes the embedded profile from Exodus when you are behind."
+            "Open a new terminal or run:  . `$PROFILE  â€” so your profile block matches prefs.",
+            "From a normal (non-elevated) window:  windo install-latest  â€” refreshes the embedded profile from v6 when you are behind."
         )
         if ($JsonOutput) {
             _emit_json "repair" @{
@@ -9175,9 +12237,9 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
                 exitCode = 0
             }
         } else {
-            Write-Host "[windo] repair ($sub): keybindings safe-reset — legacy WINDO chords cleared this session; prefix preference Alt+w." -ForegroundColor Green
+            Write-Host "[windo] repair ($sub): keybindings safe-reset â€” legacy WINDO chords cleared this session; prefix preference Alt+w." -ForegroundColor Green
             Write-Host "  Effective: $(if ($pol.enabled) { $pol.chord } else { '(disabled)' }) (source=$($pol.chordSource))" -ForegroundColor DarkGray
-            foreach ($h in $hints) { Write-Host "  → $h" -ForegroundColor DarkGray }
+            foreach ($h in $hints) { Write-Host "  â†’ $h" -ForegroundColor DarkGray }
         }
         _windo_set_exit 0
         return
@@ -9215,7 +12277,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
                     exitCode = 0
                 }
             } else {
-                Write-Host "[windo] keybindings doctor (advisory — heuristic only)" -ForegroundColor Cyan
+                Write-Host "[windo] keybindings doctor (advisory â€” heuristic only)" -ForegroundColor Cyan
                 foreach ($c in $checks) {
                     $st = if ($c.looksLikeWindoBinding) { 'ok' } else { 'review' }
                     Write-Host "  [$st] $($c.role) $($c.chord)" -ForegroundColor $(if ($c.looksLikeWindoBinding) { 'Green' } else { 'Yellow' })
@@ -9859,6 +12921,8 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             if (Test-Path $UpdateLast) { $before = (Get-Item $UpdateLast).LastWriteTime }
             Start-ScheduledTask -TaskName $TaskUpdate | Out-Null
             $sw = [Diagnostics.Stopwatch]::StartNew()
+            $selfUpdateMotionProfile = _windo_resolve_motion_profile_name -Context "self-update" -RequestedProfile "standard"
+            $selfUpdateFrameDelay = _windo_motion_interval_ms $selfUpdateMotionProfile
             $suFrame = 0
             $suLabel = "[windo] Self-update running..."
             while ($sw.Elapsed.TotalSeconds -lt 10) {
@@ -9867,9 +12931,9 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
                     $content = Get-Content -Raw -Path $UpdateLast -ErrorAction SilentlyContinue
                     if (($before -eq $null -or $current -gt $before) -and $content -match 'SELF-UPDATE END') { break }
                 }
-                _windo_spinner_line $suLabel $suFrame
+                _windo_spinner_line $suLabel $suFrame $selfUpdateMotionProfile
                 $suFrame = ($suFrame + 1) % 4
-                Start-Sleep -Milliseconds 200
+                Start-Sleep -Milliseconds $selfUpdateFrameDelay
             }
             if (_windo_spinner_enabled) { _windo_clear_spinner_line ($suLabel.Length + 4) }
             Write-Host "[windo] Self-update triggered." -ForegroundColor Green
@@ -10180,6 +13244,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
 
     $cmdLine = ($Command -join " ").Trim()
     $cmdErr = _windo_validate_elevated_command $cmdLine
+    $motionPlan = _windo_new_command_plan $Command
     if ($cmdErr) {
         Write-Host "[windo] $cmdErr" -ForegroundColor Red
         return
@@ -10227,13 +13292,15 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
 
     $sw = [Diagnostics.Stopwatch]::StartNew()
     Start-ScheduledTask -TaskName $TaskName | Out-Null
+    $dispatchProfile = _windo_resolve_motion_profile_name -Plan $motionPlan -Context "dispatch" -RequestedProfile $motionPlan.motionProfileHint
+    $dispatchDelay = _windo_motion_interval_ms $dispatchProfile
 
     $waitFrame = 0
     $waitLabel = "[windo] Waiting for elevated result..."
     while (!(Test-Path $outPath) -and $sw.Elapsed.TotalSeconds -lt 20) {
-        _windo_spinner_line $waitLabel $waitFrame
+        _windo_spinner_line $waitLabel $waitFrame $dispatchProfile
         $waitFrame = ($waitFrame + 1) % 4
-        Start-Sleep -Milliseconds 100
+        Start-Sleep -Milliseconds $dispatchDelay
     }
     if (_windo_spinner_enabled) { _windo_clear_spinner_line ($waitLabel.Length + 4) }
 
@@ -10495,7 +13562,7 @@ function __windo_resolve_completion_mode {
 
 function __windo_completion_specs {
     @{
-        help = @('version','install-latest','source','trust','scan','vault','sshx','crypto','explain','syntax','mesh','completion','output','motion','surface','integrate','control','signal','center','studio','edition','keybindings','recipes','venv','pkg','launchpad','preflight','dashboard','integrity','verify','config','profile','modules','extras','ai','repair')
+        help = @('version','install-latest','source','trust','scan','net-scan','rdp','vnc','vault','sshx','crypto','explain','syntax','mesh','completion','output','motion','surface','integrate','control','signal','center','studio','edition','keybindings','recipes','venv','pkg','container','wsl','launchpad','preflight','dashboard','integrity','verify','config','profile','modules','extras','ai','repair')
         completion = @('status','doctor','repair','native-first','hybrid','windo','off','reset','--json')
         output = @('status','compact','quiet','legacy','reset','--json')
         motion = @('status','auto','on','quiet','off','reset','pulse','demo','--json')
@@ -10508,6 +13575,9 @@ function __windo_completion_specs {
         edition = @('status','open','html','export','pulse','--open','--output','--json')
         trust = @('--online','--offline','--json')
         scan = @('--recurse','--max-mb','--no-hash','--json')
+        'net-scan' = @('status','resolve','arp','ping','probe','nmap','rdp','vnc','wsl','--interface','--include-stale','--timeout','--host-limit','--ports','--json')
+        rdp = @('status','firewall','config','troubleshoot','--enable','--disable','--nla','--security-layer','--restart','--host','--ports','--timeout','--credential','--json')
+        vnc = @('status','firewall','stop','test','troubleshoot','--ports','--host','--timeout','--credential','--json')
         vault = @('status','list','set','get','remove','--json')
         sshx = @('status','keygen','config','test','--name','--comment','--json')
         crypto = @('status','cert','key','hash','--json')
@@ -10519,6 +13589,8 @@ function __windo_completion_specs {
         recipes = @('list','show','preview','run','--json','--dry-run','arp-cache','audit-policy','bitlocker-status','boot-config','cert-my-store','cert-root-store','defender-preferences','defender-status','disk-free','dns-client-cache','driverquery','driverquery-signed','environment-os','firewall-current-profile','firewall-profiles','fsutil-drives','fsutil-trim','gpresult-summary','hostname','ipconfig-all','ipconfig-brief','local-admins','local-groups','local-users','net-accounts','net-sessions','net-shares','net-use','netstat-ports','network-adapters','network-dns-servers','network-ip-config','network-ipv6-interfaces','network-routes','network-wifi','ollama-list','ollama-ps','ollama-version','os-build','os-version','physical-disks','pnputil-drivers','power-availability','power-device-wake','power-lastwake','power-requests','processes-services','processes-verbose','recovery-info','scheduled-tasks','scheduled-tasks-verbose','service-bits-config','service-bits-query','service-spooler-query','service-winrm-query','services-all','services-drivers','shares-open-files','systeminfo','time-configuration','time-peers','time-status','tool-docker-version','tool-git-version','tool-node-version','tool-powershell-path','tool-python-version','tool-winget-version','uptime','volumes','whoami-all','whoami-groups','whoami-privileges','winhttp-proxy','winrm-config','windows-update-services')
         venv = @('status','create','activate','deactivate','remove','--python','--force','--json')
         pkg = @('status','winget','choco','scoop','install','upgrade','list','search','--json')
+        container = @('ps','images','status','logs','restart','start','stop','rmi','rm','pull','--runtime','auto','docker','podman','--json','--dry-run')
+        wsl = @('status','list','ls','check','install','version','convert','inspect','exec','launch','path','import','export','--distro','--distribution','--name','--path','--tar','--out','--output','--version','--to','--user','--command','--to-wsl','--to-win','--json','--dry-run','--apply','--overwrite')
         launchpad = @('--json','--html','--open','--tray','--output')
         dashboard = @('--json','--html','--open','--output','-o')
         preflight = @('--json')
@@ -10645,7 +13717,7 @@ Register-WindoArgumentCompleter
 $WindoCompleterBlock = $WindoCompleterBlock.Replace("__WINDO_BUILTIN_ARRAY__", $WindoBuiltinVerbsArrayLiteral)
 
 $WindoModulesLoaderBlock = @'
-# WINDO optional modules loader (enabled in %USERPROFILE%\.pwsh_secure\windo_prefs.json → enabledModules)
+# WINDO optional modules loader (enabled in %USERPROFILE%\.pwsh_secure\windo_prefs.json â†’ enabledModules)
 $__wmRoot = Join-Path $HOME 'Documents\windo\modules'
 $__wmPrefs = Join-Path $HOME '.pwsh_secure\windo_prefs.json'
 $__wmEnabled = [string[]]@()
@@ -10716,7 +13788,7 @@ if (-not [string]::IsNullOrWhiteSpace($installerSource) -and (Test-Path -Literal
 Write-WindoInstallStep -Status ok -Label "Snapshot refreshed" -Color Green
 
 Write-Host ""
-Write-WindoInstallStep -Status ok -Label "WINDO v$WindoVersion Special Edition installed" -Detail "snapshot: $SnapshotDir" -Color Green
+Write-WindoInstallStep -Status ok -Label "WINDO v$WindoVersion installed" -Detail "snapshot: $SnapshotDir" -Color Green
 Write-Host ""
 Write-Host "  Next in a normal shell:" -ForegroundColor Yellow
 Write-Host "    . `$PROFILE" -ForegroundColor Yellow
@@ -10724,3 +13796,4 @@ Write-Host "    windo preflight" -ForegroundColor Yellow
 Write-Host "    windo dashboard --html" -ForegroundColor Yellow
 Write-Host "    windo version" -ForegroundColor Yellow
 Write-Host ""
+

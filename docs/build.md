@@ -33,9 +33,9 @@ To reduce monolithic edit risk without changing the install contract:
 
 No build step is required for end users.
 
-## Branch `Exodus`, checksums, and embedded runner
+## Branch `v6`, checksums, and embedded runner
 
-- **Canonical raw URLs** for bootstrap and `windo upgrade` use the repository branch named **`Exodus`**.
+- **Canonical raw URLs** for bootstrap and `windo upgrade` use the repository branch named **`v6`**.
 - After changing **`windo_install.ps1`**, update **[`checksums/installer.sha256`](../checksums/installer.sha256)** with the **published** installer SHA256 (uppercase hex, one line). Use the helper so Windows checkout line endings do not produce a stale hash:
   `./tools/Sync-InstallerChecksum.ps1`
 - **v3.2.7+:** **`bootstrap.ps1`** and **`_windo_verify_installer_sha256_optional`** compare the downloaded installer’s hash to the **first 64 hex** characters found in the fetched checksum file (so BOM, extra whitespace, or `sha256sum`-style lines still verify). The canonical file remains a single 64-character uppercase line.
@@ -51,7 +51,7 @@ After you bump **`$WindoVersion`** in **`windo_install.ps1`** and refresh **[`ch
 ./tools/Sync-VersionSnapshot.ps1 -Version 3.2.3
 ```
 
-This writes **`versions/v3.2.3/`** (example) with the installer, checksum, top-level **`README.md`**, **`SECURITY.md`**, **`CHANGELOG.md`**, **`docs/*.md`** (including **`json-schema.md`**, **`build.md`**, **`modules-and-extras.md`**, **`framework-wave.md`**, **`ai-bridge.md`**, **`v5-roadmap.md`**), **`brand/Enterprise/`**, and **`extras/`** (including **`samples/hello`**). Use it before publishing a release so the repo carries a point-in-time copy alongside **`Exodus`** raw URLs.
+This writes **`versions/v3.2.3/`** (example) with the installer, checksum, top-level **`README.md`**, **`SECURITY.md`**, **`CHANGELOG.md`**, **`docs/*.md`** (including **`json-schema.md`**, **`build.md`**, **`modules-and-extras.md`**, **`framework-wave.md`**, **`ai-bridge.md`**, **`v5-roadmap.md`**), **`brand/Enterprise/`**, and **`extras/`** (including **`samples/hello`**). Use it before publishing a release so the repo carries a point-in-time copy alongside **`v6`** raw URLs.
 
 ## JSON CLI schema
 

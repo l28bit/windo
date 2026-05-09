@@ -19,6 +19,13 @@ function Assert-Equal($a, $b, $msg) {
     }
 }
 
+function Assert-Pattern([string]$Text, [string]$Pattern, [string]$msg) {
+    if (-not [regex]::IsMatch($Text, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+        Write-Host "FAIL: $msg  (pattern not found: '$Pattern')" -ForegroundColor Red
+        $script:failed++
+    }
+}
+
 Assert-Equal (Get-WindoIntegrityComponentLevel "a" "a") "OK" "exact match"
 Assert-Equal (Get-WindoIntegrityComponentLevel "(missing)" "abc") "UNKNOWN" "missing file"
 Assert-Equal (Get-WindoIntegrityComponentLevel "(hash-error)" "abc") "UNKNOWN" "hash error"
@@ -57,17 +64,18 @@ $installerSource = Get-Content -Path (Join-Path $root "windo_install.ps1") -Raw
 $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
 $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
+$moduleSource = Get-Content -Path (Join-Path $root "extras\samples\network-ops\Load.ps1") -Raw
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "5.4.1"') -eq $true) $true "installer version is 5.4.1"
-Assert-Equal ($bootstrapSource.Contains("WINDO 5.4.1 Limited Edition bootstrap") -eq $true) $true "bootstrap banner is current"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "6.0.0"') -eq $true) $true "installer version is 6.0.0"
+Assert-Equal ($bootstrapSource.Contains("WINDO 6.0.0 V6 bootstrap") -eq $true) $true "bootstrap banner is current"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
-Assert-Equal ($bootstrapSource.Contains("contents/windo_install.ps1?ref=Exodus") -eq $true) $true "bootstrap knows GitHub Contents API installer URL"
-Assert-Equal ($bootstrapSource.Contains('$Repo = "https://raw.githubusercontent.com/l28bit/windo/Exodus/windo_install.ps1"') -eq $false) $true "bootstrap no longer hardcodes raw installer as primary source"
+Assert-Equal ($bootstrapSource.Contains("contents/windo_install.ps1?ref=v6") -eq $true) $true "bootstrap knows GitHub Contents API installer URL"
+Assert-Equal ($bootstrapSource.Contains('$Repo = "https://raw.githubusercontent.com/l28bit/windo/v6/windo_install.ps1"') -eq $false) $true "bootstrap no longer hardcodes raw installer as primary source"
 Assert-Equal (($installerSource -match "function _windo_normalize_published_installer_sha256") -eq $true) $true "installer normalizes published installer sha256"
 Assert-Equal (($installerSource -match "function _windo_get_published_installer_sha256") -eq $true) $true "installer resolves published checksum with API/raw fallback"
 Assert-Equal (($installerSource -match "function _windo_get_published_installer_text") -eq $true) $true "installer resolves published installer with API/raw fallback"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "source")') -eq $true) $true "installer handles source command"
-Assert-Equal ($installerSource.Contains("api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=Exodus") -eq $true) $true "installer uses GitHub Contents API for checksum lookup"
+Assert-Equal ($installerSource.Contains("api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=v6") -eq $true) $true "installer uses GitHub Contents API for checksum lookup"
 Assert-Equal (($bootstrapSource -match '\[A-Fa-f0-9\]\{64\}') -eq $true) $true "bootstrap uses 64-hex regex for published checksum"
 Assert-Equal ($bootstrapSource.Contains("Get-WindoBootstrapPublishedChecksum") -eq $true) $true "bootstrap uses API/raw checksum resolver"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "repair")') -eq $true) $true "installer handles repair command"
@@ -79,7 +87,17 @@ Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[
 Assert-Equal (($installerSource -match "function _windo_resolve_output_policy") -eq $true) $true "installer resolves output policy"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "output")') -eq $true) $true "installer handles output command"
 Assert-Equal (($installerSource -match "function _windo_resolve_motion_policy") -eq $true) $true "installer resolves motion policy"
-Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "motion")') -eq $true) $true "installer handles motion command"
+Assert-Pattern $installerSource 'if \(\$Command\.Count -ge 1 -and \$Command\[0\] -eq "motion"\)' "installer handles motion command"
+Assert-Pattern $installerSource 'if \(\$Command\.Count -ge 1 -and \$Command\[0\] -eq "container"\)' "installer handles container command"
+Assert-Pattern $installerSource 'if \(\$Command\.Count -ge 1 -and \$Command\[0\] -eq "net-scan"\)' "installer handles net-scan command"
+Assert-Pattern $installerSource 'if \(\$Command\.Count -ge 1 -and \$Command\[0\] -eq "rdp"\)' "installer handles rdp command"
+Assert-Pattern $installerSource 'if \(\$Command\.Count -ge 1 -and \$Command\[0\] -eq "wsl"\)' "installer handles wsl command"
+Assert-Pattern $installerSource 'if \(\$sub -eq "version"\)' "wsl command includes version subcommand"
+Assert-Pattern $installerSource 'if \(\$sub -eq "convert"\)' "wsl command includes convert subcommand"
+Assert-Pattern $installerSource 'if \(\$sub -eq "inspect"\)' "wsl command includes inspect subcommand"
+Assert-Pattern $installerSource 'if \(\$sub -eq "exec"\)' "wsl command includes exec subcommand"
+Assert-Pattern $installerSource '--distribution' "wsl parse includes --distribution alias"
+Assert-Pattern $installerSource 'if \(\$key -eq ''--distro'' -or \$key -eq ''--distribution'' -or \$key -eq ''--name'' -or \$key -eq ''--tar'' -or \$key -eq ''--path'' -or \$key -eq ''--out'' -or \$key -eq ''--output'' -or \$key -eq ''--user'' -or \$key -eq ''--version'' -or \$key -eq ''--to'' -or \$key -eq ''--command''\)' "parse supports distro, distribution, to, and command flags"
 Assert-Equal (($installerSource -match "function _windo_surface_state") -eq $true) $true "installer defines native surface state command payload"
 Assert-Equal (($installerSource -match "function _windo_surface_panel_script_text") -eq $true) $true "installer defines native surface panel script"
 Assert-Equal (($installerSource -match "function _windo_start_surface_panel") -eq $true) $true "installer starts native surface panel"
@@ -98,7 +116,7 @@ Assert-Equal (($installerSource -match "function _windo_control_action_catalog")
 Assert-Equal (($installerSource -match "function _windo_control_execute_next") -eq $true) $true "installer defines control queue executor"
 Assert-Equal (($installerSource -match "function _windo_signal_state") -eq $true) $true "installer defines Signal Deck state"
 Assert-Equal (($installerSource -match "function _windo_center_state") -eq $true) $true "installer defines Command Center state"
-Assert-Equal (($installerSource -match "function _windo_edition_state") -eq $true) $true "installer defines Limited Edition state"
+Assert-Equal (($installerSource -match "function _windo_edition_state") -eq $true) $true "installer defines edition state"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "control")') -eq $true) $true "installer handles control command"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "signal")') -eq $true) $true "installer handles signal command"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "center")') -eq $true) $true "installer handles center command"
@@ -122,7 +140,7 @@ Assert-Equal ($installerSource.Contains("Power Studio") -eq $true) $true "tray l
 Assert-Equal ($installerSource.Contains("Repair Integration") -eq $true) $true "tray and studio expose integration repair"
 Assert-Equal (($installerSource -match "function _windo_profile_prompt_issues") -eq $true) $true "installer detects prompt profile issues"
 Assert-Equal (($installerSource -match "function _windo_repair_profile_prompt_init") -eq $true) $true "installer repairs guarded prompt init"
-Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "scan")') -eq $true) $true "installer handles scan command"
+Assert-Pattern $installerSource 'if \(\$Command\.Count -ge 1 -and \$Command\[0\] -eq "scan"\)' "installer handles scan command"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "vault")') -eq $true) $true "installer handles vault command"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "sshx")') -eq $true) $true "installer handles sshx command"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "crypto")') -eq $true) $true "installer handles crypto command"
@@ -158,6 +176,56 @@ Assert-Equal ($installerSource.Contains("windo explain <command...>") -eq $true)
 Assert-Equal ($installerSource.Contains("checksumValidation") -eq $true) $true "explain payload includes checksum posture"
 Assert-Equal ($installerSource.Contains("function __windo_resolve_completion_mode") -eq $true) $true "profile completer resolves completion mode"
 Assert-Equal ($installerSource.Contains("function __windo_completion_specs") -eq $true) $true "profile completer has command-specific syntax specs"
+Assert-Pattern ($installerSource) '\$WindoBuiltinVerbs\s*=\s*@\([\s\S]*?\)' "installer defines static builtin verb array"
+$builtinVerbMatch = [regex]::Match($installerSource, '\$WindoBuiltinVerbs\s*=\s*@\((?<body>[\s\S]*?)\)', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+Assert-Equal ($builtinVerbMatch.Success) $true "installer parses builtin verb array block"
+if ($builtinVerbMatch.Success) {
+    $builtinVerbsRaw = $builtinVerbMatch.Groups["body"].Value
+    Assert-Pattern $builtinVerbsRaw "'net-scan'" "builtin verbs include net-scan"
+    Assert-Pattern $builtinVerbsRaw "'container'" "builtin verbs include container"
+    Assert-Pattern $builtinVerbsRaw "'rdp'" "builtin verbs include rdp"
+    Assert-Pattern $builtinVerbsRaw "'wsl'" "builtin verbs include wsl"
+}
+$helpTopicsStart = $installerSource.IndexOf("function _windo_help_topics", [StringComparison]::Ordinal)
+$helpTopicsEnd = $installerSource.IndexOf("function _windo_show_help", $helpTopicsStart, [StringComparison]::Ordinal)
+Assert-Equal (($helpTopicsStart -ge 0 -and $helpTopicsEnd -gt $helpTopicsStart) -eq $true) $true "help topic catalog is extractable"
+if ($helpTopicsStart -ge 0 -and $helpTopicsEnd -gt $helpTopicsStart) {
+    Invoke-Expression $installerSource.Substring($helpTopicsStart, $helpTopicsEnd - $helpTopicsStart)
+    $helpTopics = _windo_help_topics
+    $netScanHelp = @($helpTopics | Where-Object { $_.Name -eq "net-scan" })
+    $containerHelp = @($helpTopics | Where-Object { $_.Name -eq "container" })
+    $motionHelp = @($helpTopics | Where-Object { $_.Name -eq "motion" })
+    $rdpHelp = @($helpTopics | Where-Object { $_.Name -eq "rdp" })
+    $wslHelp = @($helpTopics | Where-Object { $_.Name -eq "wsl" })
+    Assert-Equal ($netScanHelp.Count -eq 1) $true "help topic catalog documents net-scan"
+    Assert-Equal ($containerHelp.Count -eq 1) $true "help topic catalog documents container"
+    Assert-Equal ($motionHelp.Count -eq 1) $true "help topic catalog documents motion"
+    Assert-Equal ($rdpHelp.Count -eq 1) $true "help topic catalog documents rdp"
+    Assert-Equal ($wslHelp.Count -eq 1) $true "help topic catalog documents wsl"
+    Assert-Pattern (($netScanHelp[0].Syntax -join "`r`n")) "windo net-scan ping <cidr\\|host\.\.\.>" "help topic catalog documents net-scan ping syntax"
+    Assert-Pattern (($rdpHelp[0].Syntax -join "`r`n")) "windo rdp" "help topic catalog documents rdp syntax"
+    Assert-Pattern (($wslHelp[0].Syntax -join "`r`n")) "windo wsl" "help topic catalog documents wsl syntax"
+    Assert-Pattern (($wslHelp[0].Syntax -join "`r`n")) "windo wsl install" "help topic catalog documents wsl install syntax"
+    Assert-Pattern (($wslHelp[0].Syntax -join "`r`n")) "windo wsl version" "help topic catalog documents wsl version syntax"
+    Assert-Pattern (($wslHelp[0].Syntax -join "`r`n")) "windo wsl convert" "help topic catalog documents wsl convert syntax"
+    Assert-Pattern (($wslHelp[0].Syntax -join "`r`n")) "windo wsl inspect" "help topic catalog documents wsl inspect syntax"
+    Assert-Pattern (($wslHelp[0].Syntax -join "`r`n")) "windo wsl exec" "help topic catalog documents wsl exec syntax"
+}
+$completionSpecsStart = $installerSource.IndexOf("function __windo_completion_specs", [StringComparison]::Ordinal)
+$completionSpecsEnd = $installerSource.IndexOf("function __windo_complete_values", $completionSpecsStart, [StringComparison]::Ordinal)
+Assert-Equal (($completionSpecsStart -ge 0 -and $completionSpecsEnd -gt $completionSpecsStart) -eq $true) $true "completion spec table is extractable"
+if ($completionSpecsStart -ge 0 -and $completionSpecsEnd -gt $completionSpecsStart) {
+    Invoke-Expression $installerSource.Substring($completionSpecsStart, $completionSpecsEnd - $completionSpecsStart)
+    $completionSpecs = __windo_completion_specs
+    Assert-Equal ($completionSpecs.ContainsKey("net-scan")) $true "completion specs include net-scan"
+    Assert-Equal ($completionSpecs.ContainsKey("container")) $true "completion specs include container"
+    Assert-Equal ($completionSpecs.ContainsKey("rdp")) $true "completion specs include rdp"
+    Assert-Equal ($completionSpecs.ContainsKey("wsl")) $true "completion specs include wsl"
+    Assert-Equal (($completionSpecs["net-scan"] -contains "ping") -and ($completionSpecs["net-scan"] -contains "--json")) $true "net-scan completion includes ping and --json"
+    Assert-Equal (($completionSpecs["container"] -contains "--dry-run") -and ($completionSpecs["container"] -contains "--json")) $true "container completion includes dry-run and json"
+    Assert-Equal (($completionSpecs["rdp"] -contains "firewall") -and ($completionSpecs["rdp"] -contains "--json")) $true "rdp completion includes firewall and --json"
+    Assert-Equal (($completionSpecs["wsl"] -contains "version") -and ($completionSpecs["wsl"] -contains "install") -and ($completionSpecs["wsl"] -contains "convert") -and ($completionSpecs["wsl"] -contains "inspect") -and ($completionSpecs["wsl"] -contains "exec") -and ($completionSpecs["wsl"] -contains "--distribution") -and ($completionSpecs["wsl"] -contains "--to") -and ($completionSpecs["wsl"] -contains "--json")) $true "wsl completion includes advanced ops and forwarding flags"
+}
 Assert-Equal ($installerSource.Contains("function _windo_completion_doctor") -eq $true) $true "installer defines completion doctor"
 Assert-Equal ($installerSource.Contains("function _windo_completion_repair") -eq $true) $true "installer defines completion repair"
 Assert-Equal ($installerSource.Contains('if ($sub -eq "doctor")') -eq $true) $true "completion command handles doctor"
@@ -246,10 +314,10 @@ Assert-Equal ($installerSource.Contains('id = "power-studio"') -eq $true) $true 
 Assert-Equal ($installerSource.Contains('id = "integrate-repair"') -eq $true) $true "control catalog includes integrate-repair action"
 Assert-Equal ($installerSource.Contains('id = "integrate-startup"') -eq $true) $true "control catalog includes integrate-startup action"
 Assert-Equal ($installerSource.Contains("Preview, queue, or run curated actions") -eq $true) $true "Power Studio documents preview queue run boundary"
-Assert-Equal ($installerSource.Contains("Exodus Limited Edition command center") -eq $true) $true "launchpad html carries limited edition copy"
+Assert-Equal ($installerSource.Contains("V6 command center") -eq $true) $true "launchpad html carries V6 command center copy"
 Assert-Equal ($installerSource.Contains("WINDO Dashboard") -eq $true) $true "dashboard html carries branded dashboard title"
-Assert-Equal ($installerSource.Contains("Limited Edition Installer") -eq $true) $true "installer is branded as limited edition"
-Assert-Equal ($bootstrapSource.Contains("Limited Edition bootstrap") -eq $true) $true "bootstrap has limited edition visuals"
+Assert-Equal ($installerSource.Contains("V6 Installer") -eq $true) $true "installer is branded as V6"
+Assert-Equal ($bootstrapSource.Contains("V6 bootstrap") -eq $true) $true "bootstrap has V6 visuals"
 $panelStart = $installerSource.IndexOf("function _windo_surface_panel_script_text", [StringComparison]::Ordinal)
 $panelEnd = $installerSource.IndexOf("function _windo_start_surface_panel", $panelStart, [StringComparison]::Ordinal)
 Assert-Equal (($panelStart -ge 0 -and $panelEnd -gt $panelStart) -eq $true) $true "surface panel script function can be extracted"
@@ -287,6 +355,8 @@ Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v4.5.0.md
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v4.6.0.md")) -eq $true) $true "v4.6.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\v5-roadmap.md")) -eq $true) $true "v5 roadmap doc exists"
 Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v5.4.1.md") -eq $true) $true "README links v5.4.1 release notes"
+Assert-Equal ($readmeSource.Contains("windo rdp [status") -eq $true) $true "README documents windo rdp command"
+Assert-Equal ($readmeSource.Contains("windo wsl [status") -eq $true) $true "README documents windo wsl command"
 Assert-Equal ((Test-Path (Join-Path $Root "native-companion\README.md")) -eq $true) $true "native companion scaffold exists"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\Enterprise\assets\ico\windo-tray-ready.ico")) -eq $true) $true "Enterprise branded tray ico exists"
 Assert-Equal ((Test-Path (Join-Path $Root "brand\assets\banners\banner-blue-left.png")) -eq $true) $true "README banner asset exists"
@@ -302,6 +372,13 @@ if (Test-Path -LiteralPath $extrasIndex) {
     Assert-Equal ($null -ne $idxRaw.schemaVersion) $true "extras index has schemaVersion"
     Assert-Equal ($idxRaw.items.Count -ge 1) $true "extras index has at least one item"
 }
+
+Assert-Equal ($moduleSource.Contains("wincmd -Name 'netops-resolve'") -eq $true) $true "network-ops module defines netops-resolve"
+Assert-Equal ($moduleSource.Contains("wincmd -Name 'netops-subnet-scan'") -eq $true) $true "network-ops module defines netops-subnet-scan"
+Assert-Equal ($moduleSource.Contains("wincmd -Name 'netops-arp-map'") -eq $true) $true "network-ops module defines netops-arp-map"
+Assert-Equal ($moduleSource.Contains("wincmd -Name 'netops-rdp-vnc'") -eq $true) $true "network-ops module defines netops-rdp-vnc"
+Assert-Equal ($moduleSource.Contains("wincmd -Name 'netops-wsl'") -eq $true) $true "network-ops module defines netops-wsl"
+Assert-Equal ($moduleSource.Contains("_emit_json") -eq $false) $true "network-ops module does not emit WINDO JSON payloads"
 
 $modsDoc = Join-Path $root "docs\modules-and-extras.md"
 Assert-Equal (Test-Path -LiteralPath $modsDoc) $true "docs/modules-and-extras.md exists"
@@ -327,6 +404,11 @@ Assert-Equal ($jsonSchemaRaw.Contains('## `motion` payload') -eq $true) $true "j
 Assert-Equal ($jsonSchemaRaw.Contains('## `surface` payload') -eq $true) $true "json-schema documents surface payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `integrate` payload') -eq $true) $true "json-schema documents integrate payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `control` payload') -eq $true) $true "json-schema documents control payload"
+Assert-Equal ($jsonSchemaRaw.Contains('## `container` payload') -eq $true) $true "json-schema documents container payload"
+Assert-Equal ($jsonSchemaRaw.Contains('## `rdp` payload') -eq $true) $true "json-schema documents rdp payload"
+Assert-Equal ($jsonSchemaRaw.Contains('## `wsl` payload') -eq $true) $true "json-schema documents wsl payload"
+Assert-Equal ($jsonSchemaRaw.Contains('## `net-scan` payload') -eq $true) $true "json-schema documents net-scan payload"
+Assert-Equal ($jsonSchemaRaw.Contains("not wrapped in the WINDO `command` envelope") -eq $true) $true "json-schema documents network-ops module output format"
 Assert-Equal ($jsonSchemaRaw.Contains('## `signal` payload') -eq $true) $true "json-schema documents signal payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `center` payload') -eq $true) $true "json-schema documents center payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `edition` payload') -eq $true) $true "json-schema documents edition payload"
@@ -358,6 +440,26 @@ Assert-Equal ($jsonSchemaRaw.Contains('## `dev` payload') -eq $true) $true "json
 Assert-Equal ($jsonSchemaRaw.Contains('## `prompt` payload') -eq $true) $true "json-schema documents prompt payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `help` payload') -eq $true) $true "json-schema documents help payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `export` payload') -eq $true) $true "json-schema documents export payload"
+Assert-Pattern $installerSource '_emit_json "help" \@\{\s*topic = \$null\s*available = @\(\$topics \| Select-Object Name,Category,Aliases,Summary,Syntax,Description,Notes\)\s*usage = "windo \[--json\] \[--dry-run\] \[<global sudo flag>\] <command>"\s*exitCode = 0\s*\}' "help command emits JSON discovery payload"
+Assert-Pattern $installerSource '_emit_json "container" \@\{\s*runtime = \$runtimeUsed\s*subcommand = \$sub\s*runtimeCommand = \$runtimeArgList\s*dryRun = \$true\s*commandLine = \$renderCommand\s*exitCode = 0\s*\}' "container --dry-run emits complete JSON"
+Assert-Pattern $installerSource '_emit_json "motion" \@\{\s*saved = \$true;\s*motion = \$policy;\s*exitCode = 0\s*\}' "motion save emits saved JSON payload"
+Assert-Pattern $installerSource '_emit_json "motion" \@\{\s*reset = \$true;\s*motion = \$policy;\s*exitCode = 0\s*\}' "motion reset emits reset JSON payload"
+Assert-Pattern $installerSource '_emit_json "motion" \@\{\s*motion = \$policy;\s*pulseRendered = \[bool\]\$ran;\s*exitCode = 0\s*\}' "motion pulse emits pulseRendered JSON payload"
+Assert-Pattern $installerSource '_emit_json "motion" \@\{\s*motion = \$policy;\s*exitCode = 0\s*\}' "motion status emits status JSON payload"
+Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "status"[\s\S]*scannedAt = \(Get-Date -Format "o"\)' "rdp status emits status payload"
+Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "firewall"[\s\S]*action = "status"[\s\S]*requestedPorts = @\(\$ports\)' "rdp firewall emits status payload"
+Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "firewall"[\s\S]*action = "disable"[\s\S]*estimatedEffect' "rdp firewall disable emits mutating payload"
+Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "config"[\s\S]*requested = \@\{' "rdp config emits config payload"
+Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "config"[\s\S]*result = \@' "rdp config emits result payload"
+Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "troubleshoot"[\s\S]*host = \$host[\s\S]*portChecks = @\(\$probeRows\)[\s\S]*exitCode' "rdp troubleshoot emits payload"
+Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "status"[\s\S]*wslAvailable = \[bool\]\$wslExe[\s\S]*distros = @\(\$distros\.distros\)' "wsl status emits status payload"
+Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "check install"[\s\S]*exitCode = 0\s*\}' "wsl check install emits preflight payload"
+Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "check distro"[\s\S]*distro = \$found\.distro[\s\S]*exists = \$true[\s\S]*applyRequired = \$true' "wsl check distro emits preflight payload"
+Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "check import"[\s\S]*distribution = \$name[\s\S]*path = \$path' "wsl check import emits preflight payload"
+Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "check export"[\s\S]*distribution = \$name[\s\S]*out = \$out' "wsl check export emits preflight payload"
+Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "launch"[\s\S]*distro = \$distro[\s\S]*dryRun = \$true' "wsl launch dry-run emits payload"
+Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "launch"[\s\S]*distro = \$distro[\s\S]*command = @\(\$res\.output\)' "wsl launch execution emits payload"
+Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "path"[\s\S]*direction = \$direction[\s\S]*path = \$targetPath[\s\S]*converted = \$converted' "wsl path emits conversion payload"
 Assert-Equal ($installerSource.Contains("auditIncludedInExcerpt") -eq $true) $true "installer export json includes auditIncludedInExcerpt"
 Assert-Equal ($buildRaw.Contains("Sync-VersionSnapshot.ps1") -eq $true) $true "build.md documents Sync-VersionSnapshot.ps1"
 Assert-Equal ($buildRaw.Contains("v5-roadmap.md") -eq $true) $true "build.md documents v5 roadmap snapshot"

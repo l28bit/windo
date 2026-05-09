@@ -72,8 +72,8 @@ Release notes: [`docs/releases/RELEASE_NOTES_v5.1.1.md`](docs/releases/RELEASE_N
 
 ### Changed
 
-- **Dashboard visual polish:** `windo dashboard --html` now uses the branded Exodus visual system, stronger hierarchy, responsive cards, darker operator styling, and clearer issue/audit/path sections.
-- **Launchpad visual polish:** `windo launchpad --html` now uses final brand assets, stronger Command Center layout, cleaner cards/tables, and limited-edition release copy.
+- **Dashboard visual polish:** `windo dashboard --html` now uses the WINDO visual system, stronger hierarchy, responsive cards, darker operator styling, and clearer issue/audit/path sections.
+- **Launchpad visual polish:** `windo launchpad --html` now uses final WINDO assets, stronger Command Center layout, cleaner cards/tables, and neutral operator copy.
 - **Tray popup redesign:** `windo launchpad --tray` now writes a richer Windows Forms Command Center popup with scrollable action rows, clearer command text, and a local status-toast window.
 
 ## [5.1.0] - 2026-05-06
@@ -82,9 +82,9 @@ Release notes: [`docs/releases/RELEASE_NOTES_v5.1.0.md`](docs/releases/RELEASE_N
 
 ### Added
 
-- **Exodus Limited Edition surface:** `windo edition status|open|html|pulse` adds a branded local V5+ console with final assets, animated HTML, Command Center status, curated action posture, and policy-aware terminal motion.
+- **WINDO command surface:** `windo edition status|open|html|pulse` adds a branded local V5+ console with final assets, animated HTML, Command Center status, curated action posture, and policy-aware terminal motion.
 - **Command grammar hardening:** `windo control preview`, `windo control execute <request-id>`, `windo control next`, `windo center actions|preview|execute-next|execute|signal`, and `windo signal open` tighten the explicit command-center lifecycle.
-- **Control catalog expansion:** `edition-open` becomes a curated visible-shell action and the native tray menu exposes the Limited Edition Console.
+- **Control catalog expansion:** `edition-open` becomes a curated visible-shell action and the native tray menu exposes the Command Center console.
 - **Exodus branch move:** bootstrap, install/update, checksum, trust/source, extras, README, and build docs now use the `Exodus` branch as the live source contract.
 
 ## [5.0.0] - 2026-05-05
@@ -93,7 +93,7 @@ Release notes: [`docs/releases/RELEASE_NOTES_v5.0.0.md`](docs/releases/RELEASE_N
 
 ### Added
 
-- **Command Center Special Edition:** `windo center status|open|tray|run|queue|history` unifies tray, control plane, Signal Deck, surface, motion, trust, recipes, modules, extras, audit, and export into a PowerShell-native command center.
+- **Command Center:** `windo center status|open|tray|run|queue|history` unifies tray, control plane, Signal Deck, surface, motion, trust, recipes, modules, extras, audit, and export into a PowerShell-native command center.
 - **Native companion scaffold:** `native-companion/` starts the future compiled-helper path without making a compiled binary required for install or V5 operation.
 
 ## [4.6.0] - 2026-05-05
@@ -329,15 +329,15 @@ Release notes: [`docs/releases/RELEASE_NOTES_v3.3.0.md`](docs/releases/RELEASE_N
 
 ### Added
 
-- **Special Edition install/update visuals:** `bootstrap.ps1`, **`windo install-latest`**, and the installer now show a WINDO banner plus step-by-step status cards for download, checksum, UAC handoff, secure-dir hardening, task registration, manifest write, profile refresh, and snapshot write.
+- **Command Center install/update visuals:** `bootstrap.ps1`, **`windo install-latest`**, and the installer now show a WINDO banner plus step-by-step status cards for download, checksum, UAC handoff, secure-dir hardening, task registration, manifest write, profile refresh, and snapshot write.
 - **`windo preflight`** — read-only readiness scan with fix commands for non-elevated update posture, PowerShell runtime, scheduled tasks, runner integrity, audit-chain verification, profile block, and keybinding policy. Supports **`--json`**.
-- **`windo launchpad`** — Special Edition operator command center with terminal, **`--json`**, **`--html`**, **`--open`**, and **`--tray`** modes.
+- **`windo launchpad`** — Command center with terminal, **`--json`**, **`--html`**, **`--open`**, and **`--tray`** modes.
 - **Native tray launchpad:** **`windo launchpad --tray`** writes a local tray-agent script under **`.pwsh_secure`**, starts it hidden with Windows Forms, shows the WINDO tray icon when **`brand/Enterprise`** assets are present (or a Windows shield fallback), and exposes menu/window actions that open visible PowerShell command windows.
 - **Enterprise brand pack:** **`brand/Enterprise/`** now carries clean transparent PNG/SVG/ICO assets, a manifest, and a contact sheet for docs, tray icons, badges, and future UI surfaces.
 
 ### Changed
 
-- **Release identity:** bumped to **v3.3.0** for the Special Edition surface area.
+- **Release identity:** bumped to **v3.3.0** for the command-center feature release.
 - **Version snapshots:** **`tools/Sync-VersionSnapshot.ps1`** now copies **`brand/Enterprise/`** so release markdown images and tray assets stay with the frozen release tree.
 
 ## [3.2.8] - 2026-05-01

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0",
+  "name": "network-ops",
+  "version": "0.1.0",
+  "description": "Optional WINDO module with network and WSL operator helpers.",
+  "entry": "Load.ps1",
+  "requiresWindoVersion": "6.0.0",
+  "commands": [
+    "netops-resolve",
+    "netops-subnet-scan",
+    "netops-arp-map",
+    "netops-rdp-vnc",
+    "netops-wsl",
+    "netops-netcat-send",
+    "netops-netcat-recv"
+  ]
+}

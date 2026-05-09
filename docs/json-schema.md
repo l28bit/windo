@@ -1,4 +1,4 @@
-# WINDO JSON output (schema 3.0)
+# WINDO V6 JSON output (schema 3.0)
 
 Commands that support `--json` or `-Json` emit a single **envelope** so scripts can rely on stable top-level fields.
 
@@ -27,9 +27,9 @@ If you prefer the **pre-v3 JSON “look”** (no top-level **`meta`**, and **`sc
 
 | Field | Type | Description |
 |--------|------|-------------|
-| `schemaVersion` | string | **`"3.0"`** for WINDO **v3.0.0+** CLI JSON (v2.6.x installers emitted `"2.6"`) |
-| `windoVersion` | string | Installer profile version (e.g. `"3.0.0"`) |
-| `command` | string | Logical command name for the envelope (e.g. `doctor`, `integrity`, `config`, `session`, `dashboard`, `preflight`, `launchpad`, `keybindings`, `completion`, `roadmap`, `source`, `syntax`, `mesh`, `repair`, `modules`, `extras`, `recipes`, `ai`, `backups`, `version`, `verify`, `log`, `stats`, `history`, `last`, `context`, `trace`, `profile`, `motion`, `surface`, `integrate`, `control`, `signal`, `center`, `edition`; bundle-related commands when exporting, etc.) |
+| `schemaVersion` | string | **`"3.0"`** for WINDO **v3.0.0+** CLI JSON (v2.6.x installers emitted `"2.6"`). **V6** does not introduce a new schema version; the envelope shape is unchanged. |
+| `windoVersion` | string | Installer profile version (e.g. `"6.0.0"`). This is the product semver, not the schema version. |
+| `command` | string | Logical command name for the envelope (for example `account`, `completion`, `config`, `context`, `container`, `help`, `keybindings`, `launchpad`, `mesh`, `modules`, `net-scan`, `profile`, `rdp`, `roadmap`, `scan`, `source`, `syntax`, `trace`, `version`, `verify`, `wsl`, and other v6 built-in commands). |
 | `generatedAt` | string | ISO-8601 timestamp |
 | `meta` | object | Host context (see below). Present when the effective theme is **modern** (or **auto** on v3.0.0+ profiles). Omitted in **classic** theme. |
 | `payload` | object | Command-specific data |
@@ -47,9 +47,9 @@ Example:
 ```json
 {
   "schemaVersion": "3.0",
-  "windoVersion": "3.0.0",
+  "windoVersion": "6.0.0",
   "command": "doctor",
-  "generatedAt": "2026-04-01T12:00:00.0000000-04:00",
+  "generatedAt": "2026-05-08T18:00:00.0000000-05:00",
   "meta": {
     "psEdition": "Core",
     "psVersion": "7.5.5",
@@ -108,15 +108,18 @@ Several commands mirror **`$global:WINDO_EXIT_CODE`** inside **`payload.exitCode
 | `prompt` | 0, 2 | **2** = **`--export`** path write failure |
 | `ai` | 0, 2, 3 | **v3.2.5+** **`status`** = **0**; **`doctor`** = **0** or **3** (policy concerns); **2** = bad subcommand |
 | `repair` | 0, 2 | **v3.2.7+** **`keybindings` safe-reset** + hints; **2** = bad subcommand or prefs write failure |
+| `account` | 0, 2 | **v6.0.0+** **0** = account handoff operation queued/validated, **2** = invalid username or launch handoff failure |
 | `help` | 0, 2 | **2** = topic not found (suggestions may be present) |
 | `export` | 0, 2 | **v3.2.2+** CLI summary after zip write; **2** = archive failure or missing output |
 | `backups` | 0, 2 | **2** = bad args, prune without `--force`, prune failure |
 | `theme` | 0, 2 | **2** = invalid subcommand or prefs write failure |
-| `completion` | 0, 2, 3 | **v3.4.0+ / v5.4.1+** status/mode/reset success, prefs write failure, or doctor/repair attention state |
+| `container` | 0, 1, 2, runtimeExit | **v6.0.0+** **0** = runtime command prepared/executed, **1** = runtime launch/exec exception, **2** = invalid args/runtime/subcommand, or delegated runtime exit code |
+| `completion` | 0, 2, 3 | **v3.4.0+ / v6.0.0+** status/mode/reset success, prefs write failure, or doctor/repair attention state |
 | `output` | 0, 2 | **v4.0.1+** **0** = status / mode saved / reset, **2** = bad mode or prefs write failure |
 | `venv` | 0, 2, 3 | **v4.0.1+** **0** = venv action success, **2** = bad args or action failure, **3** = status missing/no active venv |
 | `pkg` | 0, 2 | **v4.0.1+** **0** = manager status or handoff ready, **2** = unsupported/missing manager or missing args |
 | `scan` | 0, 2, 3 | **v4.1.0+** **0** = no findings, **2** = path/arg errors, **3** = findings present |
+| `net-scan` | 0, 2, 3 | **v6.0.0+** **0** = status/resolve/arp/ping success with no unreachable hosts, **2** = bad args or CIDR format error, **3** = at least one host unreachable or probe error |
 | `vault` | 0, 2 | **v4.1.0+** **0** = status/list/set/get/remove success, **2** = missing secret/bad args/write failure |
 | `sshx` | 0, 2, tool exit | **v4.1.0+** status/config success, bad args/tool missing, or raw ssh/ssh-keygen exit |
 | `crypto` | 0, 2, tool exit | **v4.1.0+** status/hash success, bad args/tool missing, or raw openssl/certutil exit |
@@ -128,6 +131,8 @@ Several commands mirror **`$global:WINDO_EXIT_CODE`** inside **`payload.exitCode
 | `center` | 0, 2, 3 | **v5.0.0+ / v5.3.0+** status/open/tray/panel/studio/actions/preview/run/queue/execute/history/signal success, bad subcommand/action, or attention/native surface state |
 | `studio` | 0, 3 | **v5.3.0+** guided Power Studio launch success or native desktop unavailable |
 | `edition` | 0, 2, 3 | **v5.1.0+** status/open/html/pulse success, bad subcommand, or inherited center attention state |
+| `rdp` | 0, 2, 3 | **v6.0.0+** built-in command for status/firewall/config/troubleshoot handling |
+| `wsl` | 0, 1, 2, 3 | **v6.0.0+** built-in command for status/check/launch/path/import/export |
 
 ## `scan` payload (v4.1.0+)
 
@@ -144,6 +149,493 @@ Several commands mirror **`$global:WINDO_EXIT_CODE`** inside **`payload.exitCode
 | `files[].findings` | array | Rows: `id`, `severity`, `detail`. |
 | `errors` | array | Rows: `path`, `error`. |
 | `exitCode` | number | **0**, **2**, or **3**. |
+
+## `net-scan` payload (v6.0.0+)
+
+Envelope **`command`** is always **`net-scan`**. The shape depends on the subcommand.
+
+### Common fields (all subcommands)
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `subcommand` | string | `status`, `resolve`, `arp`, or `ping`. |
+| `scannedAt` | string | ISO-8601 timestamp of the probe. |
+| `exitCode` | number | **0**, **2**, or **3**. |
+
+### `windo net-scan [status]`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `adapters` | array | Active network adapter rows: `alias`, `ipv4`, `ipv6`, `gateway`, `dnsServers`, `macAddress`, `linkSpeed`. Addresses are strings; `dnsServers` is an array of strings. |
+
+### `windo net-scan resolve <host...>`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `hosts` | array | Rows: `host`, `addresses` (array of strings), `addressCount`, `reverseHostnames` (array of arrays), `identityTags` (array of `{ip,names,tags[]}`), `error` (when resolution failed). |
+| `errorCount` | number | Count of hosts that could not be resolved. |
+
+### `windo net-scan arp`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `neighbors` | array | ARP/neighbor table rows: `ip`, `mac`, `state`, `interfaceAlias`, `hostnames`, `identityTags`. `mac` is the link-layer address. |
+| `includeStale` | bool | Whether unreachable/incomplete/invalid entries were included. |
+| `interface` | string \| null | Filter alias when `--interface` was supplied. |
+
+### `windo net-scan ping <cidr|host...>`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `targets` | array \| null | Explicit host list when individual hosts were supplied (not CIDR). |
+| `cidr` | string \| null | CIDR block when a subnet was supplied. |
+| `hostLimit` | number | Effective `--host-limit` cap applied to the probe. |
+| `timeoutSeconds` | number | Per-host ICMP timeout. |
+| `ports` | array of number | TCP ports probed on each reachable host (empty when `--ports` was omitted). |
+| `hosts` | array | Probe result rows: `ip`, `reachable`, `rttMs` (number or null), `ports` (object: port → `open` bool), `hostnames`, `identityTags`. |
+| `hostTags` | array | Present when `--host-tags` is used (values indicate enabled tagging source). |
+| `reachableCount` | number | Hosts that responded to ICMP. |
+| `unreachableCount` | number | Hosts that did not respond. |
+| `errorCount` | number | Probe errors (e.g. access denied, socket error). |
+| `errors` | array | Rows: `ip`, `error`. |
+
+Example (`windo net-scan ping 10.10.10.0/24 --ports 22,443 --json`):
+
+```json
+{
+  "schemaVersion": "3.0",
+  "windoVersion": "6.0.0",
+  "command": "net-scan",
+  "generatedAt": "2026-05-08T18:00:00.0000000-05:00",
+  "meta": {
+    "psEdition": "Core",
+    "psVersion": "7.5.5",
+    "osVersion": "Microsoft Windows NT 10.0.26200.0"
+  },
+  "payload": {
+    "subcommand": "ping",
+    "scannedAt": "2026-05-08T18:00:00.0000000-05:00",
+    "cidr": "10.10.10.0/24",
+    "hostLimit": 254,
+    "timeoutSeconds": 1,
+    "ports": [22, 443],
+    "hosts": [
+      { "ip": "10.10.10.1",  "reachable": true,  "rttMs": 1, "ports": { "22": false, "443": true } },
+      { "ip": "10.10.10.10", "reachable": true,  "rttMs": 3, "ports": { "22": true,  "443": true } },
+      { "ip": "10.10.10.20", "reachable": false, "rttMs": null, "ports": {} }
+    ],
+    "reachableCount": 2,
+    "unreachableCount": 1,
+    "errorCount": 0,
+    "errors": [],
+    "exitCode": 3
+  }
+}
+```
+
+### `windo net-scan resolve <host...> --json`
+
+```json
+{
+  "schemaVersion": "3.0",
+  "windoVersion": "6.0.0",
+  "command": "net-scan",
+  "generatedAt": "2026-05-08T18:05:00.0000000-05:00",
+  "meta": {
+    "psEdition": "Core",
+    "psVersion": "7.5.5",
+    "osVersion": "Microsoft Windows NT 10.0.26200.0"
+  },
+  "payload": {
+    "subcommand": "resolve",
+    "scannedAt": "2026-05-08T18:05:00.0000000-05:00",
+    "hosts": [
+      { "host": "dc01", "addresses": ["10.10.10.10", "fe80::1"], "addressCount": 2, "reverseHostnames": [["dc01.windo.local"], ["dc01-v6.windo.local"]], "identityTags": [], "error": null },
+      { "host": "printer01", "addresses": [], "addressCount": 0, "reverseHostnames": [], "identityTags": [], "error": "host not found" }
+    ],
+    "errorCount": 1,
+    "exitCode": 2
+  }
+}
+```
+
+### `windo net-scan arp --json`
+
+```json
+{
+  "schemaVersion": "3.0",
+  "windoVersion": "6.0.0",
+  "command": "net-scan",
+  "generatedAt": "2026-05-08T18:06:00.0000000-05:00",
+  "meta": {
+    "psEdition": "Core",
+    "psVersion": "7.5.5",
+    "osVersion": "Microsoft Windows NT 10.0.26200.0"
+  },
+  "payload": {
+    "subcommand": "arp",
+    "scannedAt": "2026-05-08T18:06:00.0000000-05:00",
+    "interface": "Wi-Fi",
+    "includeStale": false,
+    "neighbors": [
+      { "ip": "10.10.10.1", "mac": "9A-BC-21-3C-01-22", "state": "Reachable", "interfaceAlias": "Wi-Fi", "hostnames": ["dc01.windo.local"], "identityTags": [] },
+      { "ip": "10.10.10.20", "mac": "88-77-66-55-44-33", "state": "Stale", "interfaceAlias": "Wi-Fi", "hostnames": ["legacy-printer"], "identityTags": [] }
+    ],
+    "errorCount": 0,
+    "errors": [],
+    "exitCode": 0
+  }
+}
+```
+
+## `container` payload (v6.0.0+)
+
+`windo container` always emits envelope `command` as `container`.
+
+### Common fields
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `runtime` | string | `docker` or `podman` when resolved successfully. |
+| `runtimeUsed` | string \| null | Runtime actually selected for execution (`docker` or `podman`); null when resolution not yet complete. |
+| `subcommand` | string | `ps`, `images`, `status`, `logs`, `restart`, `start`, `stop`, `rmi`, `rm`, `pull`. |
+| `command` | array | Arguments passed to the resolved runtime executable. |
+| `idOrImage` | string \| null | Primary target argument for mutating subcommands (`logs`, `restart`, `start`, `stop`, `rmi`, `rm`, `pull`) when supplied. |
+| `runtimeCommand` | array | **Dry-run only**; same as `command` in dry-run mode. |
+| `commandLine` | string | **Dry-run only**; reconstructed full command shown to operators. |
+| `dryRun` | bool | **Dry-run mode** marker, present and `true` when no execution occurs. |
+| `output` | array | Runtime stdout/stderr rows when available. |
+| `error` | string | Wrapper/runtime failure text when present. |
+| `exitCode` | number | `0`, `1`, `2`, or wrapped runtime exit code. |
+
+### `windo container ps --json`
+
+```json
+{
+  "schemaVersion": "3.0",
+  "windoVersion": "6.0.0",
+  "command": "container",
+  "generatedAt": "2026-05-08T18:10:00.0000000-05:00",
+  "meta": {
+    "psEdition": "Core",
+    "psVersion": "7.5.5",
+    "osVersion": "Microsoft Windows NT 10.0.26200.0"
+  },
+  "payload": {
+    "runtime": "docker",
+    "subcommand": "ps",
+    "command": [ "ps" ],
+    "output": [
+      "CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS   PORTS   NAMES",
+      "4bd9...        nginx     \"nginx\"   1h ago    Up 1h    80/tcp   web"
+    ],
+    "exitCode": 0
+  }
+}
+```
+
+### `windo container --dry-run pull <image> --json`
+
+```json
+{
+  "schemaVersion": "3.0",
+  "windoVersion": "6.0.0",
+  "command": "container",
+  "generatedAt": "2026-05-08T18:11:00.0000000-05:00",
+  "meta": {
+    "psEdition": "Core",
+    "psVersion": "7.5.5",
+    "osVersion": "Microsoft Windows NT 10.0.26200.0"
+  },
+  "payload": {
+    "runtime": "podman",
+    "subcommand": "pull",
+    "command": [ "pull", "nginx:latest" ],
+    "runtimeCommand": [ "pull", "nginx:latest" ],
+    "commandLine": "podman pull nginx:latest",
+    "dryRun": true,
+    "exitCode": 0
+  }
+}
+```
+
+## `rdp` payload (v6.0.0+)
+
+`windo rdp` always emits envelope `command` as `rdp`.
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `subcommand` | string | `status`, `firewall`, `config`, or `troubleshoot`. |
+| `scannedAt` | string | ISO timestamp for the request snapshot. |
+| `exitCode` | number | **0**, **2**, or **3**. |
+
+### `windo rdp status`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `service` | object | Service posture from local discovery and registry snapshot. |
+| `config` | object | Registry/config posture used for checks. |
+| `firewall` | object | `count` and `rules` from active firewall query. |
+
+### `windo rdp firewall`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `action` | string | `status`, `enable`, or `disable`. |
+| `requestedPorts` | array | Ports requested by `--ports`. |
+| `rules` | array | Candidate firewall rows. |
+| `updates` | array | Planned changes when in mutating mode. |
+| `dryRun` | bool | `true` in `--dry-run` mode. |
+| `estimatedEffect` | string | Human-readable preview text. |
+| `next` | string | Optional upgrade/elevation hint when blocked by policy. |
+
+### `windo rdp config`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `requested` | object | `enable`, `nla`, `securityLayer`, `restart`. |
+| `dryRun` | bool | `true` when applying in preview mode. |
+| `result` | object | Change result with `success` / `changes` / `error`. |
+
+### `windo rdp troubleshoot`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `host` | string | Target host/IP for end-to-end checks. |
+| `timeoutSeconds` | number | Probe timeout. |
+| `portChecks` | array | Per-port probe rows: `port`, `reachable`, `error`. |
+| `config` | object | Snapshot used for the troubleshooting pass. |
+| `firewall` | object | Rule and match summary used by the pass. |
+| `credential` | object \| null | Optional credential probe preview result. |
+
+## `wsl` payload (v6.0.0+)
+
+`windo wsl` always emits envelope `command` as `wsl`.
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `command` | string | Subcommand label: `status`, `list`, `check install`, `check distro`, `check import`, `check export`, `version`, `install`, `convert`, `inspect`, `exec`, `launch`, `path`, `import`, or `export`. |
+| `exitCode` | number | **0**, **1**, **2**, **3**; may include raw `wsl` command status in some paths. |
+
+### `windo wsl status|list|ls`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `wslAvailable` | bool | `wsl.exe` discoverability check. |
+| `wslStatus` | array | Raw output from `wsl --status`. |
+| `wslExitCode` | number | Raw exit code for `wsl --status`. |
+| `distros` | array | Parsed distribution rows (`name`, `state`, `version`, `default`). |
+| `default` | string \| null | Default distribution name. |
+
+### `windo wsl check*`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `command` | string | `check install`, `check distro`, `check import`, `check export`. |
+| `distro` \| `distribution` | string \| object | Target distro string or resolved distro row. |
+| `exists` | bool | Presence flag for targeted object. |
+| `safeToApply` | bool | Preflight safety signal. |
+| `applyRequired` | bool | `true` when the operation is gated by `--apply`. |
+| `error` | string | Validation/preflight error text. |
+| `errors` | array | Validation details for complex failures. |
+
+### `windo wsl version`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `output` | array | Raw output from `wsl --version`. |
+
+### `windo wsl install|convert|exec`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `distribution` | string | Target WSL distro name (for install/convert/exec). |
+| `command` | array \| string | In `exec`, forwarded command arguments (array) or raw tokenized command text in other command paths. |
+| `to` | string | Target WSL version (`1` or `2`) for `convert`. |
+| `apply` | bool | `true` only when `--apply` was provided. |
+| `dryRun` | bool | `true` for dry-run preview mode. |
+| `commandLine` | string | Reconstructed command line for preview. |
+
+### `windo wsl inspect`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `distribution` | object | Target distro snapshot with `name`, `state`, `default`, `version`, `kernel`, and `ip`. |
+| `osRelease` | array | Raw `/etc/os-release` lines from WSL execution. |
+| `unameExitCode` | number \| null | Exit code for `uname -a` probe. |
+| `osReleaseExitCode` | number \| null | Exit code for `/etc/os-release` probe. |
+| `ipExitCode` | number \| null | Exit code for `hostname -I` probe. |
+
+### `windo wsl launch`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `distro` | string | Target distribution. |
+| `args` | array | Arguments in dry-run mode. |
+| `command` | array | Executed command tokens in run mode. |
+| `commandLine` | string | Reconstructed command line preview. |
+| `dryRun` | bool | `true` for preview execution. |
+| `processId` | number | Process ID for interactive `launch`. |
+| `output` | array | Command output rows when execution returns output. |
+
+### `windo wsl path`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `direction` | string | `to-wsl` or `to-win`. |
+| `path` | string | Source path. |
+| `distro` | string \| null | Optional distro selector. |
+| `converted` | string \| null | Converted path when known. |
+| `dryRun` | bool | `true` for preview. |
+| `commandLine` | string | Planned command line for conversion preview. |
+
+### `windo wsl import|export`
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `distribution` | string | Distribution name argument. |
+| `tar` | string | Tar input path for import checks. |
+| `out` | string | Export target path. |
+| `path` | string | Import target path. |
+| `version` | number | Selected WSL version (`1` or `2`). |
+| `apply` | bool | Execution gate flag. |
+| `dryRun` | bool | Preview marker. |
+| `commandLine` | string | Reconstructed command in dry-run paths. |
+| `output` | array | Output rows from run mode. |
+
+## `network-ops` payloads (optional module)
+
+The optional `extras/samples/network-ops` module registers these commands via `wincmd`. They return native PowerShell objects; they are not wrapped in the WINDO `command` envelope.
+
+### `netops-resolve`
+
+Rows return:
+`Host`, `IpAddress`, `AddressFamily`, and `ReverseDns` when available.
+
+```json
+[
+  {
+    "Host": "windo.local",
+    "IpAddress": "10.10.10.10",
+    "AddressFamily": "IPv4",
+    "ReverseDns": ["windo.local.internal"]
+  }
+]
+```
+
+### `netops-netcat-send`
+
+Rows/objects are native `netops-netcat-send` output objects. Not wrapped by WINDO envelope.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | `netops-netcat-send` |
+| `protocol` | string | `tcp` or `udp` |
+| `mode` | string | `check`, `apply`, `interactive-apply`, `one-shot-apply`, `interactive-check`, or `one-shot-check` |
+| `remoteHost` | string | Target host |
+| `remotePort` | number | Target port |
+| `timeoutSeconds` | number | Timeout in seconds |
+| `maxPayloadBytes` | number | Maximum payload size per send line |
+| `maxInteractiveLines` | number | Interactive input line cap |
+| `allowRemote` | bool | Whether off-loopback was explicitly enabled |
+| `allowlist` | array | Allowed destination values when apply mode runs |
+| `allowlistMatched` | string \| null | Matching allowlist entry |
+| `safety` | object | Validation metadata (`requestedMode`, `allowed`, `reason`, `resolvedAddresses`, optional `confirmationSkipped`) |
+| `events` | array | Per-message objects (`sequence`, `bytes`, `text`, `preview`, etc.) |
+| `messages` | number | Total message count |
+| `bytes` | number | Total bytes sent |
+| `timedOut` | bool | Timeout occurred before any complete exchange |
+| `exitCode` | number | `0` success, `1` timeout, `2` failure, `3` canceled by confirmation |
+
+### `netops-netcat-recv`
+
+Rows/objects are native `netops-netcat-recv` output objects. Not wrapped by WINDO envelope.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | `netops-netcat-recv` |
+| `protocol` | string | `tcp` or `udp` |
+| `mode` | string | `check`, `apply`, `interactive-apply`, `one-shot-apply`, `interactive-check`, or `one-shot-check` |
+| `bindHost` | string | Bound listen host |
+| `localPort` | number | Bound listen port |
+| `timeoutSeconds` | number | Timeout in seconds |
+| `maxPayloadBytes` | number | Maximum payload chunk size |
+| `maxMessages` | number | Maximum message count |
+| `allowRemote` | bool | Whether off-loopback bind was explicitly enabled |
+| `allowlist` | array | Allowed bind targets when apply mode runs |
+| `allowlistMatched` | string \| null | Matching allowlist entry |
+| `safety` | object | Validation metadata (`requestedMode`, `allowed`, `reason`) |
+| `events` | array | Received message preview rows |
+| `messages` | number | Total messages captured |
+| `bytes` | number | Total bytes received |
+| `timedOut` | bool | Timeout occurred before any capture |
+| `exitCode` | number | `0` success, `1` timeout, `2` failure, `3` canceled by confirmation |
+
+### `netops-subnet-scan`
+
+Rows return:
+`IpAddress` and `Reachable`.
+
+```json
+[
+  { "IpAddress": "10.10.10.1", "Reachable": true },
+  { "IpAddress": "10.10.10.2", "Reachable": false }
+]
+```
+
+### `netops-arp-map`
+
+Rows return:
+`InterfaceAlias`, `IPAddress`, `LinkLayerAddress`, and `State`.
+
+```json
+[
+  {
+    "InterfaceAlias": "Ethernet",
+    "IPAddress": "10.10.10.1",
+    "LinkLayerAddress": "A4-5D-36-9F-12-44",
+    "State": "Reachable"
+  }
+]
+```
+
+### `netops-rdp-vnc`
+
+Returns one or both objects:
+`Protocol`, posture fields (`AllowRegistry`, `Service`, `ServiceStartup`, `FirewallEnabled`, `ListeningPorts`).
+
+```json
+[
+  {
+    "Protocol": "RDP",
+    "AllowRegistry": true,
+    "Service": "Running",
+    "ServiceStartup": "Automatic",
+    "FirewallEnabled": true
+  },
+  {
+    "Protocol": "VNC",
+    "ListeningPorts": [5901],
+    "FirewallEnabled": false
+  }
+]
+```
+
+### `netops-wsl`
+
+`status` returns rows with `Name`, `IsDefault`, `State`, `Version`, `Eth0Ip`; `ip` mode returns `Distro`, `IpAddress`, and `ProbeCommand`.
+
+```json
+[
+  {
+    "Name": "Ubuntu-24.04",
+    "IsDefault": true,
+    "State": "Running",
+    "Version": 2,
+    "Eth0Ip": "172.20.10.15"
+  }
+]
+```
 
 ## `vault` payload (v4.1.0+)
 
@@ -198,11 +690,14 @@ Several commands mirror **`$global:WINDO_EXIT_CODE`** inside **`payload.exitCode
 
 | Field | Type | Description |
 |--------|------|-------------|
-| `motion` | object | Effective motion policy: `mode` (`auto`, `on`, `quiet`, `off`), `source`, `enabled`, `interactive`, env/prefs values, `prefsFile`, and `description`. |
+| `motion` | object | Effective motion policy: `mode` (`auto`, `on`, `quiet`, `off`), `source` (`env`, `prefs`, `default`), `enabled`, `interactive`, `environmentValue`, `preferenceValue`, `prefsFile`, and `description`. |
 | `saved` | bool | Present when a mode was written to **`windo_prefs.json`**. |
 | `reset` | bool | Present when saved mode was removed. |
 | `pulseRendered` | bool | Present for `pulse`/`demo`; true when terminal motion was actually rendered. |
 | `exitCode` | number | **0** on success, **2** for invalid mode or prefs write failure. |
+
+`enabled` is computed by combining interactivity, source precedence (`env` > `prefs` > `default`), and CI constraints (`WINDO_NO_SPINNER`).  
+For `mode=auto`, motion is enabled only when interactive and CI constraints allow spinner rendering.
 
 ## `surface` payload (v4.2.0+)
 
@@ -312,7 +807,7 @@ Integration repair is current-user scoped. Expected artifacts include Start Menu
 | Field | Type | Description |
 |--------|------|-------------|
 | `subcommand` | string | `status`, `open`, `html`, or `pulse`. |
-| `edition` | object | Exodus Limited Edition state: version, branch, brand assets, center/control/signal state, motion policy, and entry commands. |
+| `edition` | object | WINDO command-surface state: version, branch, brand assets, center/control/signal state, motion policy, and entry commands. |
 | `htmlPath` | string | Present for `open`/`html`; local animated edition console path. |
 | `pulseRendered` | bool | Present for `pulse`; true when terminal motion was rendered. |
 | `exitCode` | number | **0** ready/success, **2** bad args/write failure, **3** inherited center attention state. |
@@ -365,12 +860,12 @@ Integration repair is current-user scoped. Expected artifacts include Start Menu
 | `completionPolicy` | object | Effective tab-completion policy: `mode`, `source`, `environmentValue`, `preferenceValue`, `prefsFile`, `description`. |
 | `outputPolicy` | object | **v4.0.1+** Effective compact/quiet/legacy result-output policy. |
 | `motionPolicy` | object | **v4.2.0+** Effective terminal motion policy when present in newer profiles. |
-| `extrasIndexUrl` | string | **v3.2.1+** Resolved extras catalog URL (**`WINDO_EXTRAS_INDEX_URL`** or default **`Exodus`** `extras/index.json`) |
+| `extrasIndexUrl` | string | **v3.2.1+** Resolved extras catalog URL (**`WINDO_EXTRAS_INDEX_URL`** or default **`v6`** `extras/index.json`) |
 | `exitCode` | number | **0** |
 
 The **`settings`** array is the machine-readable source of truth for env-driven behavior; **`extrasIndexUrl`** duplicates the resolved URL for quick automation without parsing **`effectiveNote`** on the **`WINDO_EXTRAS_INDEX_URL`** row.
 
-## `completion` payload (v3.4.0+ / v5.4.1+)
+## `completion` payload (v3.4.0+ / v6.0.0+)
 
 | Field | Type | Description |
 |--------|------|-------------|
@@ -380,6 +875,11 @@ The **`settings`** array is the machine-readable source of truth for env-driven 
 | `saved` | bool | Present when a mode was written to **`windo_prefs.json`**. |
 | `reset` | bool | Present when saved mode was removed. |
 | `exitCode` | number | **0** on success, **2** for invalid mode or prefs write failure, **3** for doctor/repair attention state. |
+
+### Completion/help semantics (v6)
+
+`completion` command arguments support `status`, `doctor`, `repair`, `native-first`, `hybrid`, `windo`, and `off` as canonical modes, with compatibility aliases (`native`, `stealth`, `builtin`, `builtins`) normalized to existing v6 modes.  
+The same command-topic registry used for completions powers `windo help <topic>` suggestion behavior, enabling parity between tab-completion and help query normalization.
 
 ## `roadmap` payload (release runway)
 
@@ -561,7 +1061,7 @@ Read-only readiness scan from `windo preflight --json`.
 
 ## `launchpad` payload (v3.3.0+)
 
-Special Edition command center from `windo launchpad --json`; `--tray` starts a native Windows Forms tray process and does not depend on a browser.
+Command center from `windo launchpad --json`; `--tray` starts a native Windows Forms tray process and does not depend on a browser.
 
 | Field | Type | Description |
 |--------|------|-------------|
@@ -768,6 +1268,9 @@ Read-only **AI / local env hygiene** (vendor API and **Ollama** env **names** on
 | `suggestions` | array | (not found) Up to **3** topic objects: `Name`, `Category`, `Summary` |
 | `command` | object | (found) Selected topic: `Name`, `Aliases`, `Category`, `Summary`, `Description`, `Syntax`, `Notes`, `Examples` |
 | `exitCode` | number | **0** when found or index; **2** when not found |
+
+`help` topic matching is case-insensitive and alias-aware.  
+The CLI `help`/`completion` index path is the same source of truth for topic names, so automation can rely on consistent `topic` normalization and `suggestions` output.
 
 ## `export` payload (v3.2.2+)
 

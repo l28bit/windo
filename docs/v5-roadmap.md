@@ -26,8 +26,8 @@ WINDO's major-version path should keep the product useful every step of the way.
 | 4.4.0 | Command Center Actions | Make the control-plane queue executable and inspectable. | Shipped |
 | 4.5.0 | Signal Deck | Make diagnosis and audit evidence faster to consume. | Shipped |
 | 4.6.0 | Native Shell Polish | Harden tray, surface, motion, and native readiness before V5. | Shipped |
-| 5.0.0 | Command Center Special Edition | A native-feeling Windows command center for deliberate elevation. | Shipped |
-| 5.1.0 | Exodus Limited Edition | Add the branded limited-edition surface, edition pulse, Exodus source move, and hardened command grammar. | Shipped |
+| 5.0.0 | Command Center | A native-feeling Windows command center for deliberate elevation. | Shipped |
+| 5.1.0 | Command Center Evolution | Add the unified surface, edition pulse, Exodus source move, and hardened command grammar. | Shipped |
 | 5.1.1 | Surface Polish | Make dashboard, launchpad, tray popup, and status toast feel like one designed operator system. | Shipped |
 | 5.2.0 | Native Surface Panel | Move the Command Center deeper into browser-independent Windows surfaces. | Shipped |
 | 5.3.0 | Power Studio | Turn the native surface into guided Windows wizard workflows. | Shipped |
@@ -130,7 +130,7 @@ WINDO's major-version path should keep the product useful every step of the way.
 - `windo surface open` starts the browser-independent tray surface.
 - `native-companion/` scaffolds the future compiled-helper path without making it required.
 
-### 5.0.0 Command Center Special Edition
+### 5.0.0 Command Center
 
 - `windo center` becomes the V5 operator entrypoint.
 - `windo center open|tray` starts the native command center.
@@ -138,10 +138,10 @@ WINDO's major-version path should keep the product useful every step of the way.
 - V5 unifies tray, control plane, Signal Deck, surface, motion, trust/source, recipes/modules/extras, audit, and export.
 - Public copy focuses on the native-feeling Windows command center while keeping future companion-app internals reserved.
 
-### 5.1.0 Exodus Limited Edition
+### 5.1.0 Command Center Evolution
 
-- `windo edition status|open|html|pulse` adds the V5+ limited-edition visual surface.
-- The edition console uses final brand assets, animated local HTML, Command Center status, curated action posture, and Exodus release identity.
+- `windo edition status|open|html|pulse` adds the V5+ visual command surface.
+- The edition console uses final brand assets, animated local HTML, Command Center status, and curated action posture.
 - `windo control preview`, `windo control execute <request-id>`, `windo center actions`, `windo center preview`, `windo center execute-next`, and `windo signal open` make the command grammar explicit before future native expansion.
 - Install/update, checksum, trust, extras, and README source references move from `Genesis` to `Exodus`.
 
