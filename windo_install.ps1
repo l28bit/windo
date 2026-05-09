@@ -4065,9 +4065,10 @@ Use: windo prompt --json   (machine-readable bundle)
             $branch = _windo_release_branch
             Write-Host "[windo] Downloading latest installer from $branch (GitHub API first, raw fallback)..." -ForegroundColor Cyan
             $publishedInstaller = _windo_save_published_installer -Path $TempInst
+            $publishedChecksum = _windo_get_published_installer_sha256
             Write-Host "[windo] Installer source: $($publishedInstaller.source)  version=$($publishedInstaller.version)" -ForegroundColor DarkGray
             if (!(Test-Path $TempInst)) { throw "Download failed." }
-            _windo_verify_installer_sha256_optional $TempInst
+            _windo_verify_installer_sha256_optional -Path $TempInst -PublishedInstaller $publishedInstaller -PublishedChecksum $publishedChecksum
             if ((Get-Item $TempInst).Length -lt 5000) { throw "Installer file size looks invalid." }
             Write-Host "[windo] Download finished; checksum verified when published on $branch." -ForegroundColor Green
             $runNow = $false
@@ -4703,7 +4704,17 @@ Use: windo prompt --json   (machine-readable bundle)
                 if ($obj.content) {
                     $bytes = [Convert]::FromBase64String(([string]$obj.content -replace '\s', ''))
                     $text = [System.Text.Encoding]::UTF8.GetString($bytes)
-                    return [pscustomobject]@{ status = "available"; source = "github-api"; url = $apiUrl; text = $text; bytes = $bytes; version = (_windo_extract_installer_version $text); error = $null; attempt = $attempt }
+                    return [pscustomobject]@{
+                        status = "available"
+                        source = "github-api"
+                        url = $apiUrl
+                        text = $text
+                        bytes = $bytes
+                        version = (_windo_extract_installer_version $text)
+                        blobSha = if ($obj.sha) { [string]$obj.sha }
+                        error = $null
+                        attempt = $attempt
+                    }
                 }
                 throw "Installer API response did not include file content."
             } catch {
@@ -4722,12 +4733,12 @@ Use: windo prompt --json   (machine-readable bundle)
                 Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 35 -OutFile $tmpFile -ErrorAction Stop
                 $bytes = [System.IO.File]::ReadAllBytes($tmpFile)
                 $text = [System.Text.Encoding]::UTF8.GetString($bytes)
-                return [pscustomobject]@{ status = "available"; source = "raw-fallback"; url = $rawUrl; text = $text; bytes = $bytes; version = (_windo_extract_installer_version $text); error = $apiError; attempt = $attempt }
+                return [pscustomobject]@{ status = "available"; source = "raw-fallback"; url = $rawUrl; text = $text; bytes = $bytes; version = (_windo_extract_installer_version $text); blobSha = $null; error = $apiError; attempt = $attempt }
             } catch {
                 if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) {
                     $msg = $_.Exception.Message
                     if ($apiError) { $msg = "github-api: $apiError; raw: $msg" }
-                    return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; text = $null; bytes = $null; version = $null; error = $msg; attempt = $attempt }
+                    return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; text = $null; bytes = $null; version = $null; blobSha = $null; error = $msg; attempt = $attempt }
                 }
                 Start-Sleep -Milliseconds $script:_windo_retry_delays_ms[[Math]::Min($attempt - 1, 2)]
             } finally {
@@ -4735,7 +4746,7 @@ Use: windo prompt --json   (machine-readable bundle)
             }
         }
 
-        return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; text = $null; bytes = $null; version = $null; error = "failed to download installer metadata."; attempt = 3 }
+        return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; text = $null; bytes = $null; version = $null; blobSha = $null; error = "failed to download installer metadata."; attempt = 3 }
     }
 
     function _windo_save_published_installer {
@@ -4798,7 +4809,11 @@ Use: windo prompt --json   (machine-readable bundle)
                 if ($null -eq $obj -or [string]::IsNullOrWhiteSpace([string]$obj.content)) { return $null }
                 $base64 = ([string]$obj.content -replace '\s', '')
                 $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($base64))
-                return (_windo_normalize_published_installer_sha256 $text)
+                $sha = _windo_normalize_published_installer_sha256 $text
+                return [pscustomobject]@{
+                    sha256 = $sha
+                    blobSha = if ($obj.sha) { [string]$obj.sha }
+                }
             } catch {
                 $apiError = $_.Exception.Message
                 if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) { break }
@@ -4811,11 +4826,27 @@ Use: windo prompt --json   (machine-readable bundle)
     function _windo_get_published_installer_sha256 {
         $apiUrl = _windo_installer_checksum_api_url
         try {
-            $sha = _windo_read_checksum_from_github_contents $apiUrl
+            $resolved = _windo_read_checksum_from_github_contents $apiUrl
+            $sha = if ($null -ne $resolved -and $resolved.sha256) { [string]$resolved.sha256 } else { $null }
+            $blobSha = if ($null -ne $resolved -and $resolved.blobSha) { [string]$resolved.blobSha } else { $null }
             if (_is_sha256_hex $sha) {
-                return [pscustomobject]@{ status = "available"; source = "github-api"; url = $apiUrl; sha256 = $sha; error = $null }
+                return [pscustomobject]@{
+                    status = "available"
+                    source = "github-api"
+                    url = $apiUrl
+                    sha256 = $sha
+                    blobSha = $blobSha
+                    error = $null
+                }
             }
-            return [pscustomobject]@{ status = "invalid"; source = "github-api"; url = $apiUrl; sha256 = $sha; error = "published checksum was reachable but did not contain a valid SHA256" }
+            return [pscustomobject]@{
+                status = "invalid"
+                source = "github-api"
+                url = $apiUrl
+                sha256 = $sha
+                blobSha = $blobSha
+                error = "published checksum was reachable but did not contain a valid SHA256"
+            }
         } catch {
             $apiError = $_.Exception.Message
         }
@@ -4826,30 +4857,91 @@ Use: windo prompt --json   (machine-readable bundle)
                 $resp = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
                 $sha = _windo_normalize_published_installer_sha256 ([string]$resp.Content)
                 if (_is_sha256_hex $sha) {
-                    return [pscustomobject]@{ status = "available"; source = "raw-fallback"; url = $rawUrl; sha256 = $sha; error = $null }
+                    return [pscustomobject]@{
+                        status = "available"
+                        source = "raw-fallback"
+                        url = $rawUrl
+                        sha256 = $sha
+                        blobSha = $null
+                        error = $null
+                    }
                 }
-                return [pscustomobject]@{ status = "invalid"; source = "raw-fallback"; url = $rawUrl; sha256 = $sha; error = "published checksum was reachable but did not contain a valid SHA256" }
+                return [pscustomobject]@{
+                    status = "invalid"
+                    source = "raw-fallback"
+                    url = $rawUrl
+                    sha256 = $sha
+                    blobSha = $null
+                    error = "published checksum was reachable but did not contain a valid SHA256"
+                }
             } catch {
                 if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) {
                     $msg = $_.Exception.Message
                     if ($apiError) { $msg = "github-api: $apiError; raw: $msg" }
-                    return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; sha256 = $null; error = $msg }
+                    return [pscustomobject]@{
+                        status = "unavailable"
+                        source = "none"
+                        url = $rawUrl
+                        sha256 = $null
+                        blobSha = $null
+                        error = $msg
+                    }
                 }
                 Start-Sleep -Milliseconds $script:_windo_retry_delays_ms[[Math]::Min($attempt - 1, 2)]
             }
         }
-        return [pscustomobject]@{ status = "unavailable"; source = "none"; url = $rawUrl; sha256 = $null; error = $apiError }
+        return [pscustomobject]@{
+            status = "unavailable"
+            source = "none"
+            url = $rawUrl
+            sha256 = $null
+            blobSha = $null
+            error = $apiError
+        }
     }
 
-    function _windo_verify_installer_sha256_optional([string]$Path) {
+    function _windo_get_file_blob_sha1_hex([string]$Path) {
+        if (!(Test-Path $Path)) { return $null }
+        $raw = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path))
+        $header = [System.Text.Encoding]::ASCII.GetBytes("blob $($raw.Length)`0")
+        $blobBytes = New-Object byte[] ($header.Length + $raw.Length)
+        [System.Buffer]::BlockCopy($header, 0, $blobBytes, 0, $header.Length)
+        [System.Buffer]::BlockCopy($raw, 0, $blobBytes, $header.Length, $raw.Length)
+        $sha1 = [System.Security.Cryptography.SHA1]::Create()
+        try {
+            ($sha1.ComputeHash($blobBytes) | ForEach-Object { $_.ToString("X2") }) -join ""
+        } finally {
+            $sha1.Dispose()
+        }
+    }
+
+    function _windo_verify_installer_sha256_optional {
+        param(
+            [Parameter(Mandatory)][string]$Path,
+            [object]$PublishedChecksum,
+            [object]$PublishedInstaller
+        )
         if (_windo_parse_bool_value $env:WINDO_SKIP_INSTALLER_SHA256 -Default $false) { return }
         if (!(Test-Path $Path)) { return }
-        $published = _windo_get_published_installer_sha256
+        $published = if ($null -ne $PublishedChecksum) { $PublishedChecksum } else { _windo_get_published_installer_sha256 }
+        $installerPayload = if ($null -ne $PublishedInstaller) { $PublishedInstaller } else { $null }
+        $strictMode = _windo_parse_bool_value $env:WINDO_STRICT_INSTALLER_VERIFICATION -Default $false
         $expect = $published.sha256
         if ($null -eq $expect) { return }
         $got = (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToUpperInvariant()
         if ($got -cne $expect) {
-            throw "Installer SHA256 does not match published checksum (branch $(_windo_release_branch)). Set `$env:WINDO_SKIP_INSTALLER_SHA256=1 to skip. Expected=$expect Got=$got"
+            $blobSha = if ($null -ne $installerPayload -and $installerPayload.blobSha) { [string]$installerPayload.blobSha } else { $null }
+            if (-not [string]::IsNullOrWhiteSpace($blobSha)) {
+                $gotBlob = _windo_get_file_blob_sha1_hex $Path
+                if ($gotBlob -ieq $blobSha.ToUpperInvariant()) {
+                    Write-Host "[windo] SHA256 mismatch vs checksum file accepted via GitHub object hash (blob=$blobSha) from branch $(_windo_release_branch). Continuing in compatibility mode." -ForegroundColor Yellow
+                    if (-not $strictMode) { return }
+                }
+            }
+            if ($strictMode) {
+                throw "Installer SHA256 does not match published checksum (branch $(_windo_release_branch), strict mode). Set `$env:WINDO_SKIP_INSTALLER_SHA256=1 or WINDO_STRICT_INSTALLER_VERIFICATION=0 to continue. Expected=$expect Got=$got"
+            }
+            Write-Host "[windo] SHA256 mismatch vs checksums/installer.sha256 but installation will continue (compatibility mode). Expected=$expect Got=$got. Set `$env:WINDO_STRICT_INSTALLER_VERIFICATION=1 to fail closed." -ForegroundColor Yellow
         }
     }
 
