@@ -11,7 +11,38 @@ function Test-WindoBootstrapProcessElevated {
 }
 
 function Get-WindoBootstrapReleaseBranch {
-    $branch = if ($null -ne $env:WINDO_TRACKING_BRANCH -and -not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { [string]$env:WINDO_TRACKING_BRANCH } else { "v6" }
+    $raw = if ($null -ne $env:WINDO_TRACKING_BRANCH -and -not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { [string]$env:WINDO_TRACKING_BRANCH } else { "Exodus" }
+    $trimmed = $raw.Trim()
+    $lower = $trimmed.ToLowerInvariant()
+    if ($lower -eq "genesis" -or $lower -eq "genisis") { return "Exodus" }
+    if ($trimmed -notmatch '^[A-Za-z0-9._-]{1,64}$') { return "Exodus" }
+    return $trimmed
+}
+$script:_windo_bootstrap_release_ref = $null
+
+function Get-WindoBootstrapReleaseRef {
+    if (-not [string]::IsNullOrWhiteSpace($env:WINDO_RELEASE_COMMIT)) {
+        $envCommit = [string]$env:WINDO_RELEASE_COMMIT
+        if ($envCommit -match '^[a-fA-F0-9]{40}$') {
+            return $envCommit.ToLowerInvariant()
+        }
+    }
+    if ($null -ne $script:_windo_bootstrap_release_ref) { return $script:_windo_bootstrap_release_ref }
+
+    $branch = Get-WindoBootstrapReleaseBranch
+    try {
+        $uri = "https://api.github.com/repos/l28bit/windo/commits/$branch"
+        $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+        $obj = $resp.Content | ConvertFrom-Json -ErrorAction Stop
+        if ($obj.sha) {
+            $script:_windo_bootstrap_release_ref = [string]$obj.sha
+            return $script:_windo_bootstrap_release_ref
+        }
+    } catch {
+        Write-WindoBootstrapStep -Status warn -Label "Release ref resolution failed" -Detail "Falling back to branch '$branch'." -Color Yellow
+    }
+
+    $script:_windo_bootstrap_release_ref = $branch
     return $branch
 }
 
@@ -157,11 +188,11 @@ function Invoke-WindoBootstrapDownload {
 }
 
 function Get-WindoBootstrapInstallerRawUrl {
-    "https://raw.githubusercontent.com/l28bit/windo/$((Get-WindoBootstrapReleaseBranch))/windo_install.ps1"
+    "https://raw.githubusercontent.com/l28bit/windo/$((Get-WindoBootstrapReleaseRef))/windo_install.ps1"
 }
 
 function Get-WindoBootstrapInstallerApiUrl {
-    "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=$((Get-WindoBootstrapReleaseBranch))"
+    "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=$((Get-WindoBootstrapReleaseRef))"
 }
 
 function Save-WindoBootstrapPublishedInstaller {
@@ -197,11 +228,11 @@ function Save-WindoBootstrapPublishedInstaller {
 }
 
 function Get-WindoBootstrapChecksumRawUrl {
-    "https://raw.githubusercontent.com/l28bit/windo/$((Get-WindoBootstrapReleaseBranch))/checksums/installer.sha256"
+    "https://raw.githubusercontent.com/l28bit/windo/$((Get-WindoBootstrapReleaseRef))/checksums/installer.sha256"
 }
 
 function Get-WindoBootstrapChecksumApiUrl {
-    "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=$((Get-WindoBootstrapReleaseBranch))"
+    "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=$((Get-WindoBootstrapReleaseRef))"
 }
 
 function Get-WindoBootstrapNormalizedPublishedChecksum([string]$Text) {

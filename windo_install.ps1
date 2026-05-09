@@ -4062,13 +4062,14 @@ Use: windo prompt --json   (machine-readable bundle)
         }
         $TempInst = Join-Path $env:TEMP ("windo_install_" + [Guid]::NewGuid().ToString("n") + ".ps1")
         try {
-            Write-Host "[windo] Downloading latest installer from v6 (GitHub API first, raw fallback)..." -ForegroundColor Cyan
+            $branch = _windo_release_branch
+            Write-Host "[windo] Downloading latest installer from $branch (GitHub API first, raw fallback)..." -ForegroundColor Cyan
             $publishedInstaller = _windo_save_published_installer -Path $TempInst
             Write-Host "[windo] Installer source: $($publishedInstaller.source)  version=$($publishedInstaller.version)" -ForegroundColor DarkGray
             if (!(Test-Path $TempInst)) { throw "Download failed." }
             _windo_verify_installer_sha256_optional $TempInst
             if ((Get-Item $TempInst).Length -lt 5000) { throw "Installer file size looks invalid." }
-            Write-Host "[windo] Download finished; checksum verified when published on v6." -ForegroundColor Green
+            Write-Host "[windo] Download finished; checksum verified when published on $branch." -ForegroundColor Green
             $runNow = $false
             if ($ForceContinue -or $env:WINDO_INSTALL_NONINTERACTIVE -or $env:CI) {
                 $runNow = $true
@@ -4102,7 +4103,8 @@ Use: windo prompt --json   (machine-readable bundle)
             Write-Host "[windo] Starting installer. When it finishes, reload: . `$PROFILE" -ForegroundColor Yellow
             _windo_start_downloaded_installer -ScriptPath $TempInst
         } catch {
-            Write-Host "[windo] Could not install from v6: $($_.Exception.Message)" -ForegroundColor Red
+            $branch = _windo_release_branch
+            Write-Host "[windo] Could not install from $branch: $($_.Exception.Message)" -ForegroundColor Red
             _windo_set_exit 1
         } finally {
             if (Test-Path -LiteralPath $TempInst) { Remove-Item -LiteralPath $TempInst -Force -ErrorAction SilentlyContinue }
@@ -4621,9 +4623,39 @@ Use: windo prompt --json   (machine-readable bundle)
         Remove-Job $job -Force -ErrorAction SilentlyContinue
     }
 
+    $script:_windo_release_ref = $null
+
     function _windo_release_branch {
-        if (-not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { return [string]$env:WINDO_TRACKING_BRANCH }
-        return "v6"
+        $raw = if (-not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { [string]$env:WINDO_TRACKING_BRANCH } else { "Exodus" }
+        $trimmed = $raw.Trim()
+        $lower = $trimmed.ToLowerInvariant()
+        if ($lower -eq "genesis" -or $lower -eq "genisis") { return "Exodus" }
+        if ($trimmed -notmatch '^[A-Za-z0-9._-]{1,64}$') { return "Exodus" }
+        return $trimmed
+    }
+
+    function _windo_release_ref {
+        if (-not [string]::IsNullOrWhiteSpace($env:WINDO_RELEASE_COMMIT)) {
+            $candidate = [string]$env:WINDO_RELEASE_COMMIT
+            if ($candidate -match '^[a-fA-F0-9]{40}$') { return $candidate.ToLowerInvariant() }
+        }
+        if ($null -ne $script:_windo_release_ref) { return $script:_windo_release_ref }
+
+        $branch = _windo_release_branch
+        try {
+            $uri = "https://api.github.com/repos/l28bit/windo/commits/$branch"
+            $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+            $obj = $resp.Content | ConvertFrom-Json -ErrorAction Stop
+            if ($obj.sha) {
+                $script:_windo_release_ref = [string]$obj.sha
+                return $script:_windo_release_ref
+            }
+        } catch {
+            Write-Host "[windo] Release ref lookup failed; falling back to branch '$branch'." -ForegroundColor Yellow
+        }
+
+        $script:_windo_release_ref = $branch
+        return $branch
     }
 
     function _windo_is_retryable_web_error {
@@ -4644,13 +4676,13 @@ Use: windo prompt --json   (machine-readable bundle)
     $script:_windo_retry_delays_ms = @(250, 850, 2200)
 
     function _windo_installer_raw_url {
-        $branch = _windo_release_branch
-        return "https://raw.githubusercontent.com/l28bit/windo/$branch/windo_install.ps1"
+        $ref = _windo_release_ref
+        return "https://raw.githubusercontent.com/l28bit/windo/$ref/windo_install.ps1"
     }
 
     function _windo_installer_api_url {
-        $branch = _windo_release_branch
-        return "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=$branch"
+        $ref = _windo_release_ref
+        return "https://api.github.com/repos/l28bit/windo/contents/windo_install.ps1?ref=$ref"
     }
 
     function _windo_extract_installer_version([string]$Text) {
@@ -4748,13 +4780,13 @@ Use: windo prompt --json   (machine-readable bundle)
     }
 
     function _windo_installer_checksum_raw_url {
-        $branch = _windo_release_branch
-        return "https://raw.githubusercontent.com/l28bit/windo/$branch/checksums/installer.sha256"
+        $ref = _windo_release_ref
+        return "https://raw.githubusercontent.com/l28bit/windo/$ref/checksums/installer.sha256"
     }
 
     function _windo_installer_checksum_api_url {
-        $branch = _windo_release_branch
-        return "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=$branch"
+        $ref = _windo_release_ref
+        return "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=$ref"
     }
 
     function _windo_read_checksum_from_github_contents([string]$Url) {

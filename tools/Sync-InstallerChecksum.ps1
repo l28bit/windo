@@ -9,10 +9,12 @@ $ErrorActionPreference = "Stop"
 function Get-WindoReleaseBranch {
     param([string]$Branch)
 
-    $resolved = if ([string]::IsNullOrWhiteSpace($Branch)) { "v6" } else { [string]$Branch.Trim() }
+    $resolved = if ([string]::IsNullOrWhiteSpace($Branch)) { "Exodus" } else { [string]$Branch.Trim() }
     if ($resolved -notmatch '^[A-Za-z0-9._-]{1,64}$') {
-        return "v6"
+        return "Exodus"
     }
+    $lower = $resolved.ToLowerInvariant()
+    if ($lower -eq "genesis" -or $lower -eq "genisis") { return "Exodus" }
     return $resolved
 }
 
