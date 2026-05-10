@@ -78,6 +78,24 @@ function _windo_bootstrap_is_retryable_web_error {
     return $false
 }
 
+function Get-WindoBootstrapManifestValue([string]$Text, [string]$Key) {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    if ([string]::IsNullOrWhiteSpace($Key)) { return $null }
+
+    $want = $Key.Trim()
+    foreach ($line in ($Text -split "`r?`n")) {
+        $trim = [string]$line.Trim()
+        if ([string]::IsNullOrWhiteSpace($trim) -or $trim.StartsWith("#")) { continue }
+        $equal = $trim.IndexOf("=")
+        if ($equal -lt 0) { continue }
+        $name = $trim.Substring(0, $equal).Trim()
+        if ($name -ieq $want) {
+            return $trim.Substring($equal + 1).Trim()
+        }
+    }
+    return $null
+}
+
 $script:_windo_bootstrap_retry_ms = @(350, 900, 2200)
 
 $Temp = Join-Path $env:TEMP ("windo_install_" + [Guid]::NewGuid().ToString("n") + ".ps1")
@@ -294,6 +312,15 @@ function Get-WindoBootstrapNormalizedPublishedChecksum([string]$Text) {
     return $null
 }
 
+function Get-WindoBootstrapParsedChecksumPayload([string]$Text) {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    return [pscustomobject]@{
+        sha256 = Get-WindoBootstrapNormalizedPublishedChecksum $Text
+        releaseCommit = Get-WindoBootstrapManifestValue $Text "releaseCommit"
+        releaseBranch = Get-WindoBootstrapManifestValue $Text "releaseBranch"
+    }
+}
+
 function Get-WindoBootstrapVersionedPublishedChecksum([string]$Version) {
     if ([string]::IsNullOrWhiteSpace($Version)) { return $null }
     $trimVersion = $Version.Trim()
@@ -334,8 +361,23 @@ function Get-WindoBootstrapPublishedChecksum {
             $obj = $api.Content | ConvertFrom-Json -ErrorAction Stop
             if ($obj.content) {
                 $contentText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(([string]$obj.content -replace '\s', '')))
-                $sha = Get-WindoBootstrapNormalizedPublishedChecksum $contentText
-                if ($sha) { return $sha }
+                $payload = Get-WindoBootstrapParsedChecksumPayload $contentText
+                $sha = $payload.sha256
+                $releaseCommit = $payload.releaseCommit
+                $releaseBranch = $payload.releaseBranch
+                $blobSha = if ($obj.sha) { [string]$obj.sha } else { $null }
+                if ($sha) {
+                    return [pscustomobject]@{
+                        status = "available"
+                        source = "github-api"
+                        url = $apiUrl
+                        sha256 = $sha
+                        blobSha = $blobSha
+                        releaseCommit = $releaseCommit
+                        releaseBranch = $releaseBranch
+                        error = $null
+                    }
+                }
                 throw "Published checksum payload was present but did not contain a valid SHA256."
             }
             throw "Published checksum API response was empty."
@@ -353,8 +395,22 @@ function Get-WindoBootstrapPublishedChecksum {
         try {
             $wr = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
             if ($null -ne $wr.Content) {
-                $sha = Get-WindoBootstrapNormalizedPublishedChecksum ([string]$wr.Content)
-                if ($sha) { return $sha }
+                $payload = Get-WindoBootstrapParsedChecksumPayload ([string]$wr.Content)
+                $sha = $payload.sha256
+                $releaseCommit = $payload.releaseCommit
+                $releaseBranch = $payload.releaseBranch
+                if ($sha) {
+                    return [pscustomobject]@{
+                        status = "available"
+                        source = "raw-fallback"
+                        url = $rawUrl
+                        sha256 = $sha
+                        blobSha = $null
+                        releaseCommit = $releaseCommit
+                        releaseBranch = $releaseBranch
+                        error = $null
+                    }
+                }
                 throw "Published checksum payload was present but did not contain a valid SHA256."
             }
             throw "Published checksum raw response was empty."
@@ -367,7 +423,16 @@ function Get-WindoBootstrapPublishedChecksum {
     if ($apiError) {
         Write-WindoBootstrapStep -Status warn -Label "Checksum source check failed" -Detail $apiError -Color Yellow
     }
-    return $null
+    return [pscustomobject]@{
+        status = "unavailable"
+        source = "none"
+        url = $rawUrl
+        sha256 = $null
+        blobSha = $null
+        releaseCommit = "unknown"
+        releaseBranch = Get-WindoBootstrapReleaseBranch
+        error = $apiError
+    }
 }
 
 function Start-WindoBootstrapInstaller {
@@ -425,11 +490,21 @@ try {
 
     if (-not (ConvertFrom-WindoBootstrapBool -Name WINDO_SKIP_INSTALLER_SHA256)) {
         Write-WindoBootstrapStep -Status run -Label "Verifying installer checksum" -Detail "published checksums/installer.sha256 (GitHub API, raw fallback)"
+        $strictMode = ConvertFrom-WindoBootstrapBool -Name WINDO_STRICT_INSTALLER_VERIFICATION -Default $false
+        $expected = Get-WindoBootstrapPublishedChecksum
+        $releaseBranch = Get-WindoBootstrapReleaseBranch
+        $releaseRef = Get-WindoBootstrapReleaseRef
         try {
-            $expected = Get-WindoBootstrapPublishedChecksum
-            if ($null -ne $expected) {
+            if ($null -eq $expected -or $expected.status -ne "available" -or -not $expected.sha256) {
+                if ($strictMode) {
+                    $detail = if ($null -ne $expected -and $expected.error) { $expected.error } else { "published checksum was unavailable" }
+                    throw "Installer SHA256 does not match a verifiable published checksum source (strict mode). Set WINDO_SKIP_INSTALLER_SHA256=1 to skip. $detail"
+                }
+                Write-WindoBootstrapStep -Status warn -Label "Checksum verification delayed" -Detail "Could not retrieve a parseable published checksum now; continuing in compatibility mode." -Color Yellow
+            } else {
+                $expectedSha = [string]$expected.sha256
                 $got = (Get-FileHash -Path $Temp -Algorithm SHA256).Hash.ToUpperInvariant()
-                if ($got -cne $expected) {
+                if ($got -cne $expectedSha) {
                     $blobSha = if ($downloadSource.BlobSha) { [string]$downloadSource.BlobSha } else { $null }
                     if (-not [string]::IsNullOrWhiteSpace($blobSha)) {
                         $gotBlob = Get-WindoBootstrapFileBlobSha1 -Path $Temp
@@ -448,7 +523,22 @@ try {
                             Write-WindoBootstrapStep -Status warn -Label "Checksum drift tolerated" -Detail "SHA256 matches checksums/installer.sha256 snapshot for v$version on branch $releaseBranch. Continuing in compatibility mode." -Color Yellow
                             $expected = $null
                         } else {
-                            throw "Installer SHA256 does not match published checksum. Set WINDO_SKIP_INSTALLER_SHA256=1 to skip. Expected=$expected Got=$got"
+                            $releaseCommit = if ($null -ne $expected -and $expected.PSObject.Properties.Name -contains "releaseCommit") { [string]$expected.releaseCommit } else { $null }
+                            if ([string]::IsNullOrWhiteSpace($releaseCommit) -or ($releaseCommit -notmatch '^[a-fA-F0-9]{40}$')) {
+                                Write-WindoBootstrapStep -Status warn -Label "Checksum drift tolerated" -Detail "Published checksum metadata is not release-commit pinned (releaseCommit=$releaseCommit). Continuing in compatibility mode." -Color Yellow
+                                Write-WindoBootstrapStep -Status ok -Label "Checksum accepted" -Color Green
+                                $expected = $null
+                            } elseif ($releaseRef -match '^[a-fA-F0-9]{40}$' -and $releaseCommit -ine $releaseRef) {
+                                if ($strictMode) {
+                                    throw "Installer SHA256 does not match published checksum for release ref $releaseRef. Published manifest releaseCommit=$releaseCommit. Expected=$expectedSha Got=$got. Set WINDO_SKIP_INSTALLER_SHA256=1 to continue."
+                                }
+                                Write-WindoBootstrapStep -Status warn -Label "Checksum drift tolerated" -Detail "Published checksum releaseCommit=$releaseCommit does not match resolved ref=$releaseRef. Continuing in compatibility mode." -Color Yellow
+                                Write-WindoBootstrapStep -Status ok -Label "Checksum accepted" -Color Green
+                                $expected = $null
+                            }
+                            if ($null -ne $expected) {
+                                throw "Installer SHA256 does not match published checksum. Set WINDO_SKIP_INSTALLER_SHA256=1 or WINDO_STRICT_INSTALLER_VERIFICATION=0 to continue. Expected=$expectedSha Got=$got"
+                            }
                         }
                     }
                 }

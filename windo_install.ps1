@@ -5009,7 +5009,17 @@ Use: windo prompt --json   (machine-readable bundle)
                 if (-not $strictMode) { return }
             }
             $releaseCommit = if ($published -and $published.PSObject.Properties.Name -contains "releaseCommit") { [string]$published.releaseCommit } else { $null }
-            if ([string]::IsNullOrWhiteSpace($releaseCommit) -or ($releaseCommit -notmatch '^[a-fA-F0-9]{40}$')) {
+            $resolvedRef = _windo_release_ref
+            if ($resolvedRef -match '^[a-fA-F0-9]{40}$') {
+                if ([string]::IsNullOrWhiteSpace($releaseCommit) -or ($releaseCommit -notmatch '^[a-fA-F0-9]{40}$')) {
+                    Write-Host "[windo] Published checksum metadata is missing a valid releaseCommit while installer is pinned to $resolvedRef. Continuing in compatibility mode due manifest drift." -ForegroundColor Yellow
+                    if (-not $strictMode) { return }
+                }
+                if ($releaseCommit -ine $resolvedRef) {
+                    Write-Host "[windo] Published checksum releaseCommit ($releaseCommit) does not match resolved release ref ($resolvedRef). Continuing in compatibility mode." -ForegroundColor Yellow
+                    if (-not $strictMode) { return }
+                }
+            } elseif ([string]::IsNullOrWhiteSpace($releaseCommit) -or ($releaseCommit -notmatch '^[a-fA-F0-9]{40}$')) {
                 Write-Host "[windo] Published checksum metadata is not release-commit pinned (releaseCommit=$releaseCommit). Continuing in compatibility mode due manifest drift." -ForegroundColor Yellow
                 if (-not $strictMode) { return }
             }
