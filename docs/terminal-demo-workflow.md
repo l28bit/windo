@@ -4,7 +4,7 @@ This concise flow covers install/upgrade/self-update/task repair/history from on
 
 ```powershell
 # 1) Fresh install (official path)
-iex (irm https://raw.githubusercontent.com/l28bit/windo/v6/bootstrap.ps1)
+iex (irm https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1)
 ```
 
 ```text
@@ -23,9 +23,20 @@ windo upgrade
 
 ```text
 [windo] install-latest: download is not performed while running as Administrator.
-[windo] Download finished; checksum verified when published on v6.
+[windo] Download finished; checksum verified when published on Exodus.
 [windo] The installer is ready. You can review the file before continuing: %TEMP%\windo_install.ps1
+[windo] Run the installer now? (If approved, this same command relaunches elevated to register tasks.) [y/N]
 [windo] Starting installer (pwsh.exe). When it finishes, reload: . $PROFILE
+```
+
+```powershell
+# 2d) Legacy prompt check: if you see unfamiliar text like `Input content`
+Remove-Item Env:SUDO_PROMPT -ErrorAction SilentlyContinue
+windo install-latest
+```
+
+```text
+If WINDO is showing an extra legacy `Read-Host`-style prompt, start from a clean, non-elevated shell (or clear `SUDO_PROMPT`) and rerun.
 ```
 
 ```powershell

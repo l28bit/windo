@@ -34,7 +34,7 @@ During installation, WINDO attempts to tighten `.pwsh_secure` ACLs to the curren
 
 ## Bootstrap and upgrade integrity
 
-`bootstrap.ps1`, **`windo install-latest`**, and **`windo upgrade`** (same as install-latest) download `windo_install.ps1` from the canonical **`v6`** branch. **v3.1.1+:** that download is **refused while the shell is elevated** (Administrator), so remote content is not fetched under high privilege; run from a normal user PowerShell, confirm after verification, then the installer may prompt for **UAC** during repair or task registration. Unattended flows may set **`WINDO_BOOTSTRAP_FORCE_INSTALL`**, **`WINDO_INSTALL_NONINTERACTIVE`**, or **`CI`** as documented in the README.
+`bootstrap.ps1`, **`windo install-latest`**, and **`windo upgrade`** (same as install-latest) download `windo_install.ps1` from the canonical **`Exodus`** branch unless `WINDO_TRACKING_BRANCH` overrides it. **v3.1.1+:** that download is **refused while the shell is elevated** (Administrator), so remote content is not fetched under high privilege; run from a normal user PowerShell, confirm after verification, then the installer may prompt for **UAC** during repair or task registration. Unattended flows may set **`WINDO_BOOTSTRAP_FORCE_INSTALL`**, **`WINDO_INSTALL_NONINTERACTIVE`**, or **`CI`** as documented in the README.
 
 Hash behavior:
 

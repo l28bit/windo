@@ -2,17 +2,18 @@
 
 Use this block in the main README and keep it identical wherever the one-liner is repeated.
 
-**Install or update** (downloads the current installer from the canonical `v6` branch, runs it from a temp file, then deletes the temp file):
+**Install or update** (downloads the current installer from the canonical `Exodus` branch, runs it from a temp file, then deletes the temp file):
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/l28bit/windo/v6/bootstrap.ps1)
+iex (irm https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1)
 ```
 
 Notes:
 
-- The one-liner targets **bootstrap only**. The bootstrap script does **not** pipe the full `windo_install.ps1` through `Invoke-Expression`; it saves the installer to disk and runs it with `powershell.exe -File`.
+- The one-liner targets **bootstrap only**. The bootstrap script does **not** pipe the full `windo_install.ps1` through `Invoke-Expression`; it saves the installer to disk and runs it with `pwsh.exe` when available, otherwise `powershell.exe -File`.
 - Run bootstrap from a standard (non-elevated) shell; installer flows confirm before launch in interactive sessions.
 - `windo install-latest` and `windo upgrade` share this same source and checksum contract, including strict-mode fail-fast behavior with `WINDO_STRICT_INSTALLER_VERIFICATION=1`.
+- In interactive sessions, `windo install-latest / windo upgrade` prompts before launch (`Run the installer now? ... [y/N]`) and then performs a one-shot elevated handoff attempt (UAC) when confirmed.
 - `windo self-update` prompts before installer repair launches in interactive mode and returns a repair recommendation when non-interactive.
 - Offline or repo-clone installs: run `windo_install.ps1` from disk per README.
 - From an existing profile: **`windo upgrade`** uses the same installer URL and temp-file pattern as bootstrap (no version gate).

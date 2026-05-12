@@ -332,6 +332,8 @@ $taskAccessDeniedFn = Get-WindoFunctionTextFromSource -Source $installerSource -
 $runGenesisInstallerFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_run_genisis_installer"
 $verifyLogStateFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_verify_log_state"
 $controlStartActionFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_start_action"
+$promptInstallerHandoffFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_prompt_installer_handoff"
+$normalizePromptFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_normalize_handoff_prompt"
 $appendLogFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_append_log"
 $getLastHashFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_get_last_hash"
 $dpapiProtectFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_dpapi_protect"
@@ -358,7 +360,7 @@ function _windo_start_downloaded_installer {
 }
 if (Test-Path Function:\_windo_verify_installer_sha256_optional) { Remove-Item Function:\_windo_verify_installer_sha256_optional -Force }
 function _windo_verify_installer_sha256_optional { }
-if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -and $setExitFn -and $promptSelfUpdateFn -and $taskAccessDeniedFn -and $runGenesisInstallerFn -and $verifyLogStateFn -and $appendLogFn -and $getLastHashFn -and $dpapiProtectFn -and $dpapiUnprotectFn -and $sha256HexFn -and $controlStartActionFn) {
+if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -and $setExitFn -and $promptSelfUpdateFn -and $taskAccessDeniedFn -and $runGenesisInstallerFn -and $verifyLogStateFn -and $appendLogFn -and $getLastHashFn -and $dpapiProtectFn -and $dpapiUnprotectFn -and $sha256HexFn -and $controlStartActionFn -and $promptInstallerHandoffFn -and $normalizePromptFn) {
     Invoke-Expression $commandPlanFn
     Invoke-Expression $joinPlanFn
     Invoke-Expression $quotePlanPartFn
@@ -367,6 +369,8 @@ if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -a
     Invoke-Expression $promptSelfUpdateFn
     Invoke-Expression $taskAccessDeniedFn
     Invoke-Expression $runGenesisInstallerFn
+    Invoke-Expression $promptInstallerHandoffFn
+    Invoke-Expression $normalizePromptFn
     Invoke-Expression $verifyLogStateFn
     Invoke-Expression $appendLogFn
     Invoke-Expression $controlStartActionFn
@@ -480,6 +484,17 @@ if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -a
         Assert-State "denied error detector catches elevation request" $true (_windo_is_task_access_denied "requires elevation to continue") "elevation text triggers access helper"
         Assert-State "denied error detector ignores normal output" $false (_windo_is_task_access_denied "scheduled task start succeeded") "normal output is ignored by access helper"
         if ($null -eq $savedCIEnv) { Remove-Item Env:CI -ErrorAction SilentlyContinue } else { $env:CI = $savedCIEnv }
+
+        $savedSudoPrompt = if (Test-Path Env:SUDO_PROMPT) { $env:SUDO_PROMPT } else { $null }
+        try {
+            $upgradePrompt = _windo_normalize_handoff_prompt -PromptText "Input content" -DefaultPrompt "Run the downloaded upgrade installer now? (If approved, this same command relaunches elevated to register tasks.)"
+            Assert-State "non-actionable SUDO_PROMPT text is sanitized" $false ($upgradePrompt -match "(?i)Input content") "install confirmation sanitizes generic Input content prompts"
+            $env:SUDO_PROMPT = "Run the downloaded install-latest installer now? [Y/N]"
+            $customPrompt = _windo_normalize_handoff_prompt -PromptText $env:SUDO_PROMPT -DefaultPrompt "Run the downloaded install-latest installer now? (If approved, this same command relaunches elevated to register tasks.)"
+            Assert-State "custom prompt keeps explicit y/n choice text" $true ($customPrompt -match "(?i)\[Y/N\]") "custom installer prompt keeps a yes/no choice"
+        } finally {
+            if ($null -eq $savedSudoPrompt) { Remove-Item Env:SUDO_PROMPT -ErrorAction SilentlyContinue } else { $env:SUDO_PROMPT = $savedSudoPrompt }
+        }
 
         if (Test-Path Function:\_windo_release_branch) { Remove-Item function:_windo_release_branch -Force }
         function _windo_release_branch { return "v6" }

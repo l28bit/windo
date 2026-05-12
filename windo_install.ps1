@@ -1286,7 +1286,7 @@ function Invoke-WindoBundledUninstall {
     $SecureDir = Join-Path $HOME ".pwsh_secure"
     $BundledUninstallPath = Join-Path $SecureDir "windo_uninstall.ps1"
     $SnapshotUninstallPath = Join-Path (Join-Path $HOME "Documents") "windo\windo_uninstall.ps1"
-    $UnUrl = "https://raw.githubusercontent.com/l28bit/windo/v6/windo_uninstall.ps1"
+    $UnUrl = "https://raw.githubusercontent.com/l28bit/windo/$(_windo_release_ref)/windo_uninstall.ps1"
     $TempUn = $null
     $ScriptPath = $null
 
@@ -3454,7 +3454,7 @@ function _windo_parse_runner_result([string]$OutPath, [string]$RequestId, [strin
     function _windo_extras_index_url {
         $raw = [string]$env:WINDO_EXTRAS_INDEX_URL
         if (-not [string]::IsNullOrWhiteSpace($raw)) { return $raw.Trim() }
-        return "https://raw.githubusercontent.com/l28bit/windo/v6/extras/index.json"
+        return "https://raw.githubusercontent.com/l28bit/windo/$(_windo_release_ref)/extras/index.json"
     }
 
     function _windo_fetch_text_url([string]$Uri) {
@@ -4623,6 +4623,36 @@ Use: windo prompt --json   (machine-readable bundle)
         (_json_envelope $commandName $payload) | ConvertTo-Json -Depth 14 | Write-Host
     }
 
+    function _windo_normalize_handoff_prompt {
+        param(
+            [string]$PromptText,
+            [string]$DefaultPrompt
+        )
+
+        $raw = if ($null -eq $PromptText) { "" } else { [string]$PromptText.Trim() }
+        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $DefaultPrompt }
+        if ($raw -match '(?i)^\s*Input\s+content\b') { $raw = $DefaultPrompt }
+        if ($raw -notmatch '(?i)\[y\/n\]') { $raw = "$raw [y/N]" }
+        return $raw
+    }
+
+    function _windo_prompt_installer_handoff {
+        param(
+            [string]$DisplayCommand,
+            [bool]$SelfUpdate
+        )
+
+        $defaultPrompt = if ($SelfUpdate) {
+            "Run the self-update installer now? (If approved, this command relaunches elevated to repair tasks.)"
+        } else {
+            "Run the downloaded ${DisplayCommand} installer now? (If approved, this same command relaunches elevated to register tasks.)"
+        }
+
+        $prompt = _windo_normalize_handoff_prompt -PromptText $env:SUDO_PROMPT -DefaultPrompt $defaultPrompt
+        $ans = Read-Host $prompt
+        return ($ans -eq 'y' -or $ans -eq 'Y' -or $ans -eq 'yes')
+    }
+
     function _windo_start_downloaded_installer([string]$ScriptPath) {
         $runnerExe = "powershell.exe"
         $pwshExe = Get-Command pwsh.exe -ErrorAction SilentlyContinue
@@ -4704,12 +4734,8 @@ Use: windo prompt --json   (machine-readable bundle)
                 _windo_set_exit 2
                 return $false
             } else {
-                $prompt = "Run the installer now? (If approved, this same command relaunches elevated to register tasks.) [y/N]"
-                if (-not [string]::IsNullOrWhiteSpace($env:SUDO_PROMPT)) { $prompt = [string]$env:SUDO_PROMPT }
-                if ($prompt -notmatch '(?i)\[y\/n\]') { $prompt = "$prompt [y/N]" }
                 Write-Host "[windo] The installer payload is ready. You can review it before continuing: $TempInst" -ForegroundColor Cyan
-                $ans = Read-Host $prompt
-                if ($ans -eq 'y' -or $ans -eq 'Y' -or $ans -eq 'yes') { $runNow = $true }
+                $runNow = _windo_prompt_installer_handoff -DisplayCommand $DisplayCommand
             }
             if (-not $runNow) {
                 Write-Host "[windo] Update handoff cancelled; temporary installer removed." -ForegroundColor DarkYellow
@@ -4801,14 +4827,8 @@ Use: windo prompt --json   (machine-readable bundle)
     function _windo_prompt_self_update_installer {
         param([bool]$NonInteractive)
         if ($NonInteractive -or $env:CI -or -not [Environment]::UserInteractive) { return $false }
-
-        $prompt = "Run the installer now? (If approved, this same command relaunches elevated to repair tasks.) [y/N]"
-        if (-not [string]::IsNullOrWhiteSpace($env:SUDO_PROMPT)) { $prompt = [string]$env:SUDO_PROMPT }
-        if ($prompt -notmatch '(?i)\[y\/n\]') { $prompt = "$prompt [y/N]" }
-
         Write-Host "[windo] Self-update repair can relaunch the installer elevated." -ForegroundColor Cyan
-        $ans = Read-Host $prompt
-        return ($ans -eq 'y' -or $ans -eq 'Y' -or $ans -eq 'yes')
+        return _windo_prompt_installer_handoff -DisplayCommand "self-update" -SelfUpdate:$true
     }
 
     function _pretty_print([string]$cmdLine, [int]$exitCode, [string]$output, [int]$durationMs) {

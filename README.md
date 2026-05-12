@@ -13,7 +13,7 @@ Experienced operators treat commands as intent. Elevation should not be accident
 
 **intent → choose elevation → execute with authority**
 
-The default GitHub branch for raw URLs is **`v6`**.
+The default GitHub branch for raw URLs is **`Exodus`** unless overridden by `WINDO_TRACKING_BRANCH`.
 
 ---
 
@@ -47,10 +47,10 @@ WINDO does **not** bypass Windows security boundaries; it uses a controlled elev
 
 ## Install / Update
 
-**Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/v6/bootstrap.ps1), saves `windo_install.ps1` to a **temp file**, verifies its checksum when published on the default `v6` branch, then starts it from the temp file. The **full installer is not** piped through `Invoke-Expression`. The temp file is removed afterward.
+**Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1), saves `windo_install.ps1` to a **temp file**, verifies its checksum when published on the default `Exodus` branch (or overridden via `WINDO_TRACKING_BRANCH`), then starts it from the temp file. The **full installer is not** piped through `Invoke-Expression`. The temp file is removed afterward.
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/l28bit/windo/v6/bootstrap.ps1)
+iex (irm https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1)
 ```
 
 Use a **standard (non-elevated)** session for bootstrap handoff. If you need strict install verification in automated `install-latest`/`upgrade` flows, pair `WINDO_STRICT_INSTALLER_VERIFICATION=1` with `windo install-latest --force` or `WINDO_INSTALL_NONINTERACTIVE=1`.
@@ -63,6 +63,8 @@ windo install-latest
 
 (`windo upgrade` is the same command.)
 
+After answering the installer confirmation prompt, WINDO performs a one-shot elevated handoff attempt (UAC) to complete runner/task registration and secure-dir updates.
+
 **Bootstrap** (`iex (irm …/bootstrap.ps1)`): same rule—**do not run from an elevated shell**; the script exits with instructions. After download it is prompted before launch (or set **`WINDO_BOOTSTRAP_FORCE_INSTALL=1`** / **`WINDO_INSTALL_NONINTERACTIVE=1`** / **`CI`** for unattended).
 
 ## Troubleshooting install/update and verification behavior
@@ -73,10 +75,18 @@ windo install-latest
   - run in a normal shell by default,
   - prompt before launch when interactive,
   - skip confirmation in non-interactive mode (`--non-interactive` / `CI` / `WINDO_INSTALL_NONINTERACTIVE` / `WINDO_BOOTSTRAP_FORCE_INSTALL`).
-  - source contract for prompts and checksum checks comes from the canonical `v6` branch artifacts.
+  - source contract for prompts and checksum checks comes from the canonical `Exodus` branch artifacts.
   - `windo self-update` follows the same interactive contract and branch/source checks as install flows.
   - prompts before launching installer repair when required in interactive sessions,
   - skips the repair prompt in non-interactive mode and returns a repair recommendation instead.
+
+### Legacy or unexpected prompts
+
+If you see an old/foreign prompt (for example `Input content`) while running install/update, treat it as a host or wrapper artifact (often `SUDO_PROMPT`), not as a different WINDO install flow.
+
+- Check `SUDO_PROMPT`: `Get-Item Env:SUDO_PROMPT` and clear it if set.
+- Rerun from a clean, non-elevated PowerShell session.
+- In automation, use `windo install-latest --force` or `WINDO_INSTALL_NONINTERACTIVE=1` instead of manually answering legacy prompts.
 - `windo self-update`:
   - starts the `WindoSelfUpdate` task,
   - prompts for installer repair when task state is missing or blocked,
@@ -101,7 +111,7 @@ windo install-latest
 
 Or use the bootstrap one-liner above, or run `.\windo_install.ps1` from a clone. There is no version gate: the installer replaces the WINDO profile block and refreshes secure-dir artifacts.
 
-**Remove WINDO completely:** run **`windo uninstall`** (or **`windo remove`**) from a normal shell. WINDO prefers the bundled local **`%USERPROFILE%\.pwsh_secure\windo_uninstall.ps1`** and starts it elevated with UAC; if the local copy is missing it falls back to the published raw uninstaller from `v6`. After your profile is loaded you can also run **`windo-uninstall`** (alias: **`windoremove`**) directly. Optional **`-KeepSnapshots`** / **`--keep-snapshots`** keeps `%USERPROFILE%\Documents\windo\`. The uninstaller removes WINDO marker blocks from the known **current-user** PowerShell profiles for **pwsh** and **Windows PowerShell**.
+**Remove WINDO completely:** run **`windo uninstall`** (or **`windo remove`**) from a normal shell. WINDO prefers the bundled local **`%USERPROFILE%\.pwsh_secure\windo_uninstall.ps1`** and starts it elevated with UAC; if the local copy is missing it falls back to the published raw uninstaller from the configured raw branch (default `Exodus`). After your profile is loaded you can also run **`windo-uninstall`** (alias: **`windoremove`**) directly. Optional **`-KeepSnapshots`** / **`--keep-snapshots`** keeps `%USERPROFILE%\Documents\windo\`. The uninstaller removes WINDO marker blocks from the known **current-user** PowerShell profiles for **pwsh** and **Windows PowerShell**.
 
 **Offline / clone:** run the installer from disk:
 
@@ -354,7 +364,7 @@ Optional **modules** and **extras** (v3.2+): [`docs/modules-and-extras.md`](docs
 | `WINDO_RUNNER_TIMEOUT_MS` | Max wait for the elevated child process (default **7200000** ms = 2 h; max **86400000**). |
 | `WINDO_RUNNER_MAX_OUTPUT_BYTES` | Approximate cap on captured stdout+stderr (default **4194304**; split per stream in the runner). |
 | `WINDO_MAX_COMMAND_CHARS` | Max length of the command line passed to `cmd.exe` (default **8191**). |
-| `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the `v6` branch (`bootstrap.ps1`, **`windo install-latest`** / **`upgrade`**). |
+| `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the configured branch (`bootstrap.ps1`, **`windo install-latest`** / **`upgrade`**). |
 | `WINDO_STRICT_INSTALLER_VERIFICATION` | Set to `1` for strict installer hash checking. |
 | `WINDO_JSON_ENVELOPE` | **v3.1.0+** Optional override for **`--json`** envelope shape: **`classic`** (2.6, no **`meta`**), **`modern`** (3.0 + **`meta`**), or **`auto`**. Overrides **`windo_prefs.json`** when set (see [`docs/json-schema.md`](docs/json-schema.md)). Does not change runner or security behavior. |
 | `SUDO_TIMEOUT` | Per-command override (seconds or `ms`, e.g. `10`, `10s`, `500ms`) for the `--timeout` flag when not passed explicitly. |
