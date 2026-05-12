@@ -6,6 +6,11 @@ Compatible with:
 - id-based enablement in windo_prefs.json
 - dot-sourced execution semantics (non-fatal when a module fails)
 
+Output contract:
+- netops-rdp-vnc and netops-wsl use _emit_json with the WINDO envelope `rdp` or `wsl` when AsJson is present.
+- netops-resolve, netops-subnet-scan, netops-arp-map, netops-netcat-send, and netops-netcat-recv
+  emit native command objects and are not wrapped by the WINDO `command` envelope.
+
 Commands are registered through wincmd when they are not already present.
 #>
 
@@ -41,6 +46,19 @@ function _netops_is_admin {
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [System.Security.Principal.WindowsPrincipal]::new($identity)
     return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function _netops_emit_payload {
+    param(
+        [Parameter(Mandatory)][string]$Command,
+        [Parameter(Mandatory)]$Payload,
+        [switch]$AsJson
+    )
+    if ($AsJson -and (Get-Command -Name _emit_json -ErrorAction SilentlyContinue)) {
+        _emit_json $Command $Payload
+        return $true
+    }
+    return $false
 }
 
 function _netops_uint_from_ip {
@@ -409,11 +427,11 @@ function _netops_netcat_validate_allow_target {
 }
 
 function _netops_is_loopback {
-    param([Parameter(Mandatory)][string]$Host)
-    $h = $Host.Trim().ToLowerInvariant()
+    param([Parameter(Mandatory)][string]$HostName)
+    $h = $HostName.Trim().ToLowerInvariant()
     if ($h -in @('localhost', '127.0.0.1', '::1')) { return $true }
     try {
-        foreach ($a in ([System.Net.Dns]::GetHostAddresses($Host))) {
+        foreach ($a in ([System.Net.Dns]::GetHostAddresses($HostName))) {
             if ($a.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and $a.Equals([System.Net.IPAddress]::Loopback)) { return $true }
             if ($a.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6 -and $a.Equals([System.Net.IPAddress]::IPv6Loopback)) { return $true }
         }
@@ -567,12 +585,12 @@ $cmdNetcatSend = {
         }
 
         function _netops_send_udp_once {
-            param([string]$Text, [System.Net.Sockets.UdpClient]$Client, [string]$Host, [int]$Port, [int]$MaxBytes)
+            param([string]$Text, [System.Net.Sockets.UdpClient]$Client, [string]$RemoteHost, [int]$Port, [int]$MaxBytes)
             $lineBytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
             if ($lineBytes.Count -gt $MaxBytes) {
                 throw "message exceeds maxPayloadBytes ($MaxBytes)."
             }
-            [void]$Client.Send($lineBytes, $lineBytes.Count, $Host, $Port)
+            [void]$Client.Send($lineBytes, $lineBytes.Count, $RemoteHost, $Port)
             $lineCount++
             $totalBytes += $lineBytes.Count
             [void]$payloadEvents.Add([ordered]@{
@@ -580,7 +598,7 @@ $cmdNetcatSend = {
                     bytes = $lineBytes.Count
                     text = $Text
                     preview = (_netops_preview_bytes -Bytes $lineBytes -MaxChars 160)
-                    to = "$Host:$Port"
+                    to = "$RemoteHost:$Port"
                 })
         }
 
@@ -622,10 +640,10 @@ $cmdNetcatSend = {
                             $timedOut = $true
                             break
                         }
-                        _netops_send_udp_once -Text ($line + "`n") -Client $udp -Host $RemoteHost -Port $RemotePort -MaxBytes $payloadBytesCap
+                    _netops_send_udp_once -Text ($line + "`n") -Client $udp -RemoteHost $RemoteHost -Port $RemotePort -MaxBytes $payloadBytesCap
                     }
                 } else {
-                    _netops_send_udp_once -Text $Message -Client $udp -Host $RemoteHost -Port $RemotePort -MaxBytes $payloadBytesCap
+                    _netops_send_udp_once -Text $Message -Client $udp -RemoteHost $RemoteHost -Port $RemotePort -MaxBytes $payloadBytesCap
                 }
             } finally {
                 $udp.Close()
@@ -941,9 +959,9 @@ $cmdResolve = {
             # fallback
         }
         try {
-            $host = [System.Net.Dns]::GetHostEntry($Address)
-            if ($host -and $host.HostName) {
-                [void]$results.Add([string]$host.HostName)
+        $resolvedHost = [System.Net.Dns]::GetHostEntry($Address)
+        if ($resolvedHost -and $resolvedHost.HostName) {
+            [void]$results.Add([string]$resolvedHost.HostName)
             }
         } catch {
         }
@@ -1037,8 +1055,41 @@ $cmdRdpVnc = {
         [string]$Mode = 'check',
         [ValidateSet('rdp', 'vnc', 'both')]
         [string]$Protocol = 'both',
-        [switch]$Force
+        [switch]$Force,
+        [ValidateSet('status', 'firewall')]
+        [string]$Subcommand = 'status',
+        [ValidateSet('status', 'enable', 'disable')]
+        [string]$FirewallAction = 'status',
+        [switch]$AsJson
     )
+
+    function _netops_build_rdp_payload {
+        param([Parameter(Mandatory)]$Rdp)
+        return [ordered]@{
+            subcommand = "status"
+            scannedAt = (Get-Date -Format "o")
+            service = [ordered]@{
+                name = "TermService"
+                status = [string]$Rdp.Service
+                startup = [string]$Rdp.ServiceStartup
+                exists = $Rdp.Service -ne 'Unknown'
+            }
+            config = [ordered]@{
+                terminalServerFq = [bool]$Rdp.AllowRegistry
+            }
+            firewall = [ordered]@{
+                count = if ([bool]$Rdp.FirewallEnabled) { 1 } else { 0 }
+                rules = @(
+                    [ordered]@{
+                        name = "Remote Desktop - User Mode (TCP-In)"
+                        enabled = [bool]$Rdp.FirewallEnabled
+                    }
+                )
+            }
+            exitCode = $(if ($Rdp.Service -eq 'Unknown') { 2 } else { 0 })
+        }
+    }
+
     if (-not _netops_is_admin) {
         if ($Mode -eq 'apply') {
             throw "apply mode requires an elevated shell."
@@ -1046,11 +1097,86 @@ $cmdRdpVnc = {
         Write-Warning "apply mode requested without admin; returning check mode only."
         $Mode = 'check'
     }
-    $rdp = _netops_rdp_status
-    $vnc = _netops_vnc_status
+
+    $rdpEnabled = $Protocol -in @('rdp', 'both')
+    $vncEnabled = $Protocol -in @('vnc', 'both')
+
+    if ($Subcommand -eq 'firewall') {
+        if (-not $rdpEnabled) {
+            if ($AsJson) {
+                if (_netops_emit_payload -Command "rdp" -Payload @{
+                        subcommand = "firewall"
+                        action = "status"
+                        error = "rdp protocol required for firewall operations"
+                        exitCode = 2
+                    } -AsJson:$AsJson) { return }
+            }
+            Write-Host "[WINDO module $WindoModuleId] firewall inspection requires Protocol='rdp'." -ForegroundColor Yellow
+            return
+        }
+
+        $rules = Get-NetFirewallRule -DisplayName 'Remote Desktop - User Mode (TCP-In)' -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -and ($_.DisplayName.Contains("Remote Desktop")) }
+        $ruleRows = [System.Collections.ArrayList]@()
+        $runCommands = [System.Collections.ArrayList]@()
+        $updates = [System.Collections.ArrayList]@()
+
+        foreach ($r in @($rules)) {
+            [void]$ruleRows.Add([ordered]@{
+                    name = [string]$r.Name
+                    displayName = [string]$r.DisplayName
+                    enabled = [bool]($r.Enabled -eq 'True')
+                })
+            if ($FirewallAction -in @('enable', 'disable')) {
+                $commandText = "{0} -Name '{1}' -Confirm:`$false" -f $(if ($FirewallAction -eq 'disable') { 'Disable-NetFirewallRule' } else { 'Enable-NetFirewallRule' }), [string]$r.Name
+                [void]$runCommands.Add($commandText)
+                [void]$updates.Add([ordered]@{
+                        name = [string]$r.Name
+                        action = $FirewallAction
+                        success = $true
+                    })
+            }
+        }
+
+        if ($FirewallAction -eq 'status') {
+            $firewallPayload = [ordered]@{
+                subcommand = "firewall"
+                action = "status"
+                requestedPorts = @()
+                rules = @($ruleRows)
+                scannedAt = (Get-Date -Format "o")
+                exitCode = 0
+            }
+            if (_netops_emit_payload -Command "rdp" -Payload $firewallPayload -AsJson:$AsJson) { return }
+            return $firewallPayload
+        }
+
+        $disablePayload = [ordered]@{
+            subcommand = "firewall"
+            action = [string]$FirewallAction
+            requestedPorts = @()
+            runCommand = @([string[]]$runCommands)
+            command = @([string[]]$runCommands)
+            "command-executed" = @([string[]]$runCommands)
+            updates = @($updates)
+            scannedAt = (Get-Date -Format "o")
+            exitCode = $(if ($updates.Count -gt 0) { 0 } else { 2 })
+        }
+        if (_netops_emit_payload -Command "rdp" -Payload $disablePayload -AsJson:$AsJson) { return }
+        return $disablePayload
+    }
+
     if ($Mode -eq 'check') {
-        if ($Protocol -in @('rdp', 'both')) { $rdp }
-        if ($Protocol -in @('vnc', 'both')) { $vnc }
+        if ($rdpEnabled) {
+            $rdp = _netops_rdp_status
+            if ($Subcommand -eq 'status' -and ($Protocol -eq 'rdp')) {
+                $payload = _netops_build_rdp_payload -Rdp $rdp
+                if (_netops_emit_payload -Command "rdp" -Payload $payload -AsJson:$AsJson) { return }
+                return $payload
+            }
+            if ($Protocol -in @('rdp', 'both')) { $rdp }
+        }
+        if ($vncEnabled) { _netops_vnc_status }
         return
     }
 
@@ -1058,7 +1184,7 @@ $cmdRdpVnc = {
         return
     }
 
-    if ($Protocol -in @('rdp', 'both')) {
+    if ($rdpEnabled) {
         Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Type DWord -Value 0 -Force | Out-Null
         Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name UserAuthentication -Type DWord -Value 1 -Force | Out-Null
         try { Enable-NetFirewallRule -DisplayName 'Remote Desktop - User Mode (TCP-In)' | Out-Null } catch {}
@@ -1068,7 +1194,7 @@ $cmdRdpVnc = {
         } catch {}
     }
 
-    if ($Protocol -in @('vnc', 'both')) {
+    if ($vncEnabled) {
         foreach ($port in 5900, 5901) {
             $name = 'WINDO-VNC-' + $port
             if (-not (Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue)) {
@@ -1079,25 +1205,90 @@ $cmdRdpVnc = {
         }
     }
 
-    if ($Protocol -in @('rdp', 'both')) {
-        _netops_rdp_status
+    $rows = [System.Collections.ArrayList]@()
+    if ($rdpEnabled) {
+        $rdp = _netops_rdp_status
+        if ($Protocol -eq 'rdp') {
+            $payload = _netops_build_rdp_payload -Rdp $rdp
+            if (_netops_emit_payload -Command "rdp" -Payload $payload -AsJson:$AsJson) { return }
+            return $payload
+        }
+        [void]$rows.Add($rdp)
     }
-    if ($Protocol -in @('vnc', 'both')) {
-        _netops_vnc_status
-    }
+    if ($vncEnabled) { [void]$rows.Add(_netops_vnc_status) }
+    if ($rows.Count -gt 0) { return @($rows) }
 }
 
 $cmdWsl = {
     [CmdletBinding()]
     param(
-        [ValidateSet('status', 'ip')]
+        [ValidateSet('status', 'ip', 'check')]
         [string]$Mode = 'status',
-        [string]$Distro
+        [string]$Distro,
+        [ValidateSet('install', 'distro', 'import', 'export')]
+        [string]$Check = 'install',
+        [switch]$AsJson
     )
-    $distros = _netops_wsl_distros
+    $rawDistros = _netops_wsl_distros
+    $defaultDistro = @($rawDistros | Where-Object { $_.IsDefault } | Select-Object -First 1)
+    $distros = [ordered]@{
+        distros = @($rawDistros)
+        defaultName = if ($defaultDistro.Count -gt 0) { [string]$defaultDistro[0].Name } elseif ($rawDistros.Count -gt 0) { [string]$rawDistros[0].Name } else { $null }
+        found = ($rawDistros.Count -gt 0)
+    }
+    $wslExe = Get-Command wsl.exe -ErrorAction SilentlyContinue
+    $statusOutput = @()
+    $statusExitCode = 0
+    if ($Mode -in @('status', 'check')) {
+        if ($wslExe) {
+            try {
+                $statusOutput = & wsl.exe --status 2>&1
+                $statusExitCode = if ($LASTEXITCODE -ne $null) { [int]$LASTEXITCODE } else { 0 }
+            } catch {
+                $statusOutput = @()
+                $statusExitCode = 1
+            }
+        } else {
+            $statusExitCode = 1
+        }
+    }
+
+    if ($Mode -eq 'check') {
+        if ($Check -ne "install") {
+            $payload = [ordered]@{
+                command = "check $Check"
+                error = "unsupported check target '$Check'"
+                exitCode = 2
+            }
+            if (_netops_emit_payload -Command "wsl" -Payload $payload -AsJson:$AsJson) { return }
+            return $payload
+        }
+
+        $notes = [System.Collections.ArrayList]@()
+        if (-not $wslExe) {
+            [void]$notes.Add("wsl.exe was not found in PATH.")
+        } elseif ($statusExitCode -ne 0) {
+            [void]$notes.Add("wsl --status returned $statusExitCode")
+        } else {
+            [void]$notes.Add("wsl command is executable")
+        }
+        $checkOk = if ($wslExe -and $statusExitCode -eq 0) { $true } else { $false }
+        $payload = [ordered]@{
+            command = 'check install'
+            wslAvailable = [bool]$wslExe
+            wslStatus = @($statusOutput)
+            distros = @($distros.distros)
+            default = $distros.defaultName
+            notes = @($notes)
+            exitCode = if ($checkOk) { 0 } else { 2 }
+        }
+        if (_netops_emit_payload -Command "wsl" -Payload $payload -AsJson:$AsJson) { return }
+        return $payload
+    }
+
     if ($Mode -eq 'status') {
         $rows = [System.Collections.ArrayList]@()
-        foreach ($d in @($distros)) {
+        foreach ($d in @($distros.distros)) {
             $ip = _netops_wsl_ip -Distro $d.Name
             [void]$rows.Add([pscustomobject]@{
                     Name = $d.Name
@@ -1107,15 +1298,28 @@ $cmdWsl = {
                     Eth0Ip = $ip
                 })
         }
+        if ($AsJson) {
+            $payload = [ordered]@{
+                command = "status"
+                wslAvailable = [bool]$wslExe
+                wslStatus = @($statusOutput)
+                wslExitCode = [int]$statusExitCode
+                distros = @($distros.distros)
+                default = $distros.defaultName
+                exitCode = if ($wslExe -and $statusExitCode -eq 0) { 0 } else { 2 }
+            }
+            if (_netops_emit_payload -Command "wsl" -Payload $payload -AsJson:$AsJson) { return }
+            return $payload
+        }
         return @($rows)
     }
 
     if (-not $Distro) {
-        if ($distros.Count -eq 0) {
+        if ($distros.found -eq $false) {
             throw "No WSL distro found. Run 'wsl --install' first."
         }
-        $Distro = ($distros | Where-Object { $_.IsDefault } | Select-Object -First 1).Name
-        if (-not $Distro) { $Distro = $distros[0].Name }
+        $Distro = ($distros.distros | Where-Object { $_.IsDefault } | Select-Object -First 1).Name
+        if (-not $Distro) { $Distro = $distros.distros[0].Name }
     }
     $ip = _netops_wsl_ip -Distro $Distro
     [pscustomobject]@{

@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 No unreleased changes yet.
 
+## [6.0.0] - Unreleased
+
+Release notes: [`docs/releases/RELEASE_NOTES_v6.0.0.md`](docs/releases/RELEASE_NOTES_v6.0.0.md).
+
+### Added
+
+- _None in this release._
+
+### Changed
+
+- Canonical `bootstrap.ps1`/`windo install-latest`/`windo upgrade` source wording is normalized to **`v6`** across README, SECURITY, and release notes. Historical branch names (`Genesis`, `Exodus`) remain as historical release notes and are not current contract.
+- `WINDO_STRICT_INSTALLER_VERIFICATION=1` strict-mode behavior is documented as fail-fast on checksum/source/branch divergence, while non-strict mode remains warning-based compatibility.
+- Release notes now include the stabilized diagnostics contract for install/update integrity and self-update repair prompting.
+
+### Fixed
+
+- Clarified installation/update strictness and branch-source contract drift messaging so interactive and non-interactive prompts have consistent documentation.
+
 ## [5.4.1] - 2026-05-07
 
 Release notes: [`docs/releases/RELEASE_NOTES_v5.4.1.md`](docs/releases/RELEASE_NOTES_v5.4.1.md).

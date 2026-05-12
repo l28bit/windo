@@ -43,9 +43,10 @@ namespace WindoRunner
             exitCode = 1;
             stdout = "";
             stderr = "";
+            var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(arguments ?? ""));
             var psi = new ProcessStartInfo();
-            psi.FileName = "cmd.exe";
-            psi.Arguments = "/c " + arguments;
+            psi.FileName = "powershell.exe";
+            psi.Arguments = "-NoProfile -NonInteractive -NoLogo -EncodedCommand " + encodedCommand;
             psi.RedirectStandardOutput = true;
             psi.RedirectStandardError = true;
             psi.UseShellExecute = false;

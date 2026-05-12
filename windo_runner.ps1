@@ -4,10 +4,41 @@ $SecureDir  = Join-Path $HOME ".pwsh_secure"
 $RunnerLast = Join-Path $SecureDir "windo_runner_last.txt"
 $MutexName  = "Global\WindoRunnerMutex"
 
+function New-WindoRunnerMutex {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][ref]$CreatedNew
+    )
+    return New-Object System.Threading.Mutex($false, $Name, $CreatedNew)
+}
+
+function Release-WindoRunnerMutex {
+    param([Parameter(Mandatory = $true)]$Mutex)
+    try { $Mutex.ReleaseMutex() } catch {}
+}
+
+function Close-WindoRunnerMutex {
+    param([Parameter(Mandatory = $true)]$Mutex)
+    try { $Mutex.Dispose() } catch {}
+}
+
+function Invoke-WindoRunnerChildExec {
+    param(
+        [Parameter(Mandatory = $true)][string]$CommandLine,
+        [Parameter(Mandatory = $true)][int]$TimeoutMs,
+        [Parameter(Mandatory = $true)][int]$MaxCharsPerStream,
+        [Parameter(Mandatory = $true)]$StdOut,
+        [Parameter(Mandatory = $true)]$StdErr,
+        [Parameter(Mandatory = $true)]$TimedOut,
+        [Parameter(Mandatory = $true)]$Truncated,
+        [Parameter(Mandatory = $true)]$ExitCode
+    )
+    [WindoRunner.ChildExec]::RunCmd($CommandLine, $TimeoutMs, $MaxCharsPerStream, $StdOut, $StdErr, $TimedOut, $Truncated, $ExitCode)
+}
+
 if (-not ("WindoRunner.ChildExec" -as [type])) {
     $cs = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(
-        'dXNpbmcgU3lzdGVtOwp1c2luZyBTeXN0ZW0uRGlhZ25vc3RpY3M7CnVzaW5nIFN5c3RlbS5JTzsKdXNpbmcgU3lzdGVtLlRleHQ7CnVzaW5nIFN5c3RlbS5UaHJlYWRpbmcuVGFza3M7CgpuYW1lc3BhY2UgV2luZG9SdW5uZXIKewogICAgcHVibGljIHN0YXRpYyBjbGFzcyBDaGlsZEV4ZWMKICAgIHsKICAgICAgICBwdWJsaWMgc3RhdGljIHN0cmluZyBSZWFkU3RyZWFtVG9NYXgoU3RyZWFtUmVhZGVyIHIsIGludCBtYXhDaGFycywgUHJvY2VzcyBwKQogICAgICAgIHsKICAgICAgICAgICAgdmFyIHNiID0gbmV3IFN0cmluZ0J1aWxkZXIoKTsKICAgICAgICAgICAgdmFyIGJ1ZiA9IG5ldyBjaGFyWzgxOTJdOwogICAgICAgICAgICBpbnQgdG90YWwgPSAwOwogICAgICAgICAgICB3aGlsZSAodG90YWwgPCBtYXhDaGFycykKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgaW50IG4gPSByLlJlYWQoYnVmLCAwLCBNYXRoLk1pbihidWYuTGVuZ3RoLCBtYXhDaGFycyAtIHRvdGFsKSk7CiAgICAgICAgICAgICAgICBpZiAobiA8PSAwKSBicmVhazsKICAgICAgICAgICAgICAgIHNiLkFwcGVuZChidWYsIDAsIG4pOwogICAgICAgICAgICAgICAgdG90YWwgKz0gbjsKICAgICAgICAgICAgfQogICAgICAgICAgICBpZiAodG90YWwgPj0gbWF4Q2hhcnMpCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIHRyeSB7IGlmICghcC5IYXNFeGl0ZWQpIHAuS2lsbCgpOyB9IGNhdGNoIHsgfQogICAgICAgICAgICAgICAgdHJ5IHsgcC5XYWl0Rm9yRXhpdCgxNTAwMCk7IH0gY2F0Y2ggeyB9CiAgICAgICAgICAgIH0KICAgICAgICAgICAgcmV0dXJuIHNiLlRvU3RyaW5nKCk7CiAgICAgICAgfQoKICAgICAgICBwdWJsaWMgc3RhdGljIHZvaWQgUnVuQ21kKAogICAgICAgICAgICBzdHJpbmcgYXJndW1lbnRzLAogICAgICAgICAgICBpbnQgdGltZW91dE1zLAogICAgICAgICAgICBpbnQgbWF4Q2hhcnNQZXJTdHJlYW0sCiAgICAgICAgICAgIG91dCBzdHJpbmcgc3Rkb3V0LAogICAgICAgICAgICBvdXQgc3RyaW5nIHN0ZGVyciwKICAgICAgICAgICAgb3V0IGJvb2wgdGltZWRPdXQsCiAgICAgICAgICAgIG91dCBib29sIHRydW5jYXRlZCwKICAgICAgICAgICAgb3V0IGludCBleGl0Q29kZSkKICAgICAgICB7CiAgICAgICAgICAgIHRpbWVkT3V0ID0gZmFsc2U7CiAgICAgICAgICAgIHRydW5jYXRlZCA9IGZhbHNlOwogICAgICAgICAgICBleGl0Q29kZSA9IDE7CiAgICAgICAgICAgIHN0ZG91dCA9ICIiOwogICAgICAgICAgICBzdGRlcnIgPSAiIjsKICAgICAgICAgICAgdmFyIHBzaSA9IG5ldyBQcm9jZXNzU3RhcnRJbmZvKCk7CiAgICAgICAgICAgIHBzaS5GaWxlTmFtZSA9ICJjbWQuZXhlIjsKICAgICAgICAgICAgcHNpLkFyZ3VtZW50cyA9ICIvYyAiICsgYXJndW1lbnRzOwogICAgICAgICAgICBwc2kuUmVkaXJlY3RTdGFuZGFyZE91dHB1dCA9IHRydWU7CiAgICAgICAgICAgIHBzaS5SZWRpcmVjdFN0YW5kYXJkRXJyb3IgPSB0cnVlOwogICAgICAgICAgICBwc2kuVXNlU2hlbGxFeGVjdXRlID0gZmFsc2U7CiAgICAgICAgICAgIHBzaS5DcmVhdGVOb1dpbmRvdyA9IHRydWU7CiAgICAgICAgICAgIHVzaW5nICh2YXIgcCA9IFByb2Nlc3MuU3RhcnQocHNpKSkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgdmFyIHRPdXQgPSBUYXNrLlJ1bigoKSA9PiBSZWFkU3RyZWFtVG9NYXgocC5TdGFuZGFyZE91dHB1dCwgbWF4Q2hhcnNQZXJTdHJlYW0sIHApKTsKICAgICAgICAgICAgICAgIHZhciB0RXJyID0gVGFzay5SdW4oKCkgPT4gUmVhZFN0cmVhbVRvTWF4KHAuU3RhbmRhcmRFcnJvciwgbWF4Q2hhcnNQZXJTdHJlYW0sIHApKTsKICAgICAgICAgICAgICAgIGJvb2wgZmluaXNoZWQgPSBwLldhaXRGb3JFeGl0KHRpbWVvdXRNcyk7CiAgICAgICAgICAgICAgICBpZiAoIWZpbmlzaGVkKQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIHRpbWVkT3V0ID0gdHJ1ZTsKICAgICAgICAgICAgICAgICAgICB0cnkgeyBpZiAoIXAuSGFzRXhpdGVkKSBwLktpbGwoKTsgfSBjYXRjaCB7IH0KICAgICAgICAgICAgICAgICAgICB0cnkgeyBwLldhaXRGb3JFeGl0KDE1MDAwKTsgfSBjYXRjaCB7IH0KICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIHN0ZG91dCA9IHRPdXQuUmVzdWx0OwogICAgICAgICAgICAgICAgc3RkZXJyID0gdEVyci5SZXN1bHQ7CiAgICAgICAgICAgICAgICBpZiAoc3Rkb3V0Lkxlbmd0aCA+PSBtYXhDaGFyc1BlclN0cmVhbSB8fCBzdGRlcnIuTGVuZ3RoID49IG1heENoYXJzUGVyU3RyZWFtKQogICAgICAgICAgICAgICAgICAgIHRydW5jYXRlZCA9IHRydWU7CiAgICAgICAgICAgICAgICB0cnkKICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICBleGl0Q29kZSA9IHAuSGFzRXhpdGVkID8gcC5FeGl0Q29kZSA6IC0xOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgY2F0Y2gKICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICBleGl0Q29kZSA9IC0xOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgaWYgKHRpbWVkT3V0KQogICAgICAgICAgICAgICAgICAgIGV4aXRDb2RlID0gLTE7CiAgICAgICAgICAgIH0KICAgICAgICB9CiAgICB9Cn0K'
-    ))
+        'dXNpbmcgU3lzdGVtOwp1c2luZyBTeXN0ZW0uRGlhZ25vc3RpY3M7CnVzaW5nIFN5c3RlbS5JTzsKdXNpbmcgU3lzdGVtLlRleHQ7CnVzaW5nIFN5c3RlbS5UaHJlYWRpbmcuVGFza3M7CgpuYW1lc3BhY2UgV2luZG9SdW5uZXIKewogICAgcHVibGljIHN0YXRpYyBjbGFzcyBDaGlsZEV4ZWMKICAgIHsKICAgICAgICBwdWJsaWMgc3RhdGljIHN0cmluZyBSZWFkU3RyZWFtVG9NYXgoU3RyZWFtUmVhZGVyIHIsIGludCBtYXhDaGFycywgUHJvY2VzcyBwKQogICAgICAgIHsKICAgICAgICAgICAgdmFyIHNiID0gbmV3IFN0cmluZ0J1aWxkZXIoKTsKICAgICAgICAgICAgdmFyIGJ1ZiA9IG5ldyBjaGFyWzgxOTJdOwogICAgICAgICAgICBpbnQgdG90YWwgPSAwOwogICAgICAgICAgICB3aGlsZSAodG90YWwgPCBtYXhDaGFycykKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgaW50IG4gPSByLlJlYWQoYnVmLCAwLCBNYXRoLk1pbihidWYuTGVuZ3RoLCBtYXhDaGFycyAtIHRvdGFsKSk7CiAgICAgICAgICAgICAgICBpZiAobiA8PSAwKSBicmVhazsKICAgICAgICAgICAgICAgIHNiLkFwcGVuZChidWYsIDAsIG4pOwogICAgICAgICAgICAgICAgdG90YWwgKz0gbjsKICAgICAgICAgICAgfQogICAgICAgICAgICBpZiAodG90YWwgPj0gbWF4Q2hhcnMpCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIHRyeSB7IGlmICghcC5IYXNFeGl0ZWQpIHAuS2lsbCgpOyB9IGNhdGNoIHsgfQogICAgICAgICAgICAgICAgdHJ5IHsgcC5XYWl0Rm9yRXhpdCgxNTAwMCk7IH0gY2F0Y2ggeyB9CiAgICAgICAgICAgIH0KICAgICAgICAgICAgcmV0dXJuIHNiLlRvU3RyaW5nKCk7CiAgICAgICAgfQoKICAgICAgICBwdWJsaWMgc3RhdGljIHZvaWQgUnVuQ21kKAogICAgICAgICAgICBzdHJpbmcgYXJndW1lbnRzLAogICAgICAgICAgICBpbnQgdGltZW91dE1zLAogICAgICAgICAgICBpbnQgbWF4Q2hhcnNQZXJTdHJlYW0sCiAgICAgICAgICAgIG91dCBzdHJpbmcgc3Rkb3V0LAogICAgICAgICAgICBvdXQgc3RyaW5nIHN0ZGVyciwKICAgICAgICAgICAgb3V0IGJvb2wgdGltZWRPdXQsCiAgICAgICAgICAgIG91dCBib29sIHRydW5jYXRlZCwKICAgICAgICAgICAgb3V0IGludCBleGl0Q29kZSkKICAgICAgICB7CiAgICAgICAgICAgIHRpbWVkT3V0ID0gZmFsc2U7CiAgICAgICAgICAgIHRydW5jYXRlZCA9IGZhbHNlOwogICAgICAgICAgICBleGl0Q29kZSA9IDE7CiAgICAgICAgICAgIHN0ZG91dCA9ICIiOwogICAgICAgICAgICBzdGRlcnIgPSAiIjsKICAgICAgICAgICAgdmFyIGVuY29kZWRDb21tYW5kID0gQ29udmVydC5Ub0Jhc2U2NFN0cmluZyhFbmNvZGluZy5Vbmljb2RlLkdldEJ5dGVzKGFyZ3VtZW50cyA/PyAiIikpOwogICAgICAgICAgICB2YXIgcHNpID0gbmV3IFByb2Nlc3NTdGFydEluZm8oKTsKICAgICAgICAgICAgcHNpLkZpbGVOYW1lID0gInBvd2Vyc2hlbGwuZXhlIjsKICAgICAgICAgICAgcHNpLkFyZ3VtZW50cyA9ICItTm9Qcm9maWxlIC1Ob25JbnRlcmFjdGl2ZSAtTm9Mb2dvIC1FbmNvZGVkQ29tbWFuZCAiICsgZW5jb2RlZENvbW1hbmQ7CiAgICAgICAgICAgIHBzaS5SZWRpcmVjdFN0YW5kYXJkT3V0cHV0ID0gdHJ1ZTsKICAgICAgICAgICAgcHNpLlJlZGlyZWN0U3RhbmRhcmRFcnJvciA9IHRydWU7CiAgICAgICAgICAgIHBzaS5Vc2VTaGVsbEV4ZWN1dGUgPSBmYWxzZTsKICAgICAgICAgICAgcHNpLkNyZWF0ZU5vV2luZG93ID0gdHJ1ZTsKICAgICAgICAgICAgdXNpbmcgKHZhciBwID0gUHJvY2Vzcy5TdGFydChwc2kpKQogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICB2YXIgdE91dCA9IFRhc2suUnVuKCgpID0+IFJlYWRTdHJlYW1Ub01heChwLlN0YW5kYXJkT3V0cHV0LCBtYXhDaGFyc1BlclN0cmVhbSwgcCkpOwogICAgICAgICAgICAgICAgdmFyIHRFcnIgPSBUYXNrLlJ1bigoKSA9PiBSZWFkU3RyZWFtVG9NYXgocC5TdGFuZGFyZEVycm9yLCBtYXhDaGFyc1BlclN0cmVhbSwgcCkpOwogICAgICAgICAgICAgICAgYm9vbCBmaW5pc2hlZCA9IHAuV2FpdEZvckV4aXQodGltZW91dE1zKTsKICAgICAgICAgICAgICAgIGlmICghZmluaXNoZWQpCiAgICAgICAgICAgICAgICB7CiAgICAgICAgICAgICAgICAgICAgdGltZWRPdXQgPSB0cnVlOwogICAgICAgICAgICAgICAgICAgIHRyeSB7IGlmICghcC5IYXNFeGl0ZWQpIHAuS2lsbCgpOyB9IGNhdGNoIHsgfQogICAgICAgICAgICAgICAgICAgIHRyeSB7IHAuV2FpdEZvckV4aXQoMTUwMDApOyB9IGNhdGNoIHsgfQogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgc3Rkb3V0ID0gdE91dC5SZXN1bHQ7CiAgICAgICAgICAgICAgICBzdGRlcnIgPSB0RXJyLlJlc3VsdDsKICAgICAgICAgICAgICAgIGlmIChzdGRvdXQuTGVuZ3RoID49IG1heENoYXJzUGVyU3RyZWFtIHx8IHN0ZGVyci5MZW5ndGggPj0gbWF4Q2hhcnNQZXJTdHJlYW0pCiAgICAgICAgICAgICAgICAgICAgdHJ1bmNhdGVkID0gdHJ1ZTsKICAgICAgICAgICAgICAgIHRyeQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIGV4aXRDb2RlID0gcC5IYXNFeGl0ZWQgPyBwLkV4aXRDb2RlIDogLTE7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICBjYXRjaAogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIGV4aXRDb2RlID0gLTE7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICBpZiAodGltZWRPdXQpCiAgICAgICAgICAgICAgICAgICAgZXhpdENvZGUgPSAtMTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgIH0KfQo='    ))
     Add-Type -TypeDefinition $cs -Language CSharp
 }
 
@@ -105,9 +136,22 @@ function Restore-WindoPreserveEnvironment {
     }
 }
 
+function _windo_next_request {
+    param([string]$SecureDir)
+
+    try {
+        return Get-ChildItem -Path $SecureDir -Filter "windo_req.*.json" -ErrorAction SilentlyContinue |
+            Sort-Object @{Expression = { $_.LastWriteTime }}, @{Expression = { $_.Name }} |
+            Select-Object -First 1
+    } catch {
+        return $null
+    }
+}
+
 function Test-WindoCommandLine([string]$cmdLine) {
     $max = Get-WindoMaxCommandChars
     if ($null -eq $cmdLine) { return "Command is missing." }
+    if ([string]::IsNullOrWhiteSpace([string]$cmdLine)) { return "Command is missing." }
     if ($cmdLine.Length -gt $max) { return "Command exceeds max length ($max)." }
     foreach ($ch in $cmdLine.ToCharArray()) {
         $c = [int][char]$ch
@@ -122,9 +166,12 @@ function Test-WindoResultPath([string]$outPath, [string]$secureDir) {
     try {
         $full = [System.IO.Path]::GetFullPath($outPath)
         $root = [System.IO.Path]::GetFullPath($secureDir)
-        if (-not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return "OutPath must be under SecureDir." }
+        $normalizedRoot = $root.TrimEnd('\')
+        $normalizedRoot = $normalizedRoot.TrimEnd('/')
+        $matchPrefix = $normalizedRoot + [System.IO.Path]::DirectorySeparatorChar
+        if (-not ($full.StartsWith($matchPrefix, [StringComparison]::OrdinalIgnoreCase) -or ($full -eq $normalizedRoot)) ) { return "OutPath must be under SecureDir." }
         $name = [System.IO.Path]::GetFileName($full)
-        if ($name -notmatch '^windo_res\.[a-f0-9]+\.json$') { return "OutPath file name is invalid." }
+    if ($name -cnotmatch '^windo_res\.[a-f0-9]+\.json$') { return "OutPath file name is invalid." }
     } catch { return "OutPath is invalid." }
     return $null
 }
@@ -146,9 +193,13 @@ function _windo_get_member_value([object]$Object, [string]$Name) {
 }
 
 function _dpapi_unprotect([string]$Base64Input) {
+    $protectedDataType = [type]::GetType("System.Security.Cryptography.ProtectedData")
     try {
         $enc = [Convert]::FromBase64String($Base64Input)
-        $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
+        if ($null -eq $protectedDataType) {
+            return [System.Text.Encoding]::UTF8.GetString($enc)
+        }
+        $bytes = $protectedDataType::Unprotect(
             $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
         )
         [System.Text.Encoding]::UTF8.GetString($bytes)
@@ -170,15 +221,64 @@ function _windo_resolve_preserve_environment([object]$Payload) {
         try { return $Payload | ConvertFrom-Json } catch { return $null }
     }
 
-    $payloadType = _windo_get_member_value $Payload "Type"
-    $payloadData = _windo_get_member_value $Payload "Data"
+    $payloadType = $null
+    $payloadData = $null
+    if ($Payload -is [System.Collections.IDictionary]) {
+        if ($Payload.Contains("Type")) { $payloadType = $Payload["Type"] }
+        if ($Payload.Contains("Data")) { $payloadData = $Payload["Data"] }
+    } else {
+        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Type") { $payloadType = $Payload.Type }
+        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Data") { $payloadData = $Payload.Data }
+    }
     if (-not [string]::IsNullOrWhiteSpace([string]$payloadType) -and -not [string]::IsNullOrWhiteSpace([string]$payloadData)) {
         if ([string]$payloadType -ieq "dpapi-json") {
             $json = _windo_unprotect_text [string]$payloadData
+            if ($null -eq $json -and -not [string]::IsNullOrWhiteSpace([string]$payloadData)) {
+                try {
+                    $json = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$payloadData))
+                } catch { }
+            }
             if ($null -ne $json) {
                 try { return $json | ConvertFrom-Json } catch { return $null }
             }
             return $null
+        }
+    }
+
+    return $Payload
+}
+
+function _windo_resolve_artifact_payload {
+    param([object]$Payload)
+    if ($null -eq $Payload) { return $null }
+
+    if ($Payload -is [string]) {
+        if ([string]::IsNullOrWhiteSpace([string]$Payload)) { return $null }
+        if ([string]$Payload.Length -gt 262144) { return $null }
+        if ([string]$Payload -match '^[\r\n\s\t]*\{') {
+            try { return $Payload | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
+        }
+        return $null
+    }
+
+    $payloadType = $null
+    $payloadData = $null
+    if ($Payload -is [System.Collections.IDictionary]) {
+        if ($Payload.Contains("Type")) { $payloadType = $Payload["Type"] }
+        if ($Payload.Contains("Data")) { $payloadData = $Payload["Data"] }
+    } else {
+        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Type") { $payloadType = $Payload.Type }
+        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Data") { $payloadData = $Payload.Data }
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$payloadType) -and ([string]$payloadType -ieq "dpapi-json") -and -not [string]::IsNullOrWhiteSpace([string]$payloadData)) {
+        $json = _windo_unprotect_text [string]$payloadData
+        if ($null -eq $json -and -not [string]::IsNullOrWhiteSpace([string]$payloadData)) {
+            try {
+                $json = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$payloadData))
+            } catch { }
+        }
+        if ($null -ne $json) {
+            try { return $json | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
         }
         return $null
     }
@@ -186,10 +286,18 @@ function _windo_resolve_preserve_environment([object]$Payload) {
     return $Payload
 }
 
+function _windo_join_output_streams([string]$StdOut, [string]$StdErr) {
+    $out = if ($null -eq $StdOut) { "" } else { $StdOut }
+    $err = if ($null -eq $StdErr) { "" } else { $StdErr }
+    if ([string]::IsNullOrWhiteSpace($out)) { return $err.TrimEnd() }
+    if ([string]::IsNullOrWhiteSpace($err)) { return $out.TrimEnd() }
+    return ($out + "`n" + $err).TrimEnd()
+}
+
 "RUNNER START: $([DateTime]::Now.ToString('s'))" | Set-Content -Path $RunnerLast -Encoding UTF8
 
 $createdNew = $false
-$m = New-Object System.Threading.Mutex($false, $MutexName, [ref]$createdNew)
+$m = New-WindoRunnerMutex -Name $MutexName -CreatedNew ([ref]$createdNew)
 
 try {
     if (-not $m.WaitOne(30000)) {
@@ -197,9 +305,7 @@ try {
         exit 9
     }
 
-    $req = Get-ChildItem -Path $SecureDir -Filter "windo_req.*.json" -ErrorAction SilentlyContinue |
-           Sort-Object LastWriteTime |
-           Select-Object -First 1
+    $req = _windo_next_request $SecureDir
 
     if (-not $req) {
         "NO WORK: no pending request files" | Add-Content -Path $RunnerLast -Encoding UTF8
@@ -207,16 +313,33 @@ try {
     }
 
     try {
-        $pending = Get-Content -Raw -Path $req.FullName | ConvertFrom-Json
+        $pendingRaw = Get-Content -Raw -Path $req.FullName
+        $pending = _windo_resolve_artifact_payload $pendingRaw
     } catch {
         "BAD REQUEST JSON: $($req.FullName) :: $($_.Exception.Message)" | Add-Content -Path $RunnerLast -Encoding UTF8
         try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".bad") -ErrorAction SilentlyContinue } catch {}
         exit 3
     }
 
-    $cmdLine = [string]$pending.Command
-    $outPath = [string]$pending.OutPath
-    $reqId   = [string]$pending.RequestId
+    if ($null -eq $pending -or (-not ($pending.PSObject -or $pending -is [System.Collections.IDictionary])) ) {
+        "BAD REQUEST JSON: $($req.FullName) :: malformed request payload" | Add-Content -Path $RunnerLast -Encoding UTF8
+        try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".bad") -ErrorAction SilentlyContinue } catch {}
+        exit 3
+    }
+
+    $cmdLine = _windo_get_member_value $pending "Command"
+    $outPath = _windo_get_member_value $pending "OutPath"
+    $reqId   = _windo_get_member_value $pending "RequestId"
+
+    if ($null -eq $cmdLine -or $null -eq $outPath) {
+        "BAD REQUEST JSON: $($req.FullName) :: malformed request payload (missing Command or OutPath)" | Add-Content -Path $RunnerLast -Encoding UTF8
+        try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".bad") -ErrorAction SilentlyContinue } catch {}
+        exit 3
+    }
+
+    $cmdLine = [string]$cmdLine
+    $outPath = [string]$outPath
+    $reqId   = [string]$reqId
     $timeoutMsOverride = $null
     if ($pending.PSObject.Properties.Name -contains "TimeoutOverrideMs") { $timeoutMsOverride = $pending.TimeoutOverrideMs }
     $preserveEnvironment = $null
@@ -238,11 +361,16 @@ try {
     $badCmd = Test-WindoCommandLine $cmdLine
     if ($badCmd) {
         "VALIDATION FAILED (Command): $badCmd" | Add-Content -Path $RunnerLast -Encoding UTF8
+        $message = "<WINDO VALIDATION FAILED: $badCmd>"
+        $stdout = $message
+        $stderr = ""
         $end = Get-Date
         $result = @{
             Timestamp  = $end.ToString("yyyy-MM-dd HH:mm:ss")
             Command    = $cmdLine
-            Output     = "<WINDO VALIDATION FAILED: $badCmd>"
+            Output     = $message
+            StdOut     = $stdout
+            StdErr     = $stderr
             ExitCode   = -3
             DurationMs = 0
             RequestId  = $reqId
@@ -273,16 +401,7 @@ try {
     try {
         $envState = Invoke-WindoPreserveEnvironment -Snapshot $preserveEnvironment
         try {
-            [WindoRunner.ChildExec]::RunCmd(
-                $cmdLine,
-                $timeoutMs,
-                $maxPer,
-                [ref]$stdout,
-                [ref]$stderr,
-                [ref]$timedOut,
-                [ref]$truncated,
-                [ref]$exitCode
-            )
+            Invoke-WindoRunnerChildExec -CommandLine $cmdLine -TimeoutMs $timeoutMs -MaxCharsPerStream $maxPer -StdOut ([ref]$stdout) -StdErr ([ref]$stderr) -TimedOut ([ref]$timedOut) -Truncated ([ref]$truncated) -ExitCode ([ref]$exitCode)
         } catch {
             $stdout = ""
             $stderr = ($_ | Out-String).TrimEnd()
@@ -297,7 +416,7 @@ try {
     if ($null -eq $stdout) { $stdout = "" }
     if ($null -eq $stderr) { $stderr = "" }
 
-    $output = ($stdout + $stderr).TrimEnd()
+    $output = _windo_join_output_streams $stdout $stderr
     if ($timedOut) {
         $output = ($output + "`n<WINDO: child process exceeded WINDO_RUNNER_TIMEOUT_MS>").TrimEnd()
     }
@@ -312,6 +431,8 @@ try {
         Timestamp  = $end.ToString("yyyy-MM-dd HH:mm:ss")
         Command    = $cmdLine
         Output     = $output
+        StdOut     = $stdout
+        StdErr     = $stderr
         ExitCode   = [int]$exitCode
         DurationMs = $durationMs
         RequestId  = $reqId
@@ -333,6 +454,10 @@ try {
     exit 0
 }
 finally {
-    try { $m.ReleaseMutex() } catch {}
-    try { $m.Dispose() } catch {}
+    Release-WindoRunnerMutex -Mutex $m
+    Close-WindoRunnerMutex -Mutex $m
 }
+
+
+
+

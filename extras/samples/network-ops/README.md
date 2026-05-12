@@ -7,7 +7,7 @@ Local module for host/network diagnostics and WSL integration helpers.
 - Put this folder under `%USERPROFILE%\Documents\windo\modules`.
 - `module.json` declares:
   - `entry` = `Load.ps1`
-  - `requiresWindoVersion` = `5.0.0`
+  - `requiresWindoVersion` = `6.0.0`
 - After enabling, WINDO's generated profile loader block will load `Load.ps1` at shell startup.
 - Commands are added with `wincmd` only if they do not already exist, so loading remains non-destructive.
 
@@ -27,6 +27,33 @@ Local module for host/network diagnostics and WSL integration helpers.
   Send one-shot (`-Mode apply`) or interactive (`-Interactive` with optional `-Mode apply`) TCP/UDP payloads with timeout control (`-TimeoutSeconds`) and optional JSON output (`-AsJson`). `-Mode check` performs allowlist validation only.
 - `netops-netcat-recv`  
   Receive one-shot (`-Mode apply`) or interactive (`-Interactive` with optional `-Mode apply`) TCP/UDP traffic with timeout control (`-TimeoutSeconds`), loopback bind defaults, and optional JSON output (`-AsJson`). `-Mode check` collects identity and safety details without binding.
+
+## JSON contract notes
+
+`extras/samples/network-ops` publishes explicit output contracts for each command, with JSON-envelope exceptions noted below.
+
+- `netops-rdp-vnc`:
+  - Uses WINDO `_emit_json` and the `rdp` envelope command when `-AsJson`/`--json` is active.
+  - `-Subcommand status` payload fields:
+    - `command` (`"status"`), `subcommand`, `service`, `config`, `firewall`, `scannedAt`, `exitCode`.
+  - `-Subcommand firewall` payload fields:
+    - `command` (`"firewall"`), `subcommand`, `action`, `requestedPorts`, `runCommand`, `command-executed`, `updates`, `dryRun`, `scannedAt`, `exitCode`.
+- `netops-wsl`:
+  - Uses WINDO `_emit_json` and the `wsl` envelope command when `-AsJson`/`--json` is active.
+  - `-Mode status|list` payload fields:
+    - `command` (`"status"`), `wslAvailable`, `wslStatus`, `wslExitCode`, `distros`, `default`, `exitCode`.
+  - `-Mode check` payload fields:
+    - `command` (`"check install"`), `notes`, `wslAvailable`, `wslStatus`, `distros`, `default`, `exitCode`.
+- Native object outputs (non-`_emit_json`, no WINDO envelope):
+  - `netops-resolve` rows: `Host`, `IpAddress`, `AddressFamily`, `ReverseDns`.
+  - `netops-subnet-scan` rows: `IpAddress`, `Reachable`.
+  - `netops-arp-map` rows: `InterfaceAlias`, `IPAddress`, `LinkLayerAddress`, `State`.
+  - `netops-netcat-send` rows/objects:
+    - `command`, `protocol`, `mode`, `remoteHost`, `remotePort`, `timeoutSeconds`, `allowRemote`, `allowlist`, `allowlistMatched`, `safety`, `events`, `messages`, `bytes`, `timedOut`, `exitCode`.
+  - `netops-netcat-recv` rows/objects:
+    - `command`, `protocol`, `mode`, `localHost`, `localPort`, `timeoutSeconds`, `allowRemote`, `allowlist`, `allowlistMatched`, `safety`, `events`, `messages`, `bytes`, `timedOut`, `exitCode`.
+
+For full payload details and examples, see [`docs/json-schema.md`](../../docs/json-schema.md) `network-ops` sections.
 
 Netcat safety model supports allowlist control:
 - `-AllowHosts` or `-AllowHostsFile` for explicit approved targets.

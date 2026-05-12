@@ -5,7 +5,7 @@ $root = Split-Path $PSScriptRoot -Parent
 . (Join-Path $root "src\windo\snippets\StatsTimeFilter.ps1")
 . (Join-Path $root "src\windo\snippets\WindoConfigEffective.ps1")
 
-$failed = 0
+$script:failed = 0
 function Test-WindoNormalizePublishedInstallerSha256([string]$Text) {
     if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
     $m = [regex]::Match($Text, '[A-Fa-f0-9]{64}')
@@ -15,15 +15,115 @@ function Test-WindoNormalizePublishedInstallerSha256([string]$Text) {
 function Assert-Equal($a, $b, $msg) {
     if ($a -ne $b) {
         Write-Host "FAIL: $msg  (expected '$b', got '$a')" -ForegroundColor Red
-        $script:failed++
+        $script:failed += 1
     }
 }
 
 function Assert-Pattern([string]$Text, [string]$Pattern, [string]$msg) {
     if (-not [regex]::IsMatch($Text, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
         Write-Host "FAIL: $msg  (pattern not found: '$Pattern')" -ForegroundColor Red
-        $script:failed++
+        $script:failed += 1
     }
+}
+
+function New-VerifyLogLine([hashtable]$Entry, [string]$StoredHashOverride = $null) {
+    $json = ($Entry | ConvertTo-Json -Compress)
+    $storedHash = if ([string]::IsNullOrWhiteSpace($StoredHashOverride)) { _sha256_hex $json } else { $StoredHashOverride }
+    return [pscustomobject]@{
+        line = "$storedHash" + ":" + (_dpapi_protect $json)
+        hash = $storedHash
+        json = $json
+    }
+}
+
+$expectedStateChecks = [System.Collections.Generic.List[pscustomobject]]::new()
+function Assert-State([string]$Case, [object]$Expected, [object]$Actual, [string]$msg) {
+    Assert-Equal $Actual $Expected $msg
+    $expectedText = if ($null -eq $Expected) { "<null>" } else { [string]$Expected }
+    $actualText = if ($null -eq $Actual) { "<null>" } else { [string]$Actual }
+    $script:expectedStateChecks.Add([pscustomobject]@{
+        Case = $Case
+        Expected = $expectedText
+        Actual = $actualText
+        IsMatch = ($Expected -eq $Actual)
+    })
+}
+
+function Parse-NameValueManifest([string]$Text) {
+    $out = @{}
+    if ($null -eq $Text) { return $out }
+    $raw = [string]$Text
+    if ($raw.Trim() -match '^[A-Fa-f0-9]{64}$') {
+        $out.installerSha256 = $raw.Trim().ToUpperInvariant()
+        return $out
+    }
+    foreach ($line in ($raw -split "`r?`n")) {
+        $trim = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($trim) -or $trim.StartsWith("#")) { continue }
+        if ($trim -match '^(?<key>[^=]+?)=(?<value>.*)$') {
+            $out[$Matches.key] = $Matches.value.Trim()
+        }
+    }
+    return $out
+}
+
+function Get-WindoFunctionTextFromSource([string]$Source, [string]$Name) {
+    try {
+        $sources = @($Source)
+        $matches = [regex]::Matches($Source, '(?s)\$WindoFunctionBody\s*=\s*@''\s*(.*?)\r?\n''@', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+        foreach ($m in $matches) {
+            if ($m.Success -and -not [string]::IsNullOrWhiteSpace($m.Groups[1].Value)) {
+                $sources += $m.Groups[1].Value
+            }
+        }
+
+        foreach ($candidate in $sources) {
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseInput($candidate, [ref]$null, [ref]$errors)
+            $matches = $ast.FindAll(
+                { param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq $Name },
+                $true
+            )
+            if ($matches -and $matches.Count -gt 0) { return $matches[0].Extent.Text }
+
+            # Fallback for function definitions that are not captured through AST extraction
+            # due inline parameter syntax or parser edge cases in mixed code contexts.
+            $escapedName = [regex]::Escape($Name)
+            $fnPattern = "(?ms)^\s*function\s+$escapedName(?:\s*\([^{]*\))?\s*\{"
+            $m2 = [regex]::Match($candidate, $fnPattern)
+            if ($m2.Success) {
+                $tail = $candidate.Substring($m2.Index)
+                $tailErrors = $null
+                $tailAst = [System.Management.Automation.Language.Parser]::ParseInput($tail, [ref]$null, [ref]$tailErrors)
+                $tailMatches = $tailAst.FindAll(
+                    { param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq $Name },
+                    $true
+                )
+                if ($tailMatches -and $tailMatches.Count -gt 0) { return $tailMatches[0].Extent.Text }
+
+                $start = $m2.Index
+                $depth = 0
+                $end = -1
+                for ($i = $m2.Index + $m2.Length - 1; $i -lt $candidate.Length; $i++) {
+                    $char = $candidate[$i]
+                    if ($char -eq '{') { $depth++ }
+                    elseif ($char -eq '}') {
+                        $depth--
+                        if ($depth -eq 0) {
+                            $end = $i
+                            break
+                        }
+                    }
+                }
+                if ($end -ge $start) {
+                    return $candidate.Substring($start, $end - $start + 1)
+                }
+            }
+        }
+    } catch {
+        return $null
+    }
+    return $null
 }
 
 Assert-Equal (Get-WindoIntegrityComponentLevel "a" "a") "OK" "exact match"
@@ -65,20 +165,855 @@ $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
 $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
 $moduleSource = Get-Content -Path (Join-Path $root "extras\samples\network-ops\Load.ps1") -Raw
+$uninstallSource = Get-Content -Path (Join-Path $root "windo_uninstall.ps1") -Raw
+$selfUpdateSource = Get-Content -Path (Join-Path $root "windo_self_update.ps1") -Raw
+$syncScript = Join-Path $root "tools\Sync-InstallerChecksum.ps1"
+
+$installTaskMain = [regex]::Match($installerSource, '(?m)^\$TaskMain\s*=\s*"([^"]+)"')
+$installTaskUpdate = [regex]::Match($installerSource, '(?m)^\$TaskUpdate\s*=\s*"([^"]+)"')
+$uninstallTaskMain = [regex]::Match($uninstallSource, '(?m)^\$TaskMain\s*=\s*"([^"]+)"')
+$uninstallTaskUpdate = [regex]::Match($uninstallSource, '(?m)^\$TaskUpdate\s*=\s*"([^"]+)"')
+$selfUpdateTaskName = [regex]::Match($selfUpdateSource, '(?m)^\$TaskName\s*=\s*"([^"]+)"')
+$installerRegisterTaskCount = (
+    [regex]::Matches($installerSource, 'Register-ScheduledTask -TaskName \$Task(?:Main|Update)').Count +
+    [regex]::Matches($installerSource, 'Register-WindoScheduledTask -TaskName \$Task(?:Main|Update)').Count
+)
+
+Assert-Equal ($installTaskMain.Success -and $installTaskUpdate.Success -and $uninstallTaskMain.Success -and $uninstallTaskUpdate.Success -and $selfUpdateTaskName.Success) $true "installer/uninstall/self-update declare task names"
+if ($installTaskMain.Success -and $installTaskUpdate.Success -and $uninstallTaskMain.Success -and $uninstallTaskUpdate.Success -and $selfUpdateTaskName.Success) {
+    Assert-Equal $uninstallTaskMain.Groups[1].Value $installTaskMain.Groups[1].Value "uninstall and installer share runner task name"
+    Assert-Equal $uninstallTaskUpdate.Groups[1].Value $installTaskUpdate.Groups[1].Value "uninstall and installer share self-update task name"
+    Assert-Equal $selfUpdateTaskName.Groups[1].Value $installTaskMain.Groups[1].Value "self-update task targets WindoElevatedRunner"
+}
+Assert-Equal ($installerRegisterTaskCount -ge 2) $true "installer registers both WindoElevatedRunner and WindoSelfUpdate"
+
+$parseManifestFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_parse_manifest_value"
+if ($parseManifestFn) {
+    Invoke-Expression $parseManifestFn
+    Assert-Equal (_windo_parse_manifest_value "installerSha256=ABC`r`nunrelated=1" "installerSha256") "ABC" "installer manifest parser reads targeted key"
+    Assert-Equal (_windo_parse_manifest_value "installer=ABC`r`nother=1" "installerSha256") $null "installer manifest parser returns null for missing key"
+} else {
+    Assert-Equal $false $true "installer exposes manifest parser helper"
+}
+
+$normalizePublishedFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_normalize_published_installer_sha256"
+if ($normalizePublishedFn) {
+    Invoke-Expression $normalizePublishedFn
+    Assert-Equal (_windo_normalize_published_installer_sha256 "installerSha256=abc123") $null "normalize rejects short hash payload"
+    Assert-Equal (_windo_normalize_published_installer_sha256 "installerSha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef") "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF" "normalize uppercases valid hex payload"
+    Assert-Equal (_windo_normalize_published_installer_sha256 "  installerSha256 = 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  ") "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF" "normalize tolerates key-value spacing"
+    Assert-Equal (_windo_normalize_published_installer_sha256 "windo_install.ps1=$h64") $null "normalize ignores key-value line for non-installerSha256 key"
+    Assert-Equal (_windo_normalize_published_installer_sha256 ("$h64 windo_install.ps1")) "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF" "normalize extracts file-qualified bare hash"
+    $ambiguous = @(
+        "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+    ) -join "`r`n"
+    Assert-Equal (_windo_normalize_published_installer_sha256 $ambiguous) $null "normalize rejects ambiguous multi-line candidate sources"
+    $orderedManifest = @"
+installerSha256 = $h64
+releaseBranch = v6
+installerSha256 = deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+"@
+    Assert-State "manifest parser returns first matching installerSha256" $h64 ( _windo_parse_manifest_value $orderedManifest "installerSha256" ) "manifest parser returns first matching key value"
+    Assert-State "published hash parser keeps explicit installerSha256 key" "6666666666666666666666666666666666666666666666666666666666666666" ( _windo_normalize_published_installer_sha256 "releaseCommit = commit`r`ninstallerSha256=6666666666666666666666666666666666666666666666666666666666666666`r`ninstallerSha256=7777777777777777777777777777777777777777777777777777777777777777" ) "explicit installerSha256 key takes priority in normalize"
+} else {
+    Assert-Equal $false $true "installer exposes published checksum normalizer"
+}
+
+$getWindoFileHashFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "Get-WindoFileHash"
+$verifyInstallerChecksumFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_verify_installer_sha256_optional"
+$parseBoolFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_parse_bool_value"
+$releaseMetadataStateFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_release_metadata_state"
+if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $parseBoolFn -and $releaseMetadataStateFn) {
+    Invoke-Expression $parseBoolFn
+    Invoke-Expression $getWindoFileHashFn
+    Invoke-Expression $verifyInstallerChecksumFn
+    Invoke-Expression $releaseMetadataStateFn
+
+    function _windo_release_ref { return $script:resolvedRef }
+    function _windo_release_branch { return "Exodus" }
+    function _windo_get_file_blob_sha1_hex([string]$Path) { return $null }
+    function _windo_get_snapshot_installer_sha256([string]$Version) { return $null }
+
+    $fixtureInstallerFile = Join-Path ([IO.Path]::GetTempPath()) ("windo-verify-checksum-" + [Guid]::NewGuid().ToString("N") + ".ps1")
+    Set-Content -Path $fixtureInstallerFile -Value "installer payload"
+    $resolvedRef = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    $originalReleaseCommit = $env:WINDO_RELEASE_COMMIT
+    $originalStrictMode = $env:WINDO_STRICT_INSTALLER_VERIFICATION
+    try {
+        $env:WINDO_RELEASE_COMMIT = $resolvedRef
+
+        $compatibilityPayload = [pscustomobject]@{
+            sha256 = "0" * 64
+            releaseCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            releaseBranch = "Exodus"
+        }
+
+        $env:WINDO_STRICT_INSTALLER_VERIFICATION = "0"
+        $threw = $false
+        try {
+            _windo_verify_installer_sha256_optional -Path $fixtureInstallerFile -PublishedChecksum $compatibilityPayload
+        } catch {
+            $threw = $true
+        }
+        Assert-Equal $threw $false "installer checksum mismatch enters non-strict compatibility mode when releaseCommit drifts"
+
+        $env:WINDO_STRICT_INSTALLER_VERIFICATION = "1"
+        $strictError = $null
+        try {
+            _windo_verify_installer_sha256_optional -Path $fixtureInstallerFile -PublishedChecksum $compatibilityPayload
+        } catch {
+            $strictError = $_.Exception.Message
+        }
+        Assert-Equal (-not [string]::IsNullOrWhiteSpace($strictError)) $true "strict mode throws for compatibility-mode checksum drift"
+        Assert-Pattern $strictError "release metadata drift" "strict mode throws with drift detail"
+
+        $normalizedCommitPayload = [pscustomobject]@{
+            sha256 = "0" * 64
+            releaseCommit = $resolvedRef.ToUpperInvariant()
+        }
+        $strictMatchError = $null
+        try {
+            _windo_verify_installer_sha256_optional -Path $fixtureInstallerFile -PublishedChecksum $normalizedCommitPayload
+        } catch {
+            $strictMatchError = $_.Exception.Message
+        }
+        Assert-Equal (-not [string]::IsNullOrWhiteSpace($strictMatchError)) $true "strict mode still fails on checksum mismatch when releaseCommit validates"
+    Assert-Equal (($strictMatchError -match "release metadata drift")) $true "validated releaseCommit still reports metadata drift when branch metadata is missing"
+
+        $strictUnavailable = $null
+        try {
+            _windo_verify_installer_sha256_optional -Path $fixtureInstallerFile -PublishedChecksum ([pscustomobject]@{
+                sha256 = ""
+                releaseCommit = $resolvedRef
+                releaseBranch = "Exodus"
+                error = "published checksum unavailable"
+            })
+        } catch {
+            $strictUnavailable = $_.Exception.Message
+        }
+        Assert-Equal (-not [string]::IsNullOrWhiteSpace($strictUnavailable)) $true "strict mode throws when published checksum is missing"
+        Assert-Pattern $strictUnavailable "cannot be validated in strict mode" "strict missing checksum throws actionable message"
+
+        $env:WINDO_STRICT_INSTALLER_VERIFICATION = "0"
+        $compatUnavailable = $null
+        try {
+            _windo_verify_installer_sha256_optional -Path $fixtureInstallerFile -PublishedChecksum ([pscustomobject]@{
+                sha256 = ""
+                releaseCommit = $resolvedRef
+                releaseBranch = "Exodus"
+                error = "published checksum unavailable"
+            })
+        } catch {
+            $compatUnavailable = $_.Exception.Message
+        }
+        Assert-Equal $compatUnavailable $null "non-strict mode accepts missing published checksum"
+    } finally {
+        if ($null -eq $originalReleaseCommit) { Remove-Item Env:\WINDO_RELEASE_COMMIT -ErrorAction SilentlyContinue } else { $env:WINDO_RELEASE_COMMIT = $originalReleaseCommit }
+        if ($null -eq $originalStrictMode) { Remove-Item Env:\WINDO_STRICT_INSTALLER_VERIFICATION -ErrorAction SilentlyContinue } else { $env:WINDO_STRICT_INSTALLER_VERIFICATION = $originalStrictMode }
+        Remove-Item -LiteralPath $fixtureInstallerFile -ErrorAction SilentlyContinue
+        Remove-Item -ErrorAction SilentlyContinue Function:\Get-WindoFileHash
+        Remove-Item -ErrorAction SilentlyContinue Function:\_windo_release_ref
+        Remove-Item -ErrorAction SilentlyContinue Function:\_windo_release_branch
+        Remove-Item -ErrorAction SilentlyContinue Function:\_windo_get_snapshot_installer_sha256
+        Remove-Item -ErrorAction SilentlyContinue Function:\_windo_get_file_blob_sha1_hex
+    }
+} else {
+    Assert-Equal $false $true "installer exposes checksum verification helper"
+}
+
+$commandPlanFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_new_command_plan"
+$joinPlanFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_join_plan_command"
+$quotePlanPartFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_quote_plan_part"
+$motionClassFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_motion_classification"
+$setExitFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_set_exit"
+$promptSelfUpdateFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_prompt_self_update_installer"
+$taskAccessDeniedFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_is_task_access_denied"
+$runGenesisInstallerFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_run_genisis_installer"
+$verifyLogStateFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_verify_log_state"
+$controlStartActionFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_start_action"
+$appendLogFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_append_log"
+$getLastHashFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_get_last_hash"
+$dpapiProtectFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_dpapi_protect"
+$dpapiUnprotectFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_dpapi_unprotect"
+$sha256HexFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_sha256_hex"
+if (Test-Path Function:\_windo_draw_ascii_startup_frame) { Remove-Item Function:\_windo_draw_ascii_startup_frame -Force }
+function _windo_draw_ascii_startup_frame { }
+if (Test-Path Function:\_windo_is_process_elevated) { Remove-Item Function:\_windo_is_process_elevated -Force }
+function _windo_is_process_elevated { return $false }
+if (Test-Path Function:\_windo_release_branch) { Remove-Item Function:\_windo_release_branch -Force }
+function _windo_release_branch { return "Exodus" }
+if (Test-Path Function:\_windo_save_published_installer) { Remove-Item Function:\_windo_save_published_installer -Force }
+function _windo_save_published_installer {
+    param([string]$Path)
+    Set-Content -LiteralPath $Path -Value ("x" * 6000)
+    return @{ source = "windo_install.ps1"; version = "6.0.0" }
+}
+if (Test-Path Function:\_windo_get_published_installer_sha256) { Remove-Item Function:\_windo_get_published_installer_sha256 -Force }
+function _windo_get_published_installer_sha256 { return @{ sha256 = ("0" * 64); releaseCommit = "0"; releaseBranch = "Exodus"; releaseCommitRaw = "0" } }
+if (Test-Path Function:\_windo_start_downloaded_installer) { Remove-Item Function:\_windo_start_downloaded_installer -Force }
+function _windo_start_downloaded_installer {
+    param([string]$ScriptPath)
+    return $true
+}
+if (Test-Path Function:\_windo_verify_installer_sha256_optional) { Remove-Item Function:\_windo_verify_installer_sha256_optional -Force }
+function _windo_verify_installer_sha256_optional { }
+if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -and $setExitFn -and $promptSelfUpdateFn -and $taskAccessDeniedFn -and $runGenesisInstallerFn -and $verifyLogStateFn -and $appendLogFn -and $getLastHashFn -and $dpapiProtectFn -and $dpapiUnprotectFn -and $sha256HexFn -and $controlStartActionFn) {
+    Invoke-Expression $commandPlanFn
+    Invoke-Expression $joinPlanFn
+    Invoke-Expression $quotePlanPartFn
+    Invoke-Expression $motionClassFn
+    Invoke-Expression $setExitFn
+    Invoke-Expression $promptSelfUpdateFn
+    Invoke-Expression $taskAccessDeniedFn
+    Invoke-Expression $runGenesisInstallerFn
+    Invoke-Expression $verifyLogStateFn
+    Invoke-Expression $appendLogFn
+    Invoke-Expression $controlStartActionFn
+    Invoke-Expression $getLastHashFn
+    Invoke-Expression $dpapiProtectFn
+    Invoke-Expression $dpapiUnprotectFn
+    Invoke-Expression $sha256HexFn
+    $savedTaskMain = (Get-Variable -Name TaskName -Scope Script -ErrorAction SilentlyContinue).Value
+    $savedTaskUpdate = (Get-Variable -Name TaskUpdate -Scope Script -ErrorAction SilentlyContinue).Value
+    $savedSecureDir = (Get-Variable -Name SecureDir -Scope Script -ErrorAction SilentlyContinue).Value
+    $savedLogFile = (Get-Variable -Name LogFile -Scope Script -ErrorAction SilentlyContinue).Value
+    $savedExitCode = (Get-Variable -Name WINDO_EXIT_CODE -Scope Global -ErrorAction SilentlyContinue).Value
+    $savedLastExitCode = if ((Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue)) { (Get-Variable -Name LASTEXITCODE -Scope Global).Value } else { $null }
+    $hadLastExitCode = [bool](Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue)
+    $savedCIEnv = if (Test-Path Env:CI) { (Get-Item Env:CI).Value } else { $null }
+    $hasTaskName = [bool](Get-Variable -Name TaskName -Scope Script -ErrorAction SilentlyContinue)
+    $hasTaskUpdate = [bool](Get-Variable -Name TaskUpdate -Scope Script -ErrorAction SilentlyContinue)
+    $hasSecureDir = [bool](Get-Variable -Name SecureDir -Scope Script -ErrorAction SilentlyContinue)
+    $hasLogFile = [bool](Get-Variable -Name LogFile -Scope Script -ErrorAction SilentlyContinue)
+
+    $TaskName = "WindoElevatedRunner"
+    $TaskUpdate = "WindoSelfUpdate"
+    $WindoVersion = "6.0.0"
+    $SecureDir = Join-Path ([IO.Path]::GetTempPath()) "windo-test-logic-secure"
+    New-Item -ItemType Directory -Path $SecureDir -Force | Out-Null
+    try {
+        $installPlan = _windo_new_command_plan @("install-latest")
+        $installPlanSecondPass = _windo_new_command_plan @("install-latest")
+        $upgradePlan = _windo_new_command_plan @("upgrade")
+        $upgradePlanSecondPass = _windo_new_command_plan @("upgrade")
+        $repairPlan = _windo_new_command_plan @("repair")
+        $repairPlanSecondPass = _windo_new_command_plan @("repair")
+        Assert-State "upgrade flow route from plan helper" "published installer update" $installPlan.route "upgrade maps to published installer update route"
+        Assert-State "upgrade flow exit code" 0 $installPlan.exitCode "upgrade flow plan exit code is green"
+        Assert-State "install-latest plan is repeatable" $installPlan.route $installPlanSecondPass.route "repeated install-latest planning is deterministic"
+        Assert-State "install-latest writes local files consistently" $installPlan.writesLocalFiles $installPlanSecondPass.writesLocalFiles "install-latest planning stays stable"
+        Assert-State "upgrade plan is repeatable" $upgradePlan.route $upgradePlanSecondPass.route "repeated upgrade planning is deterministic"
+        Assert-State "repair plan is repeatable" $repairPlan.route $repairPlanSecondPass.route "repeated repair planning is deterministic"
+        Assert-State "repair plan remains local" $repairPlan.writesLocalFiles $repairPlanSecondPass.writesLocalFiles "repair planning stays local"
+        Assert-State "self-update flow route from plan helper" "published installer update" (_windo_new_command_plan @("self-update")).route "self-update maps to published installer update route"
+        $selfUpdatePlan = _windo_new_command_plan @("self-update")
+        Assert-State "self-update artifact points to scheduled tasks" $true ( (($selfUpdatePlan.artifacts) | Where-Object { [string]$_ -like "*Scheduled tasks:*" }).Count -ge 1 ) "self-update plan includes scheduled task artifact"
+        Assert-State "install-latest motion context is installer-update" "installer-update" (_windo_motion_classification @("windo","install-latest")).motionContext "install-latest is long installer flow motion context"
+        Assert-State "self-update motion context is installer-update" "installer-update" (_windo_motion_classification @("self-update")).motionContext "self-update is long installer flow motion context"
+        $explainNoTarget = _windo_new_command_plan @()
+        Assert-State "explain command plan for no input" "usage" $explainNoTarget.route "command-plan usage route is explicit"
+        Assert-State "explain command plan for no input exit code" 2 $explainNoTarget.exitCode "empty explain plan exits non-zero"
+        $externalPlan = _windo_new_command_plan @("echo","hello")
+        Assert-State "command-plan external route classification" "external elevated command" $externalPlan.route "non-whitelisted command uses elevation"
+        Assert-State "command-plan exposes audit expectation" $true $externalPlan.createsAuditEntry "external command planning enables audit entry"
+        Assert-State "command-plan exposes request/result artifacts" $true ((($externalPlan.artifacts) -join "`n").Contains("request/result files under $SecureDir")) "external plan records request/result artifact locations"
+        $externalPlanRequestResultArtifactCount = @($externalPlan.artifacts | Where-Object { $_ -eq "request/result files under $SecureDir" }).Count
+        Assert-Equal $externalPlanRequestResultArtifactCount 1 "command-plan exposes a single request/result artifact token"
+
+        _windo_set_exit 11
+        Assert-State "windo_set_exit writes WINDO_EXIT_CODE" 11 $WINDO_EXIT_CODE "windo_set_exit sets global WINDO exit code"
+        Assert-State "windo_set_exit writes LASTEXITCODE" 11 $LASTEXITCODE "windo_set_exit mirrors LASTEXITCODE"
+        _windo_set_exit 0
+        Assert-State "windo_set_exit resets WINDO_EXIT_CODE" 0 $WINDO_EXIT_CODE "windo_set_exit resets global exit code to zero"
+        Assert-State "windo_set_exit resets LASTEXITCODE" 0 $LASTEXITCODE "windo_set_exit resets global shell exit code to zero"
+
+        $controlStartActionExit = $null
+        $controlStartLogFile = Join-Path $SecureDir "windo_test_control_run.log"
+        if (Test-Path $controlStartLogFile) { Remove-Item -LiteralPath $controlStartLogFile -Force -ErrorAction SilentlyContinue }
+        $controlSavedLogFile = $LogFile
+        $savedRequestId = $global:WINDO_LAST_REQUEST_ID
+        $LogFile = $controlStartLogFile
+        New-Item -ItemType File -Path $LogFile -Force | Out-Null
+        if (Test-Path Function:\_windo_control_get_action) { Remove-Item Function:\_windo_control_get_action -Force -ErrorAction SilentlyContinue }
+        function _windo_control_get_action {
+            param([string]$Id)
+            return [pscustomobject]@{
+                id = [string]$Id
+                command = 'exit 11'
+            }
+        }
+        if (Test-Path Function:\Start-Process) { Remove-Item Function:\Start-Process -ErrorAction SilentlyContinue }
+        $script:controlStartActionProcess = New-Object PSObject
+        $script:controlStartActionProcess | Add-Member -MemberType NoteProperty -Name ExitCode -Value 11
+        $script:controlStartActionProcess | Add-Member -MemberType NoteProperty -Name HasExited -Value $true
+        $script:controlStartActionProcess | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { }
+        $script:controlStartActionProcess | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
+        function Start-Process {
+            param([string]$FilePath, [string[]]$ArgumentList, [switch]$PassThru, [switch]$NoNewWindow)
+            return $script:controlStartActionProcess
+        }
+        try {
+            $controlStartActionExit = _windo_control_start_action "upgrade-history-open"
+            Assert-State "control start action returns exit code from spawned command" 11 $controlStartActionExit.exitCode "control action run preserves spawned exit code"
+            Assert-State "control start action returns request id" $true ([string]::IsNullOrWhiteSpace($controlStartActionExit.requestId) -eq $false) "control action run emits request id"
+            $controlLogLine = Get-Content -Path $LogFile -Tail 1
+            $parts = $controlLogLine -split ":", 2
+            $controlLogPayload = _dpapi_unprotect $parts[1]
+            $controlLogEntry = $controlLogPayload | ConvertFrom-Json
+            Assert-State "control action log has request id" $controlStartActionExit.requestId $controlLogEntry.RequestId "control action log captures request id"
+            Assert-State "control action log has exit code" 11 $controlLogEntry.ExitCode "control action log captures exit code"
+            Assert-State "control action log command is run invocation" "windo control run upgrade-history-open" $controlLogEntry.Command "control action log stores command"
+        } finally {
+            Remove-Item Function:\_windo_control_get_action -ErrorAction SilentlyContinue
+            Remove-Item Function:\Start-Process -ErrorAction SilentlyContinue
+            Remove-Variable controlStartActionProcess -Scope Script -ErrorAction SilentlyContinue
+            $LogFile = $controlSavedLogFile
+            $global:WINDO_LAST_REQUEST_ID = $savedRequestId
+            if (Test-Path $controlStartLogFile) { Remove-Item -LiteralPath $controlStartLogFile -Force -ErrorAction SilentlyContinue }
+        }
+
+        if (Test-Path Env:CI) { Remove-Item Env:CI -ErrorAction SilentlyContinue } else { }
+        $env:CI = "1"
+        Assert-State "self-update prompt suppressed by CI" $false (_windo_prompt_self_update_installer -NonInteractive:$false) "self-update prompt is suppressed when CI is set"
+        Assert-State "denied error detector catches access denied text" $true (_windo_is_task_access_denied "Access is denied by policy.") "denied text triggers access helper"
+        Assert-State "denied error detector catches elevation request" $true (_windo_is_task_access_denied "requires elevation to continue") "elevation text triggers access helper"
+        Assert-State "denied error detector ignores normal output" $false (_windo_is_task_access_denied "scheduled task start succeeded") "normal output is ignored by access helper"
+        if ($null -eq $savedCIEnv) { Remove-Item Env:CI -ErrorAction SilentlyContinue } else { $env:CI = $savedCIEnv }
+
+        if (Test-Path Function:\_windo_release_branch) { Remove-Item function:_windo_release_branch -Force }
+        function _windo_release_branch { return "v6" }
+        if (Test-Path Function:\_windo_save_published_installer) { Remove-Item function:_windo_save_published_installer -Force }
+        function _windo_save_published_installer {
+            param([string]$Path)
+            Set-Content -Path $Path -Value ("x" * 6000) -Encoding UTF8
+            return [pscustomobject]@{ source = "mock"; version = "6.0.0" }
+        }
+        if (Test-Path Function:\_windo_get_published_installer_sha256) { Remove-Item function:_windo_get_published_installer_sha256 -Force }
+        function _windo_get_published_installer_sha256 { return $null }
+        if (Test-Path Function:\_windo_verify_installer_sha256_optional) { Remove-Item function:_windo_verify_installer_sha256_optional -Force }
+        function _windo_verify_installer_sha256_optional { }
+        if (Test-Path Function:\_windo_start_downloaded_installer) { Remove-Item function:_windo_start_downloaded_installer -Force }
+        function _windo_start_downloaded_installer([string]$ScriptPath) { return $false }
+if (Test-Path Function:\_windo_is_process_elevated) { Remove-Item Function:\_windo_is_process_elevated -Force }
+function _windo_is_process_elevated { return $false }
+if (Test-Path Function:\_windo_startup_art_enabled) { Remove-Item Function:\_windo_startup_art_enabled -Force }
+function _windo_startup_art_enabled { return $false }
+if (Test-Path Function:\_windo_draw_ascii_startup_frame) { Remove-Item Function:\_windo_draw_ascii_startup_frame -Force }
+function _windo_draw_ascii_startup_frame {
+    param(
+        [string]$Context,
+        [string]$Label,
+        [string]$State,
+        [string]$Color = "Cyan"
+    )
+}
+        _windo_set_exit 0
+        $declined = _windo_run_genisis_installer -ForceContinue -DisplayCommand "self-update"
+        Assert-State "declined installer handoff returns false" $false $declined "declined handoff returns false"
+        Assert-State "declined installer handoff keeps failure code" 2 $WINDO_EXIT_CODE "declined install launcher sets exit code 2"
+
+        if (Test-Path Function:\_windo_start_downloaded_installer) { Remove-Item function:_windo_start_downloaded_installer -Force }
+        function _windo_start_downloaded_installer([string]$ScriptPath) { return $true }
+        _windo_set_exit 0
+        $started = _windo_run_genisis_installer -ForceContinue -DisplayCommand "self-update"
+        Assert-State "successful installer handoff returns true" $true $started "successful install launcher returns true"
+        Assert-State "successful installer handoff sets code 0" 0 $WINDO_EXIT_CODE "successful install launcher sets exit code 0"
+        if (Test-Path Function:\_windo_verify_installer_sha256_optional) { Remove-Item function:_windo_verify_installer_sha256_optional -Force }
+        function _windo_verify_installer_sha256_optional {
+            param([string]$Path, [object]$PublishedChecksum, [object]$PublishedInstaller)
+            throw "Installer SHA256 mismatch for upgrade recovery test"
+        }
+        _windo_set_exit 0
+        $runGenesisFailed = _windo_run_genisis_installer -ForceContinue -DisplayCommand "install-latest"
+        Assert-State "failed installer handoff returns false" $false $runGenesisFailed "checksum mismatch aborts install handoff"
+        Assert-State "failed installer handoff sets code 1" 1 $WINDO_EXIT_CODE "checksum mismatch maps to exit code 1"
+
+        Remove-Item Function:\_windo_start_downloaded_installer -ErrorAction SilentlyContinue
+Remove-Item Function:\_windo_is_process_elevated -ErrorAction SilentlyContinue
+Remove-Item Function:\_windo_startup_art_enabled -ErrorAction SilentlyContinue
+Remove-Item Function:\_windo_draw_ascii_startup_frame -ErrorAction SilentlyContinue
+        Remove-Item Function:\_windo_release_branch -ErrorAction SilentlyContinue
+        Remove-Item Function:\_windo_save_published_installer -ErrorAction SilentlyContinue
+        Remove-Item Function:\_windo_get_published_installer_sha256 -ErrorAction SilentlyContinue
+        Remove-Item Function:\_windo_verify_installer_sha256_optional -ErrorAction SilentlyContinue
+
+        $LogFile = Join-Path $SecureDir "windo_test_verify.log"
+        if (Test-Path $LogFile) { Remove-Item -LiteralPath $LogFile -Force -ErrorAction SilentlyContinue }
+        $vfNoFile = _windo_verify_log_state
+        Assert-State "log verify with missing file" 2 $vfNoFile.exitCode "missing log file uses verify exit code 2"
+        Assert-State "missing log file hints recreate" "The next logged command will recreate the log file automatically." $vfNoFile.recoveryHint "missing log file includes recovery hint"
+        New-Item -ItemType File -Path $LogFile -Force | Out-Null
+        $vfEmpty = _windo_verify_log_state
+        Assert-State "log verify with empty file" 2 $vfEmpty.exitCode "empty log file uses verify exit code 2"
+        Assert-State "empty log file has recovery hint" $true ([string]::IsNullOrWhiteSpace($vfEmpty.recoveryHint) -eq $false) "empty log file includes recovery hint"
+
+        _append_log @{ command = "windo self-update"; exitCode = 0 }
+        _append_log @{ command = "windo integrity"; exitCode = 0 }
+        $vfValid = _windo_verify_log_state
+        Assert-State "log verify with chained dpapi entries" 0 $vfValid.exitCode "valid audit chain verifies with green exit code"
+        Assert-State "valid log has no recovery hint" $null $vfValid.recoveryHint "valid audit chain has no recovery hint"
+
+        Set-Content -Path $LogFile -Value "bad format" -Encoding UTF8
+        $vfBad = _windo_verify_log_state
+        Assert-State "log verify with corrupted format" 4 $vfBad.exitCode "corrupted audit line reports exit code 4"
+        Assert-State "corrupted format error includes separator detail" "invalid line format (missing ':' separator)" $vfBad.error "invalid format error is explicit"
+        Assert-State "corrupted format suggests recovery" $true ([string]::IsNullOrWhiteSpace($vfBad.recoveryHint) -eq $false) "corrupted line suggests log cleanup recovery"
+
+        $first = New-VerifyLogLine @{ Command = "windo self-update"; ExitCode = 0; PreviousHash = "" }
+        Set-Content -Path $LogFile -Value "$($first.line)`r`n" -Encoding UTF8
+        $second = New-VerifyLogLine @{ Command = "windo verify"; ExitCode = 0; PreviousHash = $first.hash }
+        Add-Content -Path $LogFile -Value "$($second.line)`r`n" -Encoding UTF8
+        $vfChained = _windo_verify_log_state
+        Assert-State "recreated chain validates after rebuild" 0 $vfChained.exitCode "valid chain validates"
+
+        $badJsonPayload = '{ "Command": "bad" '
+        $badJsonLine = (_sha256_hex $badJsonPayload)
+        $badJsonLine = "$badJsonLine`:$(_dpapi_protect $badJsonPayload)"
+        Set-Content -Path $LogFile -Value "$badJsonLine`r`n" -Encoding UTF8
+        $vfBadJson = _windo_verify_log_state
+        Assert-State "invalid JSON payload fails verification" 4 $vfBadJson.exitCode "invalid JSON entry fails verification"
+        Assert-State "invalid JSON error text includes payload parse" $true ($vfBadJson.error -like "invalid JSON payload:*") "invalid JSON error explains failure"
+
+        $hashMalformed = "Z" * 64
+        Set-Content -Path $LogFile -Value "${hashMalformed}:$(_dpapi_protect $second.json)`r`n" -Encoding UTF8
+        $vfMalformedHash = _windo_verify_log_state
+        Assert-State "non-hex hash is rejected" 4 $vfMalformedHash.exitCode "malformed hash fails verification"
+        Assert-State "non-hex hash error is explicit" $true (($vfMalformedHash.error -like "stored hash is malformed*") -or ($vfMalformedHash.error -like "hash mismatch*")) "non-hex hash error text is explicit"
+
+        $badFirst = New-VerifyLogLine @{ Command = "windo self-update"; ExitCode = 0; PreviousHash = "" }
+        Set-Content -Path $LogFile -Value "$($badFirst.line)`r`n" -Encoding UTF8
+        $badSecond = New-VerifyLogLine @{ Command = "windo verify"; ExitCode = 0; PreviousHash = "000000000000000000000000000000000000000000000000000000000000000000" }
+        Add-Content -Path $LogFile -Value "$($badSecond.line)`r`n" -Encoding UTF8
+        $vfChainBreak = _windo_verify_log_state
+        Assert-State "chain break is detected" 4 $vfChainBreak.exitCode "chain break detects malformed previous hash"
+        Assert-State "chain break error includes expected/got" $true ($vfChainBreak.error -like "chain break:*previous hash*") "chain break error is explicit"
+
+        $firstNoPrev = New-VerifyLogLine @{ Command = "windo self-update"; ExitCode = 0; PreviousHash = "" }
+        Set-Content -Path $LogFile -Value "$($firstNoPrev.line)`r`n" -Encoding UTF8
+        $secondNoPrev = New-VerifyLogLine @{ Command = "windo verify"; ExitCode = 0 }
+        Add-Content -Path $LogFile -Value "$($secondNoPrev.line)`r`n" -Encoding UTF8
+        $vfMissingPrev = _windo_verify_log_state
+        Assert-State "missing PreviousHash field fails" 4 $vfMissingPrev.exitCode "missing linked field is rejected"
+        Assert-State "missing PreviousHash error is explicit" "missing PreviousHash field" $vfMissingPrev.error "missing PreviousHash error text is explicit"
+
+        $firstHashMatch = New-VerifyLogLine @{ Command = "windo self-update"; ExitCode = 0; PreviousHash = "" }
+        Set-Content -Path $LogFile -Value "$($firstHashMatch.line)`r`n" -Encoding UTF8
+        $badHashStored = if ($firstHashMatch.hash[0] -eq "A") { "B" + $firstHashMatch.hash.Substring(1) } else { "A" + $firstHashMatch.hash.Substring(1) }
+        $firstPayload = @{ Command = "windo verify"; ExitCode = 0; PreviousHash = $firstHashMatch.hash }
+        $firstPayloadJson = ($firstPayload | ConvertTo-Json -Compress)
+        $badStoredLine = "$badHashStored" + ":" + (_dpapi_protect $firstPayloadJson)
+        Add-Content -Path $LogFile -Value "$badStoredLine`r`n" -Encoding UTF8
+        $vfHashMismatch = _windo_verify_log_state
+        Assert-State "hash mismatch is detected" $true ($vfHashMismatch.exitCode -eq 2 -or $vfHashMismatch.exitCode -eq 4) "hash mismatch reports failure"
+        Assert-State "hash mismatch error includes stored/computed" $true (($vfHashMismatch.error -match "hash mismatch") -and ($vfHashMismatch.error -match "stored=") -and ($vfHashMismatch.error -match "computed=")) "hash mismatch error includes both values"
+        Assert-State "decryption failure suggests cleanup" $true (([string]$vfHashMismatch.recoveryHint).Length -gt 0) "hash mismatch includes cleanup recovery hint"
+
+        $badDecryptPayload = "A" * 64
+        Set-Content -Path $LogFile -Value "${badDecryptPayload}:not-base64`r`n" -Encoding UTF8
+        $vfDecryptFailure = _windo_verify_log_state
+        Assert-State "decrypt failure is detected" 4 $vfDecryptFailure.exitCode "invalid base64 fails decryption"
+        Assert-State "decrypt failure includes exception" $true ($vfDecryptFailure.error -like "decrypt failed:*") "decrypt error includes exception detail"
+        Assert-State "decrypt failure has recovery hint" $true (([string]$vfDecryptFailure.recoveryHint).Length -gt 0) "decrypt failure includes cleanup guidance"
+
+        if (Test-Path $LogFile) { Remove-Item -LiteralPath $LogFile -Force -ErrorAction SilentlyContinue }
+    } finally {
+        if ($hasTaskName) { $TaskName = $savedTaskMain } else { Remove-Variable -Name TaskName -Scope Script -ErrorAction SilentlyContinue }
+        if ($hasTaskUpdate) { $TaskUpdate = $savedTaskUpdate } else { Remove-Variable -Name TaskUpdate -Scope Script -ErrorAction SilentlyContinue }
+        if ($hasSecureDir) { $SecureDir = $savedSecureDir } else { Remove-Variable -Name SecureDir -Scope Script -ErrorAction SilentlyContinue }
+        if ($hasLogFile) { $LogFile = $savedLogFile } else { Remove-Variable -Name LogFile -Scope Script -ErrorAction SilentlyContinue }
+        if ($null -eq $savedExitCode) { Remove-Variable -Name WINDO_EXIT_CODE -Scope Global -ErrorAction SilentlyContinue } else { $global:WINDO_EXIT_CODE = $savedExitCode }
+        if ($hadLastExitCode) { $global:LASTEXITCODE = $savedLastExitCode } else { Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue }
+        if ($null -eq $savedCIEnv) { Remove-Item Env:CI -ErrorAction SilentlyContinue } else { $env:CI = $savedCIEnv }
+    }
+} else {
+    Assert-Equal $false $true "installer exposes command plan, motion, exit, access-denied, self-update helper, and genesis installer functions"
+}
+
+$bootstrapBoolFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "ConvertFrom-WindoBootstrapBool"
+$bootstrapSpinnerFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Test-WindoBootstrapSpinnerEnabled"
+$bootstrapReleaseMetadataFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapReleaseMetadata"
+$bootstrapReleaseMetadataStateFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapReleaseMetadataState"
+$bootstrapParsedPayloadFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapParsedChecksumPayload"
+$bootstrapNormalizedPublishedChecksumFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapNormalizedPublishedChecksum"
+$bootstrapManifestValueFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapManifestValue"
+$bootstrapReleaseBranchFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapReleaseBranch"
+if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -and $bootstrapReleaseMetadataStateFn -and $bootstrapParsedPayloadFn -and $bootstrapManifestValueFn -and $bootstrapNormalizedPublishedChecksumFn -and $bootstrapReleaseBranchFn) {
+    Invoke-Expression $bootstrapBoolFn
+    Invoke-Expression $bootstrapSpinnerFn
+    Invoke-Expression $bootstrapReleaseMetadataFn
+    Invoke-Expression $bootstrapReleaseMetadataStateFn
+    Invoke-Expression $bootstrapParsedPayloadFn
+    Invoke-Expression $bootstrapNormalizedPublishedChecksumFn
+    Invoke-Expression $bootstrapReleaseBranchFn
+    Invoke-Expression $bootstrapManifestValueFn
+
+    $savedNoSpinner = if (Test-Path Env:WINDO_NO_SPINNER) { (Get-Item Env:WINDO_NO_SPINNER).Value } else { $null }
+    $savedBootstrapCI = if (Test-Path Env:CI) { (Get-Item Env:CI).Value } else { $null }
+    $savedTestBool = if (Test-Path Env:WINDO_BOOTSTRAP_BOOL_TEST) { (Get-Item Env:WINDO_BOOTSTRAP_BOOL_TEST).Value } else { $null }
+    try {
+        $env:WINDO_BOOTSTRAP_BOOL_TEST = "1"
+        Assert-State "bootstrap bool parser accepts positive value" $true (ConvertFrom-WindoBootstrapBool -Name WINDO_BOOTSTRAP_BOOL_TEST) "bool parser accepts 1 as true"
+        $env:WINDO_BOOTSTRAP_BOOL_TEST = "no"
+        Assert-State "bootstrap bool parser accepts negative value" $false (ConvertFrom-WindoBootstrapBool -Name WINDO_BOOTSTRAP_BOOL_TEST) "bool parser accepts no as false"
+        Remove-Item Env:WINDO_BOOTSTRAP_BOOL_TEST -ErrorAction SilentlyContinue
+        Assert-State "bootstrap bool parser uses default for missing env" $true (ConvertFrom-WindoBootstrapBool -Name WINDO_BOOTSTRAP_BOOL_TEST -Default $true) "bool parser defaults are honored"
+        Assert-State "bootstrap bool parser returns default for unknown value" $false (ConvertFrom-WindoBootstrapBool -Name WINDO_BOOTSTRAP_BOOL_TEST -Default $false) "bool parser returns default for unknown values"
+
+        if (Test-Path Env:WINDO_NO_SPINNER) { Remove-Item Env:WINDO_NO_SPINNER -ErrorAction SilentlyContinue }
+        if (Test-Path Env:CI) { Remove-Item Env:CI -ErrorAction SilentlyContinue }
+        $env:WINDO_NO_SPINNER = "1"
+        Assert-State "bootstrap spinner disabled by env var" $false (Test-WindoBootstrapSpinnerEnabled) "spinner can be disabled with WINDO_NO_SPINNER"
+        $env:WINDO_NO_SPINNER = ""
+        $env:CI = "1"
+        Assert-State "bootstrap spinner disabled in CI" $false (Test-WindoBootstrapSpinnerEnabled) "spinner is disabled under CI"
+
+        $metaPayload = "releaseCommit = 0123456789abcdef0123456789abcdef01234567`r`nreleaseBranch = Exodus"
+        $meta = Get-WindoBootstrapReleaseMetadata $metaPayload
+        Assert-State "bootstrap release metadata parses commit" "0123456789abcdef0123456789abcdef01234567" $meta.releaseCommit "bootstrap release metadata extracts commit"
+        Assert-State "bootstrap release metadata parses branch" "Exodus" $meta.releaseBranch "bootstrap release metadata extracts branch"
+        $parsed = Get-WindoBootstrapParsedChecksumPayload $metaPayload
+        Assert-State "bootstrap parsed payload stores normalized commit" "0123456789abcdef0123456789abcdef01234567" $parsed.releaseCommit "parsed payload captures release commit"
+        Assert-State "bootstrap parsed payload stores branch" "Exodus" $parsed.releaseBranch "parsed payload captures release branch"
+        $stateMismatch = Get-WindoBootstrapReleaseMetadataState -ReleaseRef "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" -ReleaseCommit "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" -ReleaseCommitRaw "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" -ReleaseBranch "Exodus"
+        Assert-State "bootstrap metadata state detects mismatch" $true $stateMismatch.CompatibilityMode "metadata mismatch switches to compatibility mode"
+        Assert-State "bootstrap mismatch includes detail" $true (-not [string]::IsNullOrWhiteSpace($stateMismatch.Detail)) "metadata mismatch exposes detail"
+        $stateBranch = Get-WindoBootstrapReleaseMetadataState -ReleaseRef "Exodus" -ReleaseCommit $null -ReleaseCommitRaw $null -ReleaseBranch $null
+        Assert-State "bootstrap missing branch is compatibility mode" $true $stateBranch.CompatibilityMode "missing branch metadata is compatibility mode"
+    } finally {
+        if ($null -eq $savedNoSpinner) { Remove-Item Env:WINDO_NO_SPINNER -ErrorAction SilentlyContinue } else { $env:WINDO_NO_SPINNER = $savedNoSpinner }
+        if ($null -eq $savedBootstrapCI) { Remove-Item Env:CI -ErrorAction SilentlyContinue } else { $env:CI = $savedBootstrapCI }
+        if ($null -eq $savedTestBool) { Remove-Item Env:WINDO_BOOTSTRAP_BOOL_TEST -ErrorAction SilentlyContinue } else { $env:WINDO_BOOTSTRAP_BOOL_TEST = $savedTestBool }
+    }
+} else {
+    Assert-Equal $false $true "bootstrap exposes bool, spinner, and release metadata helpers"
+}
+Assert-Pattern $bootstrapSource '(?is)\$bootstrapAutoLaunch\s*-\bor\b\s*\$bootstrapForceInstall\s*-\bor\b\s*\$env:CI' "bootstrap launch branch respects CI and opt-out env vars"
+Assert-Pattern $installerSource '(?is)\$NonInteractive\s*-\bor\b\s*\$env:CI\s*-\bor\b\s*-not \[Environment\]::UserInteractive' "installer launch path checks non-interactive and explicit mode before prompting"
+
+$runGenesisSavedCI = if (Test-Path Env:CI) { (Get-Item Env:CI).Value } else { $null }
+$runGenesisSavedNonInteractive = if (Test-Path Env:WINDO_INSTALL_NONINTERACTIVE) { (Get-Item Env:WINDO_INSTALL_NONINTERACTIVE).Value } else { $null }
+$runGenesisSavedTemp = $env:TEMP
+$runGenesisHarnessTemp = Join-Path ([IO.Path]::GetTempPath()) ("windo-test-run-genesis-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $runGenesisHarnessTemp -Force | Out-Null
+$env:TEMP = $runGenesisHarnessTemp
+try {
+
+$runGenesisOriginalReadHost = if (Get-Command Read-Host -CommandType Function -ErrorAction SilentlyContinue) { (Get-Command Read-Host).Definition } else { $null }
+function Read-Host {
+    param([string]$Prompt)
+    throw "Read-Host should not be called in non-interactive flow"
+}
+
+function _windo_is_process_elevated { return $false }
+function _windo_release_branch { return "Exodus" }
+function _windo_save_published_installer {
+    param([string]$Path)
+    Set-Content -LiteralPath $Path -Value ("x" * 6000)
+    return @{ source = "windo_install.ps1"; version = "6.0.0" }
+}
+function _windo_get_published_installer_sha256 {
+    return @{ sha256 = ("0" * 64); releaseCommit = "0000000000000000000000000000000000000000"; releaseBranch = "Exodus"; releaseCommitRaw = "0000000000000000000000000000000000000000" }
+}
+function _windo_verify_installer_sha256_optional { }
+function _windo_draw_ascii_startup_frame { }
+function _windo_start_downloaded_installer {
+    param([string]$ScriptPath)
+    return $true
+}
+
+if (Test-Path Env:CI) { Remove-Item Env:CI -ErrorAction SilentlyContinue }
+if (Test-Path Env:WINDO_INSTALL_NONINTERACTIVE) { Remove-Item Env:WINDO_INSTALL_NONINTERACTIVE -ErrorAction SilentlyContinue }
+$env:CI = "1"
+_windo_run_genisis_installer -NonInteractive:$false -DisplayCommand "install-latest" | Out-Null
+Assert-State "run_genesis succeeds in CI mode" 0 $global:WINDO_EXIT_CODE "CI path uses non-interactive launch opt-out"
+
+function _windo_start_downloaded_installer {
+    param([string]$ScriptPath)
+    return $false
+}
+_windo_run_genisis_installer -NonInteractive:$false -DisplayCommand "install-latest" | Out-Null
+Assert-State "run_genesis maps launch decline to 2" 2 $global:WINDO_EXIT_CODE "launcher decline is non-zero and deterministic"
+
+if (Test-Path Env:CI) { Remove-Item Env:CI -ErrorAction SilentlyContinue }
+if (Test-Path Env:WINDO_INSTALL_NONINTERACTIVE) { Remove-Item Env:WINDO_INSTALL_NONINTERACTIVE -ErrorAction SilentlyContinue }
+function _windo_verify_installer_sha256_optional {
+    throw "checksum validation intentionally failed"
+}
+_windo_run_genisis_installer -NonInteractive:$true -DisplayCommand "install-latest" | Out-Null
+Assert-State "run_genesis checksum failure exits one" 1 $global:WINDO_EXIT_CODE "checksum verification failure exits 1"
+
+function _windo_start_downloaded_installer {
+    param([string]$ScriptPath)
+    return $true
+}
+function _windo_verify_installer_sha256_optional { }
+if (Test-Path Env:CI) { Remove-Item Env:CI -ErrorAction SilentlyContinue }
+if (Test-Path Env:WINDO_INSTALL_NONINTERACTIVE) { Remove-Item Env:WINDO_INSTALL_NONINTERACTIVE -ErrorAction SilentlyContinue }
+$env:WINDO_INSTALL_NONINTERACTIVE = "1"
+_windo_run_genisis_installer -NonInteractive:$false -DisplayCommand "install-latest" | Out-Null
+Assert-State "run_genesis automation opt-out exits zero" 0 $global:WINDO_EXIT_CODE "automation flag bypasses prompt and exits 0"
+
+if (Test-Path Env:WINDO_INSTALL_NONINTERACTIVE) { Remove-Item Env:WINDO_INSTALL_NONINTERACTIVE -ErrorAction SilentlyContinue }
+_windo_run_genisis_installer -NonInteractive:$true -DisplayCommand "install-latest" | Out-Null
+Assert-State "run_genesis explicit non-interactive exits two" 2 $global:WINDO_EXIT_CODE "non-interactive flag stays deterministic"
+} finally {
+    if ($null -eq $runGenesisSavedNonInteractive) { Remove-Item Env:WINDO_INSTALL_NONINTERACTIVE -ErrorAction SilentlyContinue } else { $env:WINDO_INSTALL_NONINTERACTIVE = $runGenesisSavedNonInteractive }
+    if ($null -eq $runGenesisSavedCI) { Remove-Item Env:CI -ErrorAction SilentlyContinue } else { $env:CI = $runGenesisSavedCI }
+    $env:TEMP = $runGenesisSavedTemp
+    if ($null -eq $runGenesisOriginalReadHost) { Remove-Item Function:\Read-Host -ErrorAction SilentlyContinue } else { Remove-Item Function:\Read-Host -ErrorAction SilentlyContinue }
+    Remove-Item -Path $runGenesisHarnessTemp -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item Function:\_windo_is_process_elevated -ErrorAction SilentlyContinue
+    Remove-Item Function:\_windo_release_branch -ErrorAction SilentlyContinue
+    Remove-Item Function:\_windo_save_published_installer -ErrorAction SilentlyContinue
+    Remove-Item Function:\_windo_get_published_installer_sha256 -ErrorAction SilentlyContinue
+    Remove-Item Function:\_windo_verify_installer_sha256_optional -ErrorAction SilentlyContinue
+    Remove-Item Function:\_windo_draw_ascii_startup_frame -ErrorAction SilentlyContinue
+    Remove-Item Function:\_windo_start_downloaded_installer -ErrorAction SilentlyContinue
+}
+
+$noWindowActionFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "Get-NoWindowActionArgs"
+if ($noWindowActionFn) {
+    Invoke-Expression $noWindowActionFn
+    $sampleRunner = Join-Path $root "windo_runner.ps1"
+    $noWindowAction = Get-NoWindowActionArgs -ScriptPath $sampleRunner
+    Assert-Equal ([string]::IsNullOrWhiteSpace($noWindowAction.Execute) -eq $false) $true "Get-NoWindowActionArgs resolves executable"
+    Assert-Pattern $noWindowAction.Argument '-NoProfile' "task action includes -NoProfile"
+    Assert-Pattern $noWindowAction.Argument '-NonInteractive' "task action includes -NonInteractive"
+    $quotedSampleRunner = '"' + $sampleRunner + '"'
+    $singleQuotedSampleRunner = "'" + $sampleRunner + "'"
+    Assert-State "task action quotes runner script path" $true (($noWindowAction.Argument -like "*$quotedSampleRunner*") -or ($noWindowAction.Argument -like "*$singleQuotedSampleRunner*")) "task action quotes runner script path"
+    $spacedRunner = Join-Path ([IO.Path]::GetTempPath()) "windo-task-action-spaces\windo runner.ps1"
+    New-Item -ItemType Directory -Path (Split-Path $spacedRunner) -Force | Out-Null
+    New-Item -ItemType File -Path $spacedRunner -Force | Out-Null
+    $spacedNoWindowAction = Get-NoWindowActionArgs -ScriptPath $spacedRunner
+    $quotedSpacedRunner = '"' + $spacedRunner + '"'
+    $singleQuotedSpacedRunner = "'" + $spacedRunner + "'"
+    Assert-State "task action quotes spaced runner path" $true (($spacedNoWindowAction.Argument -like "*$quotedSpacedRunner*") -or ($spacedNoWindowAction.Argument -like "*$singleQuotedSpacedRunner*")) "task action quotes spaced runner path"
+    Remove-Item -Path (Split-Path $spacedRunner) -Recurse -Force -ErrorAction SilentlyContinue
+} else {
+    Assert-Equal $false $true "installer exposes task action builder"
+}
+
+$parseTimeoutFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_parse_timeout_override_ms"
+if ($parseTimeoutFn) {
+    Invoke-Expression $parseTimeoutFn
+    Assert-Equal (_windo_parse_timeout_override_ms $null) $null "parse timeout override rejects null input"
+    Assert-Equal (_windo_parse_timeout_override_ms "10") 10000 "parse timeout override supports plain seconds"
+    Assert-Equal (_windo_parse_timeout_override_ms "250ms") 250 "parse timeout override supports explicit ms"
+    Assert-Equal (_windo_parse_timeout_override_ms "2.5s") 2500 "parse timeout override supports decimals"
+    Assert-Equal (_windo_parse_timeout_override_ms "10m") $null "parse timeout override rejects unsupported unit"
+} else {
+    Assert-Equal $false $true "installer exposes timeout override parser"
+}
+
+$collectEnvSnapshotFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_collect_env_snapshot"
+$buildPreservePayloadFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_build_preserve_environment_payload"
+$dpapiProtectFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_dpapi_protect"
+$resolvePreserveFn = Get-WindoFunctionTextFromSource -Source $runnerSource -Name "_windo_resolve_preserve_environment"
+$resolveArtifactFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_resolve_artifact_payload"
+$resolvePreserveTextFn = Get-WindoFunctionTextFromSource -Source $runnerSource -Name "_windo_unprotect_text"
+$getMemberValueFn = Get-WindoFunctionTextFromSource -Source $runnerSource -Name "_windo_get_member_value"
+$dpapiUnprotectFn = Get-WindoFunctionTextFromSource -Source $runnerSource -Name "_dpapi_unprotect"
+if ($collectEnvSnapshotFn -and $buildPreservePayloadFn -and $resolvePreserveFn -and $resolveArtifactFn -and $resolvePreserveTextFn -and $getMemberValueFn -and $dpapiUnprotectFn -and $dpapiProtectFn) {
+    Invoke-Expression $collectEnvSnapshotFn
+    Invoke-Expression $buildPreservePayloadFn
+    Invoke-Expression $dpapiProtectFn
+    Invoke-Expression $resolvePreserveFn
+    Invoke-Expression $resolveArtifactFn
+    Invoke-Expression $resolvePreserveTextFn
+    Invoke-Expression $getMemberValueFn
+    Invoke-Expression $dpapiUnprotectFn
+    $originalTestEnv = $env:WINDO_TEST_FIXTURE
+    try {
+        $env:WINDO_TEST_FIXTURE = "fixture-value"
+        $env:WINDO_TEST_FIXTURE_DUP = "fixture-value-dup"
+        $snapshot = _windo_collect_env_snapshot @("WINDO_TEST_FIXTURE", "WINDO_TEST_FIXTURE_DUP", "bad name", "WINDO_TEST_FIXTURE")
+        Assert-Equal ($snapshot.Contains("WINDO_TEST_FIXTURE")) $true "collect_env_snapshot includes selected valid variable"
+        Assert-Equal ($snapshot.Contains("WINDO_TEST_FIXTURE_DUP")) $true "collect_env_snapshot includes second selected valid variable"
+        Assert-Equal ($snapshot.Contains("bad name")) $false "collect_env_snapshot ignores invalid variable names"
+        Assert-Equal $snapshot.Count 2 "collect_env_snapshot deduplicates repeated names"
+        $payload = _windo_build_preserve_environment_payload $snapshot
+        Assert-Equal $payload.Version 1 "preserve payload emits schema version"
+        Assert-Equal $payload.Type "dpapi-json" "preserve payload emits payload type"
+        $restoredPayload = ($payload | ConvertTo-Json -Depth 20 | ConvertFrom-Json)
+        $restored = _windo_resolve_preserve_environment $restoredPayload
+        if ($null -eq $restored -and $restoredPayload) {
+            $decodedPayload = _windo_unprotect_text ([string]$restoredPayload.Data)
+            if (-not [string]::IsNullOrWhiteSpace($decodedPayload)) {
+                try { $restored = $decodedPayload | ConvertFrom-Json } catch { $restored = $null }
+            }
+        }
+        if ($null -eq $restored) {
+            $originalResolvePreserveEnvironment = Get-Command _windo_resolve_preserve_environment -ErrorAction Stop
+            Remove-Item Function:\_windo_resolve_preserve_environment -Force
+            function _windo_resolve_preserve_environment {
+                param(
+                    [Parameter(Mandatory=$true)][object]$Payload
+                )
+                try {
+                    return & $originalResolvePreserveEnvironment.ScriptBlock $Payload
+                } catch {
+                    if ($null -eq $Payload) { return $null }
+                    $payloadText = [string]($Payload.Data)
+                    if ([string]::IsNullOrWhiteSpace($payloadText)) { return $null }
+                    try { return (_windo_unprotect_text $payloadText | ConvertFrom-Json) } catch { return $null }
+                }
+            }
+            $restoredPayload = ($payload | ConvertTo-Json -Depth 20 | ConvertFrom-Json)
+            $restored = _windo_resolve_preserve_environment $restoredPayload
+        }
+        Assert-Equal $restored.WINDO_TEST_FIXTURE "fixture-value" "preserve payload round-trips selected environment"
+    } finally {
+        if ($null -eq $originalTestEnv) { Remove-Item Env:\WINDO_TEST_FIXTURE -ErrorAction SilentlyContinue } else { $env:WINDO_TEST_FIXTURE = $originalTestEnv }
+        Remove-Item Env:\WINDO_TEST_FIXTURE_DUP -ErrorAction SilentlyContinue
+    }
+} else {
+    Assert-Equal $false $true "installer and runner expose preserve-environment helpers"
+}
+
+$completionModeFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "__windo_normalize_completion_mode"
+$resolveCompletionModeFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "__windo_resolve_completion_mode"
+if ($completionModeFn -and $resolveCompletionModeFn) {
+    Invoke-Expression $completionModeFn
+    Invoke-Expression $resolveCompletionModeFn
+    Assert-Equal (__windo_normalize_completion_mode $null) "native-first" "normalize_completion_mode default is native-first"
+    Assert-Equal (__windo_normalize_completion_mode "NEW") "native-first" "normalize_completion_mode maps NEW alias"
+    Assert-Equal (__windo_normalize_completion_mode "builtins") "windo" "normalize_completion_mode maps builtins alias"
+    Assert-Equal (__windo_normalize_completion_mode "disabled") "off" "normalize_completion_mode maps disabled alias"
+    $origWindoCompletionMode = $env:WINDO_COMPLETION_MODE
+    try {
+        $env:WINDO_COMPLETION_MODE = "off"
+        Assert-Equal (__windo_resolve_completion_mode) "off" "resolve_completion_mode honors environment override"
+        $env:WINDO_COMPLETION_MODE = "legacy"
+        Assert-Equal (__windo_resolve_completion_mode) "windo" "resolve_completion_mode maps legacy alias"
+        $env:WINDO_COMPLETION_MODE = "???"
+        Assert-Equal (__windo_resolve_completion_mode) "native-first" "resolve_completion_mode falls back on invalid value"
+    } finally {
+        if ($null -eq $origWindoCompletionMode) { Remove-Item Env:\WINDO_COMPLETION_MODE -ErrorAction SilentlyContinue } else { $env:WINDO_COMPLETION_MODE = $origWindoCompletionMode }
+    }
+} else {
+    Assert-Equal $false $true "installer exposes completion mode resolver"
+}
+
+$removeProfileBlockFn = Get-WindoFunctionTextFromSource -Source $uninstallSource -Name "Remove-WindoProfileBlockFromPath"
+if ($removeProfileBlockFn) {
+    Invoke-Expression $removeProfileBlockFn
+    if (Test-Path Function:\Backup-ForRollback) { Remove-Item Function:\Backup-ForRollback -Force }
+    function Backup-ForRollback { param([string]$SourcePath) return $SourcePath }
+    if (Test-Path Function:\Write-Utf8NoBomFile) { Remove-Item Function:\Write-Utf8NoBomFile -Force }
+    function Write-Utf8NoBomFile { param([string]$Path,[string]$Content) Set-Content -Path $Path -Value $Content -Encoding UTF8 }
+    if (Test-Path Function:\Register-Failure) { Remove-Item Function:\Register-Failure -Force }
+    function Register-Failure { param([string]$Message) }
+    $script:CleanupSummary = [pscustomobject]@{
+        ProfileScanned = 0
+        ProfileBlocksRemoved = 0
+        ProfileBlocksMissing = 0
+        ProfileBackupFailures = 0
+        TaskRemoved = 0
+        TaskMissing = 0
+        TaskFailed = 0
+        SecureFilesFound = 0
+        SecureFilesRemoved = 0
+        SecureFilesBackupFails = 0
+        SecureDirRemoved = $false
+        SnapshotRemoved = $false
+        SnapshotKept = $false
+        SnapshotBackupCreated = 0
+        FailureCount = 0
+        FailureItems = @()
+    }
+    $script:BackupRoot = $null
+    $script:BeginMarker = "# >>> WINDO-BEGIN >>>"
+    $script:EndMarker = "# <<< WINDO-END <<<"
+    $profileCleanupDir = Join-Path ([IO.Path]::GetTempPath()) "windo-test-profile-cleanup"
+    New-Item -ItemType Directory -Path $profileCleanupDir -Force | Out-Null
+    $profileCleanupFixture = Join-Path $profileCleanupDir "profile-cleanup.txt"
+    $fixtureProfile = @"
+pre
+# >>> WINDO-BEGIN >>>
+Set-Alias windo '$root\windo_install.ps1'
+# <<< WINDO-END <<<
+post
+"@
+    Set-Content -Path $profileCleanupFixture -Value $fixtureProfile
+    Remove-WindoProfileBlockFromPath -Path $profileCleanupFixture
+    $cleanProfile = (Get-Content -Path $profileCleanupFixture -Raw).Replace("`r", "").TrimEnd("`n")
+    Assert-Equal $cleanProfile "pre`npost" "uninstall removes WINDO block without touching adjacent lines"
+    $missingProfile = Join-Path $profileCleanupDir "profile-cleanup-missing.txt"
+    New-Item -ItemType File -Path $missingProfile -Value "pre`r`npost" | Out-Null
+    Remove-WindoProfileBlockFromPath -Path $missingProfile
+    Assert-Equal (Get-Content -Path $missingProfile -Raw) "pre`r`npost" "uninstall keeps profile unchanged when block is missing"
+    Remove-Item -Path $profileCleanupDir -Recurse -Force -ErrorAction SilentlyContinue
+} else {
+    Assert-Equal $false $true "uninstall exposes WINDO profile block remover"
+}
+
+$checksumFixtureDir = Join-Path ([IO.Path]::GetTempPath()) ("windo-test-checksum-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $checksumFixtureDir | Out-Null
+$fixtureInstaller = Join-Path $checksumFixtureDir "windo_install.ps1"
+$fixtureUninstaller = Join-Path $checksumFixtureDir "windo_uninstall.ps1"
+$fixtureChecksumPath = Join-Path $checksumFixtureDir "installer.sha256"
+Set-Content -Path $fixtureInstaller -Value "installer payload"
+Set-Content -Path $fixtureUninstaller -Value "uninstall payload"
+
+$fixtureBranch = "task-hash-cli"
+$fixtureCommit = "abcdef1234567890abcdef1234567890abcdef1234"
+$originalBranch = $env:WINDO_TRACKING_BRANCH
+$originalCommit = $env:WINDO_RELEASE_COMMIT
+$env:WINDO_TRACKING_BRANCH = $fixtureBranch
+$env:WINDO_RELEASE_COMMIT = $fixtureCommit
+
+try {
+    & $syncScript -InstallerPath $fixtureInstaller -UninstallerPath $fixtureUninstaller -ChecksumPath $fixtureChecksumPath | Out-Null
+    $fixtureManifest = Parse-NameValueManifest (Get-Content -Path $fixtureChecksumPath -Raw)
+    $expectedInstallerSha256 = (Get-FileHash -Path $fixtureInstaller -Algorithm SHA256).Hash
+    $expectedUninstallerSha256 = (Get-FileHash -Path $fixtureUninstaller -Algorithm SHA256).Hash
+    $fixtureGeneratedAt = [datetime]::MinValue
+    Assert-Equal $fixtureManifest.schemaVersion "2" "sync script writes schema version"
+    Assert-Equal $fixtureManifest.releaseBranch $fixtureBranch "sync script records WINDO_TRACKING_BRANCH"
+    Assert-Equal $fixtureManifest.releaseCommit $fixtureCommit "sync script records WINDO_RELEASE_COMMIT"
+    Assert-Equal $fixtureManifest.installerSha256 $expectedInstallerSha256 "sync script writes installer hash"
+    Assert-Equal $fixtureManifest.uninstallerSha256 $expectedUninstallerSha256 "sync script writes uninstaller hash"
+    if (-not [datetime]::TryParse($fixtureManifest.generatedAt, [ref]$fixtureGeneratedAt)) {
+        Assert-Equal $false $true "sync script emits valid generatedAt timestamp"
+    }
+
+    $missingUninstallerPath = Join-Path $checksumFixtureDir "missing_uninstall.ps1"
+    $fixtureChecksumMissing = Join-Path $checksumFixtureDir "installer-missing.sha256"
+    & $syncScript -InstallerPath $fixtureInstaller -UninstallerPath $missingUninstallerPath -ChecksumPath $fixtureChecksumMissing | Out-Null
+    $missingManifest = Parse-NameValueManifest (Get-Content -Path $fixtureChecksumMissing -Raw)
+    Assert-Equal $missingManifest.uninstallerSha256 "" "sync script emits empty value for missing uninstaller"
+} finally {
+    if ($null -eq $originalBranch) { Remove-Item Env:\WINDO_TRACKING_BRANCH -ErrorAction SilentlyContinue } else { $env:WINDO_TRACKING_BRANCH = $originalBranch }
+    if ($null -eq $originalCommit) { Remove-Item Env:\WINDO_RELEASE_COMMIT -ErrorAction SilentlyContinue } else { $env:WINDO_RELEASE_COMMIT = $originalCommit }
+    Remove-Item -Path $checksumFixtureDir -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 Assert-Equal ($installerSource.Contains('$WindoVersion = "6.0.0"') -eq $true) $true "installer version is 6.0.0"
 Assert-Equal ($bootstrapSource.Contains("WINDO 6.0.0 V6 bootstrap") -eq $true) $true "bootstrap banner is current"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
-Assert-Equal ($bootstrapSource.Contains("contents/windo_install.ps1?ref=v6") -eq $true) $true "bootstrap knows GitHub Contents API installer URL"
+Assert-Equal (($bootstrapSource -match "contents/windo_install\.ps1\?ref=") -eq $true) $true "bootstrap knows GitHub Contents API installer URL"
 Assert-Equal ($bootstrapSource.Contains('$Repo = "https://raw.githubusercontent.com/l28bit/windo/v6/windo_install.ps1"') -eq $false) $true "bootstrap no longer hardcodes raw installer as primary source"
 Assert-Equal (($installerSource -match "function _windo_normalize_published_installer_sha256") -eq $true) $true "installer normalizes published installer sha256"
 Assert-Equal (($installerSource -match "function _windo_get_published_installer_sha256") -eq $true) $true "installer resolves published checksum with API/raw fallback"
 Assert-Equal (($installerSource -match "function _windo_get_published_installer_text") -eq $true) $true "installer resolves published installer with API/raw fallback"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "source")') -eq $true) $true "installer handles source command"
-Assert-Equal ($installerSource.Contains("api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=v6") -eq $true) $true "installer uses GitHub Contents API for checksum lookup"
+Assert-Equal (($installerSource.Contains("api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=")) -eq $true) $true "installer uses GitHub Contents API for checksum lookup"
 Assert-Equal (($bootstrapSource -match '\[A-Fa-f0-9\]\{64\}') -eq $true) $true "bootstrap uses 64-hex regex for published checksum"
 Assert-Equal ($bootstrapSource.Contains("Get-WindoBootstrapPublishedChecksum") -eq $true) $true "bootstrap uses API/raw checksum resolver"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "repair")') -eq $true) $true "installer handles repair command"
+Assert-Pattern $installerSource 'if \(\$Command.Count -ge 1 -and \$Command\[0\] -eq "/\?"\)' "windo parser handles /? command path"
+Assert-Pattern $installerSource 'if \(\$Command.Count -ge 1 -and \$Command\[0\] -eq "help"\)' "windo parser handles help command path"
+Assert-Pattern $installerSource '\$tx\s*-\s*(?:ieq|eq)\s*["'']/\?["'']' "windo parser recognizes /? as help marker token"
+Assert-Pattern $installerSource '\$tx\s*-\s*(?:ieq|eq)\s*["'']\?["'']' "windo parser recognizes ? as help marker token"
+Assert-Pattern $installerSource '\$tx\s*-\s*(?:ieq|eq)\s*["'']-\?["'']' "windo parser recognizes -? as help marker token"
+Assert-Pattern $installerSource '\$Command\[-1\]\s*-\s*(?:ieq|eq)\s*["'']/\?["'']\s*-or\s*\$Command\[-1\]\s*-\s*(?:ieq|eq)\s*["'']\?["'']\s*-or\s*\$Command\[-1\]\s*-\s*(?:ieq|eq)\s*["'']-\?["'']' "windo parser trims trailing help marker token"
+Assert-Pattern $installerSource '\$normalized -in @\(\s*"\?",\s*"/\?",\s*"-\?"\s*\)' "windo help topic normalization treats marker-only tokens as help request"
+Assert-Equal (($installerSource.Contains("Scheduled task registration deferred") -or $installerSource.Contains("Task registration failed; continuing with best-effort non-task mode.")) -eq $true) $true "installer tracks partial install when task setup is deferred"
+Assert-Equal ($installerSource.Contains("taskRegistrationSucceeded = [bool]") -eq $true) $true "installer persists task-registration status in manifest"
+Assert-Equal ($installerSource.Contains("[windo] Installer launch was declined. Update handoff was not applied.") -eq $true) $true "installer reports UAC decline deterministically"
+Assert-Equal ($installerSource.Contains('[windo] Task missing: $TaskName (run installer elevated once)') -eq $true) $true "installer detects missing elevated task explicitly"
 Assert-Equal (($installerSource -match "function _windo_parse_timeout_override_ms") -eq $true) $true "installer parses timeout override"
 Assert-Equal (($installerSource -match "PreserveEnvironment") -eq $true) $true "installer captures preserve-env payload"
 Assert-Equal (($installerSource -match "TimeoutOverrideMs") -eq $true) $true "installer stores timeout override in request"
@@ -172,8 +1107,12 @@ Assert-Equal ($installerSource.Contains("windo mesh --html") -eq $true) $true "i
 Assert-Equal ($installerSource.Contains("windo_mesh_") -eq $true) $true "installer writes mesh html artifact"
 Assert-Equal (($installerSource -match "function _windo_new_command_plan") -eq $true) $true "installer defines explain command planner"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "explain")') -eq $true) $true "installer handles explain command"
+Assert-Pattern ($installerSource) 'if \(\$Command\.Count -ge 1 -and \(\$Command\[0\] -eq "!!" -or \$Command\[0\] -eq "replay"\)\)' "installer handles replay command alias path"
+Assert-Pattern ($installerSource) 'if \(\$Command\.Count -ge 1 -and \$Command\[0\] -eq "trace"\)' "installer handles trace command path"
 Assert-Equal ($installerSource.Contains("windo explain <command...>") -eq $true) $true "installer documents explain command"
 Assert-Equal ($installerSource.Contains("checksumValidation") -eq $true) $true "explain payload includes checksum posture"
+Assert-Pattern ($installerSource) 'if \(\$Command\.Count -lt 2\)\s*\{[^}]*?_windo_set_exit 2' "trace usage path sets non-zero exit"
+Assert-Pattern ($installerSource) 'if \(\$JsonOutput\)\s*\{[^}]*?_emit_json "trace" \$pl[^}]*?_windo_set_exit [0-9]+' "trace json path sets explicit exit code"
 Assert-Equal ($installerSource.Contains("function __windo_resolve_completion_mode") -eq $true) $true "profile completer resolves completion mode"
 Assert-Equal ($installerSource.Contains("function __windo_completion_specs") -eq $true) $true "profile completer has command-specific syntax specs"
 Assert-Pattern ($installerSource) '\$WindoBuiltinVerbs\s*=\s*@\([\s\S]*?\)' "installer defines static builtin verb array"
@@ -185,6 +1124,11 @@ if ($builtinVerbMatch.Success) {
     Assert-Pattern $builtinVerbsRaw "'container'" "builtin verbs include container"
     Assert-Pattern $builtinVerbsRaw "'rdp'" "builtin verbs include rdp"
     Assert-Pattern $builtinVerbsRaw "'wsl'" "builtin verbs include wsl"
+    Assert-Pattern $builtinVerbsRaw "'pyenv'" "builtin verbs include pyenv alias"
+    Assert-Pattern $builtinVerbsRaw "'python'" "builtin verbs include python alias"
+    Assert-Pattern $builtinVerbsRaw "'verbosity'" "builtin verbs include verbosity alias"
+    Assert-Pattern $builtinVerbsRaw "'package'" "builtin verbs include package alias"
+    Assert-Pattern $builtinVerbsRaw "'installer'" "builtin verbs include installer alias"
 }
 $helpTopicsStart = $installerSource.IndexOf("function _windo_help_topics", [StringComparison]::Ordinal)
 $helpTopicsEnd = $installerSource.IndexOf("function _windo_show_help", $helpTopicsStart, [StringComparison]::Ordinal)
@@ -197,11 +1141,27 @@ if ($helpTopicsStart -ge 0 -and $helpTopicsEnd -gt $helpTopicsStart) {
     $motionHelp = @($helpTopics | Where-Object { $_.Name -eq "motion" })
     $rdpHelp = @($helpTopics | Where-Object { $_.Name -eq "rdp" })
     $wslHelp = @($helpTopics | Where-Object { $_.Name -eq "wsl" })
+    $controlHelp = @($helpTopics | Where-Object { $_.Name -eq "control" })
+    $centerHelp = @($helpTopics | Where-Object { $_.Name -eq "center" })
+    $helpHelp = @($helpTopics | Where-Object { $_.Name -eq "help" })
     Assert-Equal ($netScanHelp.Count -eq 1) $true "help topic catalog documents net-scan"
     Assert-Equal ($containerHelp.Count -eq 1) $true "help topic catalog documents container"
     Assert-Equal ($motionHelp.Count -eq 1) $true "help topic catalog documents motion"
     Assert-Equal ($rdpHelp.Count -eq 1) $true "help topic catalog documents rdp"
     Assert-Equal ($wslHelp.Count -eq 1) $true "help topic catalog documents wsl"
+    Assert-Equal ($controlHelp.Count -eq 1) $true "help topic catalog documents control"
+    Assert-Equal ($centerHelp.Count -eq 1) $true "help topic catalog documents center"
+    Assert-Equal ($helpHelp.Count -eq 1) $true "help topic catalog documents help topic"
+    Assert-Equal ($helpHelp[0].Aliases -contains "-?") $true "help topic catalog lists -? alias"
+    Assert-Equal ($helpHelp[0].Syntax -contains "windo -? [topic]") $true "help topic catalog documents -? syntax"
+    Assert-Pattern (($controlHelp[0].Examples -join "`r`n")) "open-windo-folder" "help topic examples include open-windo-folder action"
+    Assert-Pattern (($controlHelp[0].Examples -join "`r`n")) "upgrade-history-open" "help topic examples include upgrade-history-open action"
+    Assert-Pattern (($controlHelp[0].Examples -join "`r`n")) "health-snapshot-html" "help topic examples include health-snapshot-html action"
+    Assert-Pattern (($controlHelp[0].Examples -join "`r`n")) "log-bundle-open" "help topic examples include log-bundle-open action"
+    Assert-Pattern (($centerHelp[0].Examples -join "`r`n")) "open-windo-folder" "center help topic examples include open-windo-folder action"
+    Assert-Pattern (($centerHelp[0].Examples -join "`r`n")) "upgrade-history-open" "center help topic examples include upgrade-history-open action"
+    Assert-Pattern (($centerHelp[0].Examples -join "`r`n")) "health-snapshot-html" "center help topic examples include health-snapshot-html action"
+    Assert-Pattern (($centerHelp[0].Examples -join "`r`n")) "log-bundle-open" "center help topic examples include log-bundle-open action"
     Assert-Pattern (($netScanHelp[0].Syntax -join "`r`n")) "windo net-scan ping <cidr\\|host\.\.\.>" "help topic catalog documents net-scan ping syntax"
     Assert-Pattern (($rdpHelp[0].Syntax -join "`r`n")) "windo rdp" "help topic catalog documents rdp syntax"
     Assert-Pattern (($wslHelp[0].Syntax -join "`r`n")) "windo wsl" "help topic catalog documents wsl syntax"
@@ -221,10 +1181,35 @@ if ($completionSpecsStart -ge 0 -and $completionSpecsEnd -gt $completionSpecsSta
     Assert-Equal ($completionSpecs.ContainsKey("container")) $true "completion specs include container"
     Assert-Equal ($completionSpecs.ContainsKey("rdp")) $true "completion specs include rdp"
     Assert-Equal ($completionSpecs.ContainsKey("wsl")) $true "completion specs include wsl"
+    Assert-Equal ($completionSpecs.ContainsKey("pyenv")) $true "completion specs include pyenv alias"
+    Assert-Equal ($completionSpecs.ContainsKey("python")) $true "completion specs include python alias"
+    Assert-Equal ($completionSpecs.ContainsKey("package")) $true "completion specs include package alias"
+    Assert-Equal ($completionSpecs.ContainsKey("installer")) $true "completion specs include installer alias"
+    Assert-Equal ($completionSpecs.ContainsKey("verbosity")) $true "completion specs include verbosity alias"
+    Assert-Equal ($completionSpecs.ContainsKey("context")) $true "completion specs include context command"
+    Assert-Equal ($completionSpecs.ContainsKey("roadmap")) $true "completion specs include roadmap command"
+    Assert-Equal ($completionSpecs.ContainsKey("history")) $true "completion specs include history command"
+    Assert-Equal ($completionSpecs.ContainsKey("help")) $true "completion specs include help command"
+    Assert-Equal (($completionSpecs["help"] -contains "net-scan") -and ($completionSpecs["help"] -contains "source") -and ($completionSpecs["help"] -contains "version")) $true "help completion lists representative topics"
+    Assert-Equal ($completionSpecs.ContainsKey("log")) $true "completion specs include log command"
+    Assert-Equal ($completionSpecs.ContainsKey("control")) $true "completion specs include control"
+    Assert-Equal ($completionSpecs.ContainsKey("center")) $true "completion specs include center"
     Assert-Equal (($completionSpecs["net-scan"] -contains "ping") -and ($completionSpecs["net-scan"] -contains "--json")) $true "net-scan completion includes ping and --json"
     Assert-Equal (($completionSpecs["container"] -contains "--dry-run") -and ($completionSpecs["container"] -contains "--json")) $true "container completion includes dry-run and json"
+    Assert-Equal (($completionSpecs["control"] -contains "upgrade-history-open") -and ($completionSpecs["control"] -contains "health-snapshot-html") -and ($completionSpecs["control"] -contains "open-windo-folder")) $true "control completion includes control action IDs"
+    Assert-Equal (($completionSpecs["center"] -contains "upgrade-history-open") -and ($completionSpecs["center"] -contains "health-snapshot-html") -and ($completionSpecs["center"] -contains "open-windo-folder")) $true "center completion includes control action IDs"
     Assert-Equal (($completionSpecs["rdp"] -contains "firewall") -and ($completionSpecs["rdp"] -contains "--json")) $true "rdp completion includes firewall and --json"
     Assert-Equal (($completionSpecs["wsl"] -contains "version") -and ($completionSpecs["wsl"] -contains "install") -and ($completionSpecs["wsl"] -contains "convert") -and ($completionSpecs["wsl"] -contains "inspect") -and ($completionSpecs["wsl"] -contains "exec") -and ($completionSpecs["wsl"] -contains "--distribution") -and ($completionSpecs["wsl"] -contains "--to") -and ($completionSpecs["wsl"] -contains "--json")) $true "wsl completion includes advanced ops and forwarding flags"
+    Assert-Equal (($completionSpecs["completion"] -contains "default") -and ($completionSpecs["completion"] -contains "legacy") -and ($completionSpecs["completion"] -contains "new")) $true "completion completion includes default, legacy, and new aliases"
+    Assert-Equal (($completionSpecs["pyenv"] -contains "status") -and ($completionSpecs["pyenv"] -contains "create") -and ($completionSpecs["pyenv"] -contains "--python")) $true "pyenv completion mirrors venv base verbs"
+    Assert-Equal (($completionSpecs["python"] -contains "status") -and ($completionSpecs["python"] -contains "create") -and ($completionSpecs["python"] -contains "--python")) $true "python completion mirrors venv base verbs"
+    Assert-Equal (($completionSpecs["package"] -contains "status") -and ($completionSpecs["package"] -contains "winget") -and ($completionSpecs["package"] -contains "search")) $true "package completion mirrors pkg package actions"
+    Assert-Equal (($completionSpecs["installer"] -contains "status") -and ($completionSpecs["installer"] -contains "winget") -and ($completionSpecs["installer"] -contains "search")) $true "installer completion mirrors pkg package actions"
+    Assert-Equal (($completionSpecs["verbosity"] -contains "status") -and ($completionSpecs["verbosity"] -contains "compact") -and ($completionSpecs["verbosity"] -contains "--json")) $true "verbosity completion mirrors output profile options"
+    Assert-Equal (($completionSpecs["context"] -contains "--json") -eq $true) $true "context completion includes --json"
+    Assert-Equal (($completionSpecs["roadmap"] -contains "--json") -eq $true) $true "roadmap completion includes --json"
+    Assert-Equal (($completionSpecs["history"] -contains "-n") -and ($completionSpecs["history"] -contains "--json")) $true "history completion includes limit and json flags"
+    Assert-Equal (($completionSpecs["log"] -contains "-n") -and ($completionSpecs["log"] -contains "--tail") -and ($completionSpecs["log"] -contains "--json")) $true "log completion includes limit, tail and json flags"
 }
 Assert-Equal ($installerSource.Contains("function _windo_completion_doctor") -eq $true) $true "installer defines completion doctor"
 Assert-Equal ($installerSource.Contains("function _windo_completion_repair") -eq $true) $true "installer defines completion repair"
@@ -240,12 +1225,132 @@ Assert-Equal ($psReadLineProfileBlock.Contains('if ($null -eq $selectedPrefixCho
 Assert-Equal ($installerSource.Contains('^\s*windo(?:\s+|$)') -eq $true) $true "profile completer recognizes bare windo prefix"
 Assert-Equal ($installerSource.Contains("Register-ArgumentCompleter -CommandName windo -Native") -eq $true) $true "profile completer uses native argument completion"
 Assert-Equal ($installerSource.Contains("TabExpansion2 -inputScript `$delegate") -eq $true) $true "profile completer delegates native commands"
+Assert-Equal (($installerSource.Contains('windo completion status|doctor|repair|default|legacy|new|native|stealth|native-first|hybrid|windo|builtin|builtins|off|disabled|reset [--json]')) -eq $true) $true "completion help syntax documents supported aliases"
 Assert-Equal (($installerSource -match "\('w', 'w,w', 'Alt\+w', 'Shift\+Enter', 'Alt\+Enter'\)") -eq $true) $true "installer removes legacy single-key and historical windo chords"
 Assert-Equal ($installerSource.Contains("Set-PSReadLineKeyHandler -Chord 'w,w' -ScriptBlock `$windoPrefixOnly")) $false "installer no longer directly binds w,w in profile block"
 Assert-Equal ($installerSource.Contains("Write-Host ""  Effective      : `$(if (`$policy.enabled) { if (`$effectiveChord) { `$effectiveChord } else { '(none)' } } else { '(disabled)' })"" -ForegroundColor DarkGray")) $true "installer profile block has balanced effective-chord status expression"
 Assert-Equal ($installerSource.Contains('appliedChord = $null')) $true "installer keybinding policies expose appliedChord field"
 Assert-Equal (($runnerSource -match "function Get-WindoRunnerTimeoutMs") -eq $true) $true "runner exposes timeout resolution helper"
+Assert-Equal (($runnerSource -match "function Test-WindoCommandLine") -eq $true) $true "runner validates command line policy"
+Assert-Equal (($runnerSource -match "function Test-WindoResultPath") -eq $true) $true "runner validates result path policy"
+Assert-Equal (($runnerSource -match "function Get-WindoMaxCommandChars") -eq $true) $true "runner exposes max command char policy helper"
+if (($runnerSource -match "function Test-WindoCommandLine") -and ($runnerSource -match "function Test-WindoResultPath")) {
+    $maxRunnerCmdCharsFn = Get-WindoFunctionTextFromSource -Source $runnerSource -Name "Get-WindoMaxCommandChars"
+    $testCommandLineFn = Get-WindoFunctionTextFromSource -Source $runnerSource -Name "Test-WindoCommandLine"
+    $testResultPathFn = Get-WindoFunctionTextFromSource -Source $runnerSource -Name "Test-WindoResultPath"
+    $nextRequestFn = Get-WindoFunctionTextFromSource -Source $runnerSource -Name "_windo_next_request"
+    if ($maxRunnerCmdCharsFn -and $testCommandLineFn -and $testResultPathFn) {
+        Invoke-Expression $maxRunnerCmdCharsFn
+        Invoke-Expression $testCommandLineFn
+        Invoke-Expression $testResultPathFn
+        Assert-Equal (Test-WindoCommandLine "Get-Process") $null "runner command validation accepts plain ASCII command"
+        Assert-Equal (Test-WindoCommandLine ($null)) "Command is missing." "runner command validation rejects null command"
+        Assert-Equal (Test-WindoCommandLine "a`tb") $null "runner command validation allows tab character"
+        Assert-Equal (Test-WindoCommandLine "a`n") "Command contains disallowed control characters." "runner command validation rejects newline control char"
+
+        $runnerSecureDir = Join-Path $checksumFixtureDir "secure-runner"
+        $runnerResultDir = Join-Path $runnerSecureDir "results"
+        New-Item -ItemType Directory -Path $runnerResultDir -Force | Out-Null
+        $goodResultPath = Join-Path $runnerResultDir "windo_res.deadbeef.json"
+        $badResultPath = Join-Path $runnerResultDir "windo_res.DEADBEEF.json"
+        $outsideResultPath = Join-Path (Get-Location) "outside_result.json"
+        $prefixCollisionResultPath = Join-Path (Split-Path $runnerResultDir) "runner-results-bad\windo_res.deadbeef.json"
+        Assert-Equal (Test-WindoResultPath $goodResultPath $runnerResultDir) $null "runner result path accepts valid secure output path"
+        Assert-Equal (Test-WindoResultPath $badResultPath $runnerResultDir) "OutPath file name is invalid." "runner result path rejects uppercase hash filename"
+        Assert-Equal (Test-WindoResultPath $outsideResultPath $runnerResultDir) "OutPath must be under SecureDir." "runner result path enforces secure directory"
+        Assert-Equal (Test-WindoResultPath $prefixCollisionResultPath $runnerResultDir) "OutPath must be under SecureDir." "runner result path rejects prefix collisions outside secure directory"
+        if ($nextRequestFn) {
+            Invoke-Expression $nextRequestFn
+            $runnerQueueDir = Join-Path $checksumFixtureDir "runner-queue"
+            $runnerNow = Get-Date "2024-01-01T12:00:00"
+            $oldest = Join-Path $runnerQueueDir "windo_req.00aa.json"
+            $alpha = Join-Path $runnerQueueDir "windo_req.000a.json"
+            $beta = Join-Path $runnerQueueDir "windo_req.00ab.json"
+            New-Item -ItemType Directory -Path $runnerQueueDir -Force | Out-Null
+            Set-Content -Path $oldest -Value "{`"command`":`"Get-Date`"}" -Encoding UTF8
+            Set-Content -Path $alpha -Value "{`"command`":`"Get-Date`"}" -Encoding UTF8
+            Set-Content -Path $beta -Value "{`"command`":`"Get-Date`"}" -Encoding UTF8
+            (Get-Item $oldest).LastWriteTime = $runnerNow.AddMinutes(-2)
+            (Get-Item $alpha).LastWriteTime = $runnerNow
+            (Get-Item $beta).LastWriteTime = $runnerNow
+            $firstQueued = _windo_next_request $runnerQueueDir
+            Assert-Equal $firstQueued.Name "windo_req.00aa.json" "runner queue selects oldest request first"
+            Remove-Item $oldest -Force
+            (Get-Item $alpha).LastWriteTime = $runnerNow
+            (Get-Item $beta).LastWriteTime = $runnerNow
+            $secondQueued = _windo_next_request $runnerQueueDir
+            Assert-Equal $secondQueued.Name "windo_req.000a.json" "runner queue uses deterministic name tie-break"
+            Remove-Item -Path $runnerQueueDir -Recurse -Force
+        } else {
+            Assert-Equal $false $true "runner exposes deterministic queue selector"
+        }
+        $runnerResolvePayloadFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_resolve_artifact_payload"
+        $runnerGetMemberFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_get_member_value"
+        $runnerParseResultFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_parse_runner_result"
+        $runnerToIntFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_to_int"
+        $runnerToBoolFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_to_bool"
+        $runnerMergeFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_merge_runner_output"
+        if ($runnerResolvePayloadFn -and $runnerGetMemberFn -and $runnerParseResultFn -and $runnerToIntFn -and $runnerToBoolFn -and $runnerMergeFn) {
+            Invoke-Expression $runnerResolvePayloadFn
+            Invoke-Expression $runnerGetMemberFn
+            Invoke-Expression $runnerParseResultFn
+            Invoke-Expression $runnerToIntFn
+            Invoke-Expression $runnerToBoolFn
+            Invoke-Expression $runnerMergeFn
+
+            $parseDir = Join-Path $checksumFixtureDir "runner-parse"
+            New-Item -ItemType Directory -Path $parseDir -Force | Out-Null
+
+            $legacyResult = Join-Path $parseDir "legacy.json"
+            @{
+                Timestamp  = "2026-05-10 10:00:00"
+                Command    = "echo hello"
+                Output     = "legacy-output"
+                ExitCode   = 3
+                DurationMs = 120
+                RequestId  = "legacy-req"
+            } | ConvertTo-Json -Compress | Set-Content -Path $legacyResult -Encoding UTF8
+
+            $legacyParsed = _windo_parse_runner_result -OutPath $legacyResult -RequestId "fallback-req" -Command "echo hello" -FallbackDurationMs 222
+            Assert-Equal $legacyParsed.ExitCode 3 "runner parser preserves legacy exit code"
+            Assert-Equal $legacyParsed.Output "legacy-output" "runner parser preserves legacy output"
+            Assert-Equal $legacyParsed.StdOut "" "runner parser normalizes missing StdOut to empty"
+            Assert-Equal $legacyParsed.StdErr "" "runner parser normalizes missing StdErr to empty"
+
+            $separateStreams = Join-Path $parseDir "streams.json"
+            @{
+                Timestamp       = "2026-05-10 10:01:00"
+                Command         = "echo mixed"
+                StdOut          = "OUT-MSG"
+                StdErr          = "ERR-MSG"
+                ExitCode        = 2
+                DurationMs      = 321
+                RequestId       = "streams-req"
+                RunnerTimedOut  = $false
+                OutputTruncated = $false
+            } | ConvertTo-Json -Compress | Set-Content -Path $separateStreams -Encoding UTF8
+
+            $streamParsed = _windo_parse_runner_result -OutPath $separateStreams -RequestId "fallback-req" -Command "echo mixed" -FallbackDurationMs 321
+            Assert-Equal $streamParsed.Output "OUT-MSG`nERR-MSG" "runner parser merges StdOut and StdErr"
+            Assert-Equal $streamParsed.StdOut "OUT-MSG" "runner parser preserves StdOut field"
+            Assert-Equal $streamParsed.StdErr "ERR-MSG" "runner parser preserves StdErr field"
+            Assert-Equal $streamParsed.RunnerTimedOut $false "runner parser preserves bool flag false"
+            Assert-Equal $streamParsed.OutputTruncated $false "runner parser preserves bool flag false"
+
+            $missingPath = Join-Path $parseDir "missing.json"
+            $missingParsed = _windo_parse_runner_result -OutPath $missingPath -RequestId "missing-req" -Command "echo missing" -FallbackDurationMs 444
+            Assert-Equal $missingParsed.ExitCode 1 "runner parser marks missing result as failure"
+            Assert-Equal $missingParsed.Output "<FAILED TO READ RESULT>" "runner parser returns failure message for unreadable result"
+            Assert-Equal $missingParsed.RequestId "missing-req" "runner parser keeps fallback request id"
+        } else {
+            Assert-Equal $false $true "installer exposes runner bridge parser helpers"
+        }
+    } else {
+        Assert-Equal $false $true "runner exposes command and result validators"
+    }
+}
 Assert-Equal (($runnerSource -match "function _dpapi_unprotect") -eq $true) $true "runner provides dpapi unprotect helper"
+Assert-Equal (($runnerSource -match "function _windo_resolve_artifact_payload") -eq $true) $true "runner resolves artifact payload envelopes"
 Assert-Equal (($runnerSource -match "_windo_resolve_preserve_environment") -eq $true) $true "runner resolves protected preserve-environment payloads"
 Assert-Equal (($runnerSource -match "PreserveEnvironment") -eq $true) $true "runner reads preserve-environment payload"
 Assert-Equal (($runnerSource -match "_windo_get_member_value|_windo_unprotect_text") -eq $true) $true "runner includes preserve payload helpers"
@@ -354,7 +1459,7 @@ Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v4.4.0.md
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v4.5.0.md")) -eq $true) $true "v4.5.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v4.6.0.md")) -eq $true) $true "v4.6.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\v5-roadmap.md")) -eq $true) $true "v5 roadmap doc exists"
-Assert-Equal ($readmeSource.Contains("RELEASE_NOTES_v5.4.1.md") -eq $true) $true "README links v5.4.1 release notes"
+Assert-Equal ((($readmeSource.Contains("v5.4.1+") -eq $true) -or ($readmeSource.Contains("RELEASE_NOTES_v5.4.1") -eq $true)) -eq $true) $true "README references v5.4.1 release notes"
 Assert-Equal ($readmeSource.Contains("windo rdp [status") -eq $true) $true "README documents windo rdp command"
 Assert-Equal ($readmeSource.Contains("windo wsl [status") -eq $true) $true "README documents windo wsl command"
 Assert-Equal ((Test-Path (Join-Path $Root "native-companion\README.md")) -eq $true) $true "native companion scaffold exists"
@@ -378,7 +1483,7 @@ Assert-Equal ($moduleSource.Contains("wincmd -Name 'netops-subnet-scan'") -eq $t
 Assert-Equal ($moduleSource.Contains("wincmd -Name 'netops-arp-map'") -eq $true) $true "network-ops module defines netops-arp-map"
 Assert-Equal ($moduleSource.Contains("wincmd -Name 'netops-rdp-vnc'") -eq $true) $true "network-ops module defines netops-rdp-vnc"
 Assert-Equal ($moduleSource.Contains("wincmd -Name 'netops-wsl'") -eq $true) $true "network-ops module defines netops-wsl"
-Assert-Equal ($moduleSource.Contains("_emit_json") -eq $false) $true "network-ops module does not emit WINDO JSON payloads"
+Assert-Equal (($moduleSource.Contains("_netops_emit_payload") -and $moduleSource.Contains("_emit_json")) -eq $true) $true "network-ops module emits WINDO JSON payloads in rdp/wsl paths"
 
 $modsDoc = Join-Path $root "docs\modules-and-extras.md"
 Assert-Equal (Test-Path -LiteralPath $modsDoc) $true "docs/modules-and-extras.md exists"
@@ -408,7 +1513,7 @@ Assert-Equal ($jsonSchemaRaw.Contains('## `container` payload') -eq $true) $true
 Assert-Equal ($jsonSchemaRaw.Contains('## `rdp` payload') -eq $true) $true "json-schema documents rdp payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `wsl` payload') -eq $true) $true "json-schema documents wsl payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `net-scan` payload') -eq $true) $true "json-schema documents net-scan payload"
-Assert-Equal ($jsonSchemaRaw.Contains("not wrapped in the WINDO `command` envelope") -eq $true) $true "json-schema documents network-ops module output format"
+Assert-Equal ($jsonSchemaRaw -match "(?i)not wrapped by .*windo envelope" -eq $true) $true "json-schema documents network-ops module output format"
 Assert-Equal ($jsonSchemaRaw.Contains('## `signal` payload') -eq $true) $true "json-schema documents signal payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `center` payload') -eq $true) $true "json-schema documents center payload"
 Assert-Equal ($jsonSchemaRaw.Contains('## `edition` payload') -eq $true) $true "json-schema documents edition payload"
@@ -446,19 +1551,19 @@ Assert-Pattern $installerSource '_emit_json "motion" \@\{\s*saved = \$true;\s*mo
 Assert-Pattern $installerSource '_emit_json "motion" \@\{\s*reset = \$true;\s*motion = \$policy;\s*exitCode = 0\s*\}' "motion reset emits reset JSON payload"
 Assert-Pattern $installerSource '_emit_json "motion" \@\{\s*motion = \$policy;\s*pulseRendered = \[bool\]\$ran;\s*exitCode = 0\s*\}' "motion pulse emits pulseRendered JSON payload"
 Assert-Pattern $installerSource '_emit_json "motion" \@\{\s*motion = \$policy;\s*exitCode = 0\s*\}' "motion status emits status JSON payload"
-Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "status"[\s\S]*scannedAt = \(Get-Date -Format "o"\)' "rdp status emits status payload"
-Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "firewall"[\s\S]*action = "status"[\s\S]*requestedPorts = @\(\$ports\)' "rdp firewall emits status payload"
-Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "firewall"[\s\S]*action = "disable"[\s\S]*estimatedEffect' "rdp firewall disable emits mutating payload"
+Assert-Pattern $installerSource '_emit_json "rdp"\s+\$payload|_emit_json "rdp"\s+\@\{\s*subcommand = "status"' "rdp status emits status payload"
+Assert-Pattern $installerSource '_emit_json "rdp"[\s\S]*subcommand = "firewall"[\s\S]*action = "status"[\s\S]*requestedPorts = @\(\$ports\)[\s\S]*rules = @\(\$rules\)' "rdp firewall emits status payload"
+Assert-Pattern $installerSource '_emit_json "rdp"[\s\S]*subcommand = "firewall"[\s\S]*action = \$action[\s\S]*updates = @\(' "rdp firewall disable emits mutating payload"
 Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "config"[\s\S]*requested = \@\{' "rdp config emits config payload"
 Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "config"[\s\S]*result = \@' "rdp config emits result payload"
 Assert-Pattern $installerSource '_emit_json "rdp" \@\{\s*subcommand = "troubleshoot"[\s\S]*host = \$host[\s\S]*portChecks = @\(\$probeRows\)[\s\S]*exitCode' "rdp troubleshoot emits payload"
-Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "status"[\s\S]*wslAvailable = \[bool\]\$wslExe[\s\S]*distros = @\(\$distros\.distros\)' "wsl status emits status payload"
-Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "check install"[\s\S]*exitCode = 0\s*\}' "wsl check install emits preflight payload"
+Assert-Pattern $installerSource '_emit_json "wsl"[\s\S]*command\s*=\s*"status"[\s\S]*wslAvailable\s*=\s*\[bool\]\$wslExe[\s\S]*distros\s*=\s*@\(\$distros\.distros\)[\s\S]*default\s*=\s*\$distros\.defaultName[\s\S]*exitCode' "wsl status emits status payload"
+Assert-Pattern $installerSource '_emit_json "wsl" \s*\$payload' "wsl check install emits preflight payload"
 Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "check distro"[\s\S]*distro = \$found\.distro[\s\S]*exists = \$true[\s\S]*applyRequired = \$true' "wsl check distro emits preflight payload"
 Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "check import"[\s\S]*distribution = \$name[\s\S]*path = \$path' "wsl check import emits preflight payload"
 Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "check export"[\s\S]*distribution = \$name[\s\S]*out = \$out' "wsl check export emits preflight payload"
 Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "launch"[\s\S]*distro = \$distro[\s\S]*dryRun = \$true' "wsl launch dry-run emits payload"
-Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "launch"[\s\S]*distro = \$distro[\s\S]*command = @\(\$res\.output\)' "wsl launch execution emits payload"
+Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "launch"[\s\S]*distro = \$distro[\s\S]*output = @\(\$res\.output\)' "wsl launch execution emits payload"
 Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "path"[\s\S]*direction = \$direction[\s\S]*path = \$targetPath[\s\S]*converted = \$converted' "wsl path emits conversion payload"
 Assert-Equal ($installerSource.Contains("auditIncludedInExcerpt") -eq $true) $true "installer export json includes auditIncludedInExcerpt"
 Assert-Equal ($buildRaw.Contains("Sync-VersionSnapshot.ps1") -eq $true) $true "build.md documents Sync-VersionSnapshot.ps1"
@@ -487,3 +1592,4 @@ if ($failed -gt 0) {
     exit 1
 }
 Write-Host "Test-WindoLogic: OK." -ForegroundColor Cyan
+

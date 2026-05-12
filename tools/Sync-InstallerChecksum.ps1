@@ -23,10 +23,14 @@ function Get-WindoChecksumManifestLine([string]$Key, [string]$Value) {
     return "${Key}=$Value"
 }
 
+function New-WindoSHA256 {
+    return [System.Security.Cryptography.SHA256]::Create()
+}
+
 function Get-WindoPublishedTextFileSha256([string]$Path) {
     if (!(Test-Path -LiteralPath $Path)) { return $null }
     $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $sha = New-WindoSHA256
     try {
         # Runtime verification uses Get-FileHash on raw bytes, so publish the same raw SHA256 domain.
         $hashBytes = $sha.ComputeHash($bytes)
@@ -51,12 +55,16 @@ $releaseCommit = if (-not [string]::IsNullOrWhiteSpace($env:WINDO_RELEASE_COMMIT
     }
 }
 $generatedAt = (Get-Date -Format "o")
+$releaseCommitRaw = if (-not [string]::IsNullOrWhiteSpace($releaseCommit)) { [string]$releaseCommit } else { "" }
+$releaseBranchRaw = if (-not [string]::IsNullOrWhiteSpace($branch)) { [string]$branch } else { "" }
 
 $payload = @(
     (Get-WindoChecksumManifestLine "schemaVersion" "2")
     (Get-WindoChecksumManifestLine "generatedAt" $generatedAt)
     (Get-WindoChecksumManifestLine "releaseBranch" $branch)
     (Get-WindoChecksumManifestLine "releaseCommit" $releaseCommit)
+    (Get-WindoChecksumManifestLine "releaseBranchRaw" $releaseBranchRaw)
+    (Get-WindoChecksumManifestLine "releaseCommitRaw" $releaseCommitRaw)
     (Get-WindoChecksumManifestLine "installerSha256" $installerHash)
     (Get-WindoChecksumManifestLine "uninstallerSha256" ($uninstallerHash -as [string]))
 )

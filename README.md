@@ -47,13 +47,13 @@ WINDO does **not** bypass Windows security boundaries; it uses a controlled elev
 
 ## Install / Update
 
-**Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/v6/bootstrap.ps1), saves `windo_install.ps1` to a **temp file**, verifies its checksum, then starts it from the temp file. In interactive sessions WINDO requests **UAC elevation** for the installer so scheduled tasks and secure-dir ACL work can complete; the temp file is removed afterward. The **full installer is not** piped through `Invoke-Expression`.
+**Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/v6/bootstrap.ps1), saves `windo_install.ps1` to a **temp file**, verifies its checksum when published on the default `v6` branch, then starts it from the temp file. The **full installer is not** piped through `Invoke-Expression`. The temp file is removed afterward.
 
 ```powershell
 iex (irm https://raw.githubusercontent.com/l28bit/windo/v6/bootstrap.ps1)
 ```
 
-Run the **installer** from an **elevated** session when you want scheduled tasks registered and `%USERPROFILE%\.pwsh_secure\` updated without permission issues—**after** you have downloaded and confirmed.
+Use a **standard (non-elevated)** session for bootstrap handoff. If you need strict install verification in automated `install-latest`/`upgrade` flows, pair `WINDO_STRICT_INSTALLER_VERIFICATION=1` with `windo install-latest --force` or `WINDO_INSTALL_NONINTERACTIVE=1`.
 
 **Upgrade from any installed v2.x / v3.x:** with WINDO loaded in your profile, run **`windo install-latest`** from a **normal (non-elevated)** window. The installer is **not** downloaded while Administrator (avoids high-privilege fetch). After checksum verification you get a **prompt** before the installer runs; in interactive sessions WINDO then requests **UAC elevation** so scheduled tasks and secure-dir ACL work can complete. Use **`windo install-latest --force`** or **`WINDO_INSTALL_NONINTERACTIVE=1`** in CI/automation.
 
@@ -63,7 +63,41 @@ windo install-latest
 
 (`windo upgrade` is the same command.)
 
-**Bootstrap** (`iex (irm …/bootstrap.ps1)`): same rule—**do not run from an elevated shell**; the script exits with instructions. After download you are prompted before launch (or set **`WINDO_BOOTSTRAP_FORCE_INSTALL=1`** / **`CI`** for unattended).
+**Bootstrap** (`iex (irm …/bootstrap.ps1)`): same rule—**do not run from an elevated shell**; the script exits with instructions. After download it is prompted before launch (or set **`WINDO_BOOTSTRAP_FORCE_INSTALL=1`** / **`WINDO_INSTALL_NONINTERACTIVE=1`** / **`CI`** for unattended).
+
+## Troubleshooting install/update and verification behavior
+
+### Prompt behavior
+
+- `windo install-latest` and bootstrap:
+  - run in a normal shell by default,
+  - prompt before launch when interactive,
+  - skip confirmation in non-interactive mode (`--non-interactive` / `CI` / `WINDO_INSTALL_NONINTERACTIVE` / `WINDO_BOOTSTRAP_FORCE_INSTALL`).
+  - source contract for prompts and checksum checks comes from the canonical `v6` branch artifacts.
+  - `windo self-update` follows the same interactive contract and branch/source checks as install flows.
+  - prompts before launching installer repair when required in interactive sessions,
+  - skips the repair prompt in non-interactive mode and returns a repair recommendation instead.
+- `windo self-update`:
+  - starts the `WindoSelfUpdate` task,
+  - prompts for installer repair when task state is missing or blocked,
+  - skips the repair prompt in non-interactive mode and returns a repair recommendation.
+- `windo self-update --dry-run` prints planned repair/task start only and does not execute.
+
+### Hash and strict-mode behavior
+
+- Default behavior is compatibility mode: checksum validation runs when checksums are available and continues on most drift paths after warnings.
+- Set `WINDO_STRICT_INSTALLER_VERIFICATION=1` to require strict installer checks instead of compatibility-path warnings. In strict mode, checksum, source, and branch mismatches (including checksum-source failures) are treated as hard failures instead of warnings.
+- `WINDO_SKIP_INSTALLER_SHA256=1` disables installer checksum checks in both bootstrap and upgrade/install flows.
+
+### Known limitations
+
+- Compatibility paths are accepted as warnings in non-strict mode:
+  - GitHub blob SHA1 match to object hash,
+  - snapshot checksum match for the same version,
+  - checksum-source fetch or parsing failures that still have a valid fallback path,
+  - release metadata/branch drift.
+- In strict mode, those compatibility paths fail the install path.
+- Bootstrap can fail early in strict mode when the published checksum source is unavailable or unparseable.
 
 Or use the bootstrap one-liner above, or run `.\windo_install.ps1` from a clone. There is no version gate: the installer replaces the WINDO profile block and refreshes secure-dir artifacts.
 
@@ -91,6 +125,8 @@ windo integrity
 ```
 
 The canonical install snippet is also kept in `docs/releases/README_INSTALL_UPDATE_SECTION.md` for copy/paste consistency across docs.
+
+For a concise terminal workflow that covers install → upgrade → self-update → repair → history with sample output, see [`docs/terminal-demo-workflow.md`](docs/terminal-demo-workflow.md).
 
 ---
 
@@ -184,6 +220,8 @@ windo net-scan ping 10.10.10.0/24 --host-limit 254 --timeout 1 --ports 22,80,443
 windo container --runtime podman ps
 windo container --runtime auto images --json
 windo container --dry-run pull nginx:latest
+windo control run system-diagnostics-open
+windo center run system-diagnostics-open
 ```
 
 Representative `windo net-scan ping` JSON payload (safe default `hostLimit=254`, `timeoutSeconds=1`):
@@ -317,6 +355,7 @@ Optional **modules** and **extras** (v3.2+): [`docs/modules-and-extras.md`](docs
 | `WINDO_RUNNER_MAX_OUTPUT_BYTES` | Approximate cap on captured stdout+stderr (default **4194304**; split per stream in the runner). |
 | `WINDO_MAX_COMMAND_CHARS` | Max length of the command line passed to `cmd.exe` (default **8191**). |
 | `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the `v6` branch (`bootstrap.ps1`, **`windo install-latest`** / **`upgrade`**). |
+| `WINDO_STRICT_INSTALLER_VERIFICATION` | Set to `1` for strict installer hash checking. |
 | `WINDO_JSON_ENVELOPE` | **v3.1.0+** Optional override for **`--json`** envelope shape: **`classic`** (2.6, no **`meta`**), **`modern`** (3.0 + **`meta`**), or **`auto`**. Overrides **`windo_prefs.json`** when set (see [`docs/json-schema.md`](docs/json-schema.md)). Does not change runner or security behavior. |
 | `SUDO_TIMEOUT` | Per-command override (seconds or `ms`, e.g. `10`, `10s`, `500ms`) for the `--timeout` flag when not passed explicitly. |
 | `SUDO_PROMPT` | Optional custom text for the `windo install-latest` confirmation prompt. |

@@ -1,4 +1,14 @@
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$global:WINDO_EXIT_CODE = 0
+
+function Set-WindoBootstrapExitCode {
+    param([int]$Code)
+    $script:bootstrapExitCode = $Code
+    $global:WINDO_EXIT_CODE = $Code
+    try { $global:LASTEXITCODE = $Code } catch { }
+}
 
 function Test-WindoBootstrapProcessElevated {
     try {
@@ -26,13 +36,14 @@ function Get-WindoBootstrapReleaseRef {
         if ($envCommit -match '^[a-fA-F0-9]{40}$') {
             return $envCommit.ToLowerInvariant()
         }
+        Write-WindoBootstrapStep -Status warn -Label "WINDO_RELEASE_COMMIT invalid" -Detail "Falling back to branch '$($env:WINDO_TRACKING_BRANCH)'." -Color Yellow
     }
     if ($null -ne $script:_windo_bootstrap_release_ref) { return $script:_windo_bootstrap_release_ref }
 
     $branch = Get-WindoBootstrapReleaseBranch
     try {
         $uri = "https://api.github.com/repos/l28bit/windo/commits/$branch"
-        $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+        $resp = Invoke-WindoBootstrapWebRequest -Uri $uri -TimeoutSec 25 -UseBasicParsing
         $obj = $resp.Content | ConvertFrom-Json -ErrorAction Stop
         if ($obj.sha) {
             $script:_windo_bootstrap_release_ref = [string]$obj.sha
@@ -63,6 +74,68 @@ function ConvertFrom-WindoBootstrapBool {
     }
 }
 
+function Invoke-WindoBootstrapWebRequest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [int]$TimeoutSec = 25,
+        [switch]$UseBasicParsing,
+        [string]$OutFile
+    )
+    if ($null -ne $OutFile) {
+        Invoke-WebRequest -Uri $Uri -UseBasicParsing:$UseBasicParsing -TimeoutSec $TimeoutSec -OutFile $OutFile -ErrorAction Stop
+    } else {
+        Invoke-WebRequest -Uri $Uri -UseBasicParsing:$UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
+    }
+}
+
+function Invoke-WindoBootstrapRestMethod {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [int]$TimeoutSec = 35,
+        [string]$OutFile
+    )
+    if ($null -ne $OutFile) {
+        Invoke-RestMethod -Uri $Uri -OutFile $OutFile -TimeoutSec $TimeoutSec -ErrorAction Stop
+    } else {
+        Invoke-RestMethod -Uri $Uri -TimeoutSec $TimeoutSec -ErrorAction Stop
+    }
+}
+
+function Start-WindoBootstrapProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string]$Verb = $null,
+        [object]$ArgumentList = $null,
+        [switch]$Wait,
+        [switch]$PassThru,
+        [string]$ErrorAction = "Stop"
+    )
+    $common = @{
+        FilePath = $FilePath
+        Wait = $Wait
+        ErrorAction = $ErrorAction
+        PassThru = $PassThru.IsPresent
+    }
+    if ([string]::IsNullOrWhiteSpace($Verb)) {
+        if ($null -eq $ArgumentList) {
+            return Start-Process @common
+        }
+        $common.ArgumentList = $ArgumentList
+        return Start-Process @common
+    }
+
+    $common.Verb = $Verb
+    if ($null -ne $ArgumentList) {
+        $common.ArgumentList = $ArgumentList
+    }
+    return Start-Process @common
+}
+
+function Get-WindoBootstrapFileHash {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+}
+
 function _windo_bootstrap_is_retryable_web_error {
     param([System.Management.Automation.ErrorRecord]$ErrorRecord)
     if ($null -eq $ErrorRecord) { return $false }
@@ -78,6 +151,62 @@ function _windo_bootstrap_is_retryable_web_error {
     return $false
 }
 
+function Get-WindoBootstrapRuntimeProfile {
+    $platform = $null
+    try { $platform = [System.Environment]::OSVersion.Platform } catch {}
+
+    $osVersion = $null
+    try { $osVersion = [System.Environment]::OSVersion.Version } catch {}
+
+    $psVersion = $null
+    try { $psVersion = [version]$PSVersionTable.PSVersion } catch {}
+
+    $languageMode = "Unknown"
+    try { $languageMode = $ExecutionContext.SessionState.LanguageMode.ToString() } catch {}
+
+    return [pscustomobject]@{
+        IsWindows = ($platform -eq [System.PlatformID]::Win32NT)
+        IsWindows10OrLater = if ($null -ne $osVersion) { $osVersion.Major -ge 10 } else { $false }
+        IsPowerShellSupported = if ($null -ne $psVersion) { $psVersion -ge [version]'5.1' } else { $false }
+        PowerShellVersion = if ($null -ne $psVersion) { $psVersion.ToString() } else { "unknown" }
+        LanguageMode = $languageMode
+        SupportsBackgroundJobs = [bool](Get-Command Start-Job -ErrorAction SilentlyContinue)
+        SupportsWebCmdlets = ($null -ne (Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue)) -and ($null -ne (Get-Command Invoke-RestMethod -ErrorAction SilentlyContinue))
+    }
+}
+
+function Test-WindoBootstrapHostCompatibility {
+    $profile = Get-WindoBootstrapRuntimeProfile
+
+    Write-WindoBootstrapStep -Status run -Label "Runtime compatibility" -Detail "PS $($profile.PowerShellVersion) on Windows $($profile.IsWindows10OrLater)"
+
+    if (-not $profile.IsWindows) {
+        throw "WINDO bootstrap requires Windows."
+    }
+    if (-not $profile.IsWindows10OrLater) {
+        throw "WINDO bootstrap requires Windows 10 or newer."
+    }
+    if (-not $profile.IsPowerShellSupported) {
+        throw "WINDO bootstrap requires PowerShell 5.1+."
+    }
+    if (-not $profile.SupportsWebCmdlets) {
+        throw "Required web cmdlets are unavailable in this session."
+    }
+
+    $script:WindoBootstrapSupportsBackgroundJobs = $profile.SupportsBackgroundJobs
+    if (-not $script:WindoBootstrapSupportsBackgroundJobs) {
+        Write-WindoBootstrapStep -Status warn -Label "Background jobs unavailable" -Detail "Falling back to inline download without spinner."
+    }
+
+    if ($profile.LanguageMode -ne "FullLanguage") {
+        Write-WindoBootstrapStep -Status warn -Label "Constrained host detected" -Detail "Dynamic language mode is not FullLanguage; some advanced tooling paths may be restricted."
+    } else {
+        Write-WindoBootstrapStep -Status ok -Label "Language mode" -Detail "FullLanguage" -Color Green
+    }
+
+    return $profile
+}
+
 function Get-WindoBootstrapManifestValue([string]$Text, [string]$Key) {
     if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
     if ([string]::IsNullOrWhiteSpace($Key)) { return $null }
@@ -90,10 +219,67 @@ function Get-WindoBootstrapManifestValue([string]$Text, [string]$Key) {
         if ($equal -lt 0) { continue }
         $name = $trim.Substring(0, $equal).Trim()
         if ($name -ieq $want) {
-            return $trim.Substring($equal + 1).Trim()
+            $raw = $trim.Substring($equal + 1).Trim()
+            if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+
+            $hashIndex = $raw.IndexOf("#")
+            if ($hashIndex -ge 0) { $raw = $raw.Substring(0, $hashIndex).Trim() }
+            if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+
+            $len = $raw.Length
+            if ($len -ge 2 -and (($raw[0] -eq '"' -and $raw[$len - 1] -eq '"') -or ($raw[0] -eq "'" -and $raw[$len - 1] -eq "'")) ) {
+                $raw = $raw.Substring(1, $len - 2)
+            }
+
+            return $raw.Trim()
         }
     }
     return $null
+}
+
+function Get-WindoBootstrapReleaseMetadata([string]$Text) {
+    $releaseCommitRaw = Get-WindoBootstrapManifestValue -Text $Text -Key "releaseCommit"
+    $releaseBranchRaw = Get-WindoBootstrapManifestValue -Text $Text -Key "releaseBranch"
+
+    $normalizedCommit = if ($releaseCommitRaw -match '^[a-fA-F0-9]{40,64}$') { $releaseCommitRaw.ToLowerInvariant() } else { $null }
+    $normalizedBranch = if ($releaseBranchRaw -match '^[A-Za-z0-9._-]{1,64}$') { $releaseBranchRaw } else { $null }
+
+    return [pscustomobject]@{
+        releaseCommit = $normalizedCommit
+        releaseCommitRaw = $releaseCommitRaw
+        releaseBranch = $normalizedBranch
+        releaseBranchRaw = $releaseBranchRaw
+    }
+}
+
+function Get-WindoBootstrapReleaseMetadataState {
+    param(
+        [string]$ReleaseRef,
+        [string]$ReleaseCommit,
+        [string]$ReleaseCommitRaw,
+        [string]$ReleaseBranch
+    )
+    $resolvedCommit = $ReleaseRef.ToLowerInvariant()
+    if ($resolvedCommit -match '^[a-fA-F0-9]{40}$') {
+        if ($ReleaseCommit -notmatch '^[a-fA-F0-9]{40,64}$') {
+            $raw = if ([string]::IsNullOrWhiteSpace($ReleaseCommitRaw)) { $null } else { $ReleaseCommitRaw }
+            return [pscustomobject]@{ CompatibilityMode = $true; Detail = "manifest releaseCommit is missing or invalid (received '$raw') while release ref is commit $resolvedCommit." }
+        }
+        if ($ReleaseCommit -ine $resolvedCommit) {
+            return [pscustomobject]@{ CompatibilityMode = $true; Detail = "manifest releaseCommit=$ReleaseCommit does not match resolved release commit=$resolvedCommit." }
+        }
+        return [pscustomobject]@{ CompatibilityMode = $false; Detail = $null }
+    }
+
+    $resolvedBranch = Get-WindoBootstrapReleaseBranch
+    if ([string]::IsNullOrWhiteSpace($ReleaseBranch)) {
+        return [pscustomobject]@{ CompatibilityMode = $true; Detail = "resolved release ref is branch '$resolvedBranch', but checksum manifest did not include releaseBranch metadata." }
+    }
+    if ($ReleaseBranch -ine $resolvedBranch) {
+        return [pscustomobject]@{ CompatibilityMode = $true; Detail = "manifest releaseBranch=$ReleaseBranch does not match resolved branch=$resolvedBranch." }
+    }
+
+    return [pscustomobject]@{ CompatibilityMode = $true; Detail = "resolved release ref is branch '$resolvedBranch' (compatibility mode)." }
 }
 
 $script:_windo_bootstrap_retry_ms = @(350, 900, 2200)
@@ -148,6 +334,7 @@ function Get-WindoBootstrapFileBlobSha1 {
 }
 
 function Test-WindoBootstrapSpinnerEnabled {
+    if (-not $script:WindoBootstrapSupportsBackgroundJobs) { return $false }
     if ($env:WINDO_NO_SPINNER) { return $false }
     if ($env:CI) { return $false }
     try {
@@ -181,7 +368,7 @@ function Invoke-WindoBootstrapDownload {
 
     if (-not (Test-WindoBootstrapSpinnerEnabled)) {
         Write-Host $baseLabel -ForegroundColor DarkCyan
-        Invoke-RestMethod -Uri $Uri -OutFile $OutFile
+        Invoke-WindoBootstrapRestMethod -Uri $Uri -OutFile $OutFile
         return
     }
 
@@ -190,7 +377,7 @@ function Invoke-WindoBootstrapDownload {
         $job = Start-Job -ScriptBlock {
             param($u, $o)
             $ErrorActionPreference = "Stop"
-            Invoke-RestMethod -Uri $u -OutFile $o
+            Invoke-WindoBootstrapRestMethod -Uri $u -OutFile $o
         } -ArgumentList $Uri, $OutFile
     } catch {
         $job = $null
@@ -198,7 +385,7 @@ function Invoke-WindoBootstrapDownload {
 
     if ($null -eq $job) {
         Write-Host $baseLabel -ForegroundColor DarkCyan
-        Invoke-RestMethod -Uri $Uri -OutFile $OutFile
+        Invoke-WindoBootstrapRestMethod -Uri $Uri -OutFile $OutFile
         return
     }
 
@@ -236,7 +423,7 @@ function Save-WindoBootstrapPublishedInstaller {
 
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
-            $api = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 35 -ErrorAction Stop
+            $api = Invoke-WindoBootstrapWebRequest -Uri $apiUrl -TimeoutSec 35 -UseBasicParsing
             $obj = $api.Content | ConvertFrom-Json -ErrorAction Stop
             if ($obj.content) {
                 $bytes = [Convert]::FromBase64String(([string]$obj.content -replace '\s', ''))
@@ -314,10 +501,13 @@ function Get-WindoBootstrapNormalizedPublishedChecksum([string]$Text) {
 
 function Get-WindoBootstrapParsedChecksumPayload([string]$Text) {
     if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    $meta = Get-WindoBootstrapReleaseMetadata $Text
     return [pscustomobject]@{
         sha256 = Get-WindoBootstrapNormalizedPublishedChecksum $Text
-        releaseCommit = Get-WindoBootstrapManifestValue $Text "releaseCommit"
-        releaseBranch = Get-WindoBootstrapManifestValue $Text "releaseBranch"
+        releaseCommit = $meta.releaseCommit
+        releaseCommitRaw = $meta.releaseCommitRaw
+        releaseBranch = $meta.releaseBranch
+        releaseBranchRaw = $meta.releaseBranchRaw
     }
 }
 
@@ -331,7 +521,7 @@ function Get-WindoBootstrapVersionedPublishedChecksum([string]$Version) {
 
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
-            $resp = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+            $resp = Invoke-WindoBootstrapWebRequest -Uri $rawUrl -TimeoutSec 25 -UseBasicParsing
             if ($null -ne $resp.Content) {
                 return Get-WindoBootstrapNormalizedPublishedChecksum ([string]$resp.Content)
             }
@@ -357,7 +547,7 @@ function Get-WindoBootstrapPublishedChecksum {
 
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
-            $api = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+            $api = Invoke-WindoBootstrapWebRequest -Uri $apiUrl -TimeoutSec 25 -UseBasicParsing
             $obj = $api.Content | ConvertFrom-Json -ErrorAction Stop
             if ($obj.content) {
                 $contentText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(([string]$obj.content -replace '\s', '')))
@@ -373,8 +563,10 @@ function Get-WindoBootstrapPublishedChecksum {
                         url = $apiUrl
                         sha256 = $sha
                         blobSha = $blobSha
-                        releaseCommit = $releaseCommit
-                        releaseBranch = $releaseBranch
+                        releaseCommit = $payload.releaseCommit
+                        releaseBranch = $payload.releaseBranch
+                        releaseCommitRaw = $payload.releaseCommitRaw
+                        releaseBranchRaw = $payload.releaseBranchRaw
                         error = $null
                     }
                 }
@@ -393,7 +585,7 @@ function Get-WindoBootstrapPublishedChecksum {
     $rawUrl = Get-WindoBootstrapChecksumRawUrl
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
-            $wr = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+            $wr = Invoke-WindoBootstrapWebRequest -Uri $rawUrl -TimeoutSec 25 -UseBasicParsing
             if ($null -ne $wr.Content) {
                 $payload = Get-WindoBootstrapParsedChecksumPayload ([string]$wr.Content)
                 $sha = $payload.sha256
@@ -406,8 +598,10 @@ function Get-WindoBootstrapPublishedChecksum {
                         url = $rawUrl
                         sha256 = $sha
                         blobSha = $null
-                        releaseCommit = $releaseCommit
-                        releaseBranch = $releaseBranch
+                        releaseCommit = $payload.releaseCommit
+                        releaseBranch = $payload.releaseBranch
+                        releaseCommitRaw = $payload.releaseCommitRaw
+                        releaseBranchRaw = $payload.releaseBranchRaw
                         error = $null
                     }
                 }
@@ -431,6 +625,8 @@ function Get-WindoBootstrapPublishedChecksum {
         blobSha = $null
         releaseCommit = "unknown"
         releaseBranch = Get-WindoBootstrapReleaseBranch
+        releaseCommitRaw = "unknown"
+        releaseBranchRaw = Get-WindoBootstrapReleaseBranch
         error = $apiError
     }
 }
@@ -450,33 +646,47 @@ function Start-WindoBootstrapInstaller {
     $shouldElevate = [Environment]::UserInteractive -and -not $env:CI
 
     if ($shouldElevate) {
-        Write-Host "[windo] Requesting elevation for installer..." -ForegroundColor DarkCyan
+        Write-Host "[windo] Requesting elevated installer launch..." -ForegroundColor Cyan
         try {
-            Start-Process -FilePath $runnerExe -Verb RunAs -ArgumentList $argList -Wait | Out-Null
-            return
+            $installerProcess = Start-WindoBootstrapProcess -FilePath $runnerExe -Verb RunAs -ArgumentList $argList -Wait -PassThru
+            return [int]($installerProcess.ExitCode)
         } catch [System.ComponentModel.Win32Exception] {
             if ($_.Exception.NativeErrorCode -eq 1223) {
-                throw "Installer elevation was canceled. Re-run bootstrap and approve the UAC prompt, or run the installer from an elevated PowerShell session."
+                return 1223
             }
             throw
         }
     }
 
-    Write-Host "[windo] Running installer without elevation (non-interactive or CI session)." -ForegroundColor DarkYellow
+    Write-Host "[windo] Running bootstrap installer without elevation (non-interactive or CI session)." -ForegroundColor Cyan
     & $runnerExe @argList
+    if ($LASTEXITCODE -is [int]) {
+        return [int]$LASTEXITCODE
+    }
+    return 0
 }
 
 Write-WindoBootstrapBanner
+try {
+    $script:WindoBootstrapRuntime = Test-WindoBootstrapHostCompatibility
+} catch {
+    Write-Host "WINDO bootstrap cannot proceed in this environment." -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Set-WindoBootstrapExitCode 1
+    exit $global:WINDO_EXIT_CODE
+}
 
 if (Test-WindoBootstrapProcessElevated) {
     Write-Host ""
-    Write-Host "WINDO bootstrap: installer is not downloaded while running as Administrator." -ForegroundColor Yellow
+    Write-Host "WINDO bootstrap is disabled in elevated shells." -ForegroundColor Yellow
     Write-Host "  Open a normal (non-elevated) PowerShell window and run the bootstrap one-liner again." -ForegroundColor DarkGray
-    Write-Host "  After a verified download you will be asked before the installer runs." -ForegroundColor DarkGray
+    Write-Host "  After a verified download, you will be asked to approve the installer handoff." -ForegroundColor DarkGray
     Write-Host ""
-    exit 1
+    Set-WindoBootstrapExitCode 1
+    exit $global:WINDO_EXIT_CODE
 }
 
+ $bootstrapExitCode = 0
 try {
 
     Write-WindoBootstrapStep -Status run -Label "Downloading installer" -Detail "GitHub API first, raw fallback"
@@ -485,7 +695,7 @@ try {
             $releaseBranch = Get-WindoBootstrapReleaseBranch
 
     if (!(Test-Path $Temp)) {
-        throw "Installer failed to download."
+        throw "Installer download failed or was blocked. Confirm network access to GitHub endpoints, then re-run bootstrap."
     }
 
     if (-not (ConvertFrom-WindoBootstrapBool -Name WINDO_SKIP_INSTALLER_SHA256)) {
@@ -498,12 +708,12 @@ try {
             if ($null -eq $expected -or $expected.status -ne "available" -or -not $expected.sha256) {
                 if ($strictMode) {
                     $detail = if ($null -ne $expected -and $expected.error) { $expected.error } else { "published checksum was unavailable" }
-                    throw "Installer SHA256 does not match a verifiable published checksum source (strict mode). Set WINDO_SKIP_INSTALLER_SHA256=1 to skip. $detail"
+                    throw "Installer SHA256 cannot be validated against a verifiable published source in strict mode. Check network/API access and branch state, then re-run. Temporary override: WINDO_SKIP_INSTALLER_SHA256=1. $detail"
                 }
                 Write-WindoBootstrapStep -Status warn -Label "Checksum verification delayed" -Detail "Could not retrieve a parseable published checksum now; continuing in compatibility mode." -Color Yellow
             } else {
                 $expectedSha = [string]$expected.sha256
-                $got = (Get-FileHash -Path $Temp -Algorithm SHA256).Hash.ToUpperInvariant()
+$got = Get-WindoBootstrapFileHash -Path $Temp
                 if ($got -cne $expectedSha) {
                     $blobSha = if ($downloadSource.BlobSha) { [string]$downloadSource.BlobSha } else { $null }
                     if (-not [string]::IsNullOrWhiteSpace($blobSha)) {
@@ -523,22 +733,20 @@ try {
                             Write-WindoBootstrapStep -Status warn -Label "Checksum drift tolerated" -Detail "SHA256 matches checksums/installer.sha256 snapshot for v$version on branch $releaseBranch. Continuing in compatibility mode." -Color Yellow
                             $expected = $null
                         } else {
-                            $releaseCommit = if ($null -ne $expected -and $expected.PSObject.Properties.Name -contains "releaseCommit") { [string]$expected.releaseCommit } else { $null }
-                            if ([string]::IsNullOrWhiteSpace($releaseCommit) -or ($releaseCommit -notmatch '^[a-fA-F0-9]{40}$')) {
-                                Write-WindoBootstrapStep -Status warn -Label "Checksum drift tolerated" -Detail "Published checksum metadata is not release-commit pinned (releaseCommit=$releaseCommit). Continuing in compatibility mode." -Color Yellow
-                                Write-WindoBootstrapStep -Status ok -Label "Checksum accepted" -Color Green
-                                $expected = $null
-                            } elseif ($releaseRef -match '^[a-fA-F0-9]{40}$' -and $releaseCommit -ine $releaseRef) {
-                                if ($strictMode) {
-                                    throw "Installer SHA256 does not match published checksum for release ref $releaseRef. Published manifest releaseCommit=$releaseCommit. Expected=$expectedSha Got=$got. Set WINDO_SKIP_INSTALLER_SHA256=1 to continue."
-                                }
-                                Write-WindoBootstrapStep -Status warn -Label "Checksum drift tolerated" -Detail "Published checksum releaseCommit=$releaseCommit does not match resolved ref=$releaseRef. Continuing in compatibility mode." -Color Yellow
-                                Write-WindoBootstrapStep -Status ok -Label "Checksum accepted" -Color Green
-                                $expected = $null
-                            }
-                            if ($null -ne $expected) {
-                                throw "Installer SHA256 does not match published checksum. Set WINDO_SKIP_INSTALLER_SHA256=1 or WINDO_STRICT_INSTALLER_VERIFICATION=0 to continue. Expected=$expectedSha Got=$got"
-                            }
+                $releaseCommit = if ($null -ne $expected -and $expected.PSObject.Properties.Name -contains "releaseCommit") { [string]$expected.releaseCommit } else { $null }
+                $releaseCommitRaw = if ($null -ne $expected -and $expected.PSObject.Properties.Name -contains "releaseCommitRaw") { [string]$expected.releaseCommitRaw } else { $null }
+                $releaseBranch = if ($null -ne $expected -and $expected.PSObject.Properties.Name -contains "releaseBranch") { [string]$expected.releaseBranch } else { $null }
+                $metadataState = Get-WindoBootstrapReleaseMetadataState -ReleaseRef $releaseRef -ReleaseCommit $releaseCommit -ReleaseCommitRaw $releaseCommitRaw -ReleaseBranch $releaseBranch
+                if ($metadataState.CompatibilityMode) {
+                    if ($strictMode) {
+                        throw "Installer SHA256 does not match published checksum for ref $releaseRef. $($metadataState.Detail) Expected=$expectedSha Got=$got. Verify branch pins and manifest provenance before continuing."
+                    }
+                    Write-WindoBootstrapStep -Status warn -Label "Checksum drift tolerated" -Detail "$($metadataState.Detail) Continuing in compatibility mode." -Color Yellow
+                    Write-WindoBootstrapStep -Status ok -Label "Checksum accepted" -Color Green
+                    $expected = $null
+                } elseif ($null -ne $expected) {
+                    throw "Installer SHA256 does not match published checksum. Confirm manifest and release provenance before continuing. Temporary override: WINDO_SKIP_INSTALLER_SHA256=1 or WINDO_STRICT_INSTALLER_VERIFICATION=0. Expected=$expectedSha Got=$got"
+                }
                         }
                     }
                 }
@@ -553,43 +761,57 @@ try {
 
     $size = (Get-Item $Temp).Length
     if ($size -lt 5000) {
-        throw "Installer file size looks invalid."
+        throw "Installer file size is too small ($size bytes), likely truncated or tampered. Retry bootstrap from a trusted network path."
     }
 
     Write-WindoBootstrapStep -Status ok -Label "Installer ready" -Detail $Temp -Color Green
     $doLaunch = $false
-    if ($env:WINDO_BOOTSTRAP_FORCE_INSTALL -or $env:CI) {
+    $bootstrapForceInstall = ConvertFrom-WindoBootstrapBool -Name WINDO_BOOTSTRAP_FORCE_INSTALL
+    $bootstrapAutoLaunch = ConvertFrom-WindoBootstrapBool -Name WINDO_INSTALL_NONINTERACTIVE
+    if ($bootstrapAutoLaunch -or $bootstrapForceInstall -or $env:CI) {
         $doLaunch = $true
-        Write-Host "[windo] Proceeding without prompt (CI or WINDO_BOOTSTRAP_FORCE_INSTALL)." -ForegroundColor DarkGray
+        Write-Host "[windo] Proceeding without prompt (CI or WINDO_BOOTSTRAP_FORCE_INSTALL or WINDO_INSTALL_NONINTERACTIVE)." -ForegroundColor DarkGray
     } elseif ([Environment]::UserInteractive) {
         $ans = Read-Host "Launch the installer now? (UAC may prompt for elevation.) [y/N]"
         if ($ans -eq 'y' -or $ans -eq 'Y' -or $ans -eq 'yes') { $doLaunch = $true }
     } else {
-        Write-Host "[windo] Non-interactive shell: set WINDO_BOOTSTRAP_FORCE_INSTALL=1 to launch after download, or run interactively." -ForegroundColor Yellow
-        throw "Bootstrap: non-interactive without WINDO_BOOTSTRAP_FORCE_INSTALL"
+        Write-Host "[windo] Non-interactive shell: set WINDO_BOOTSTRAP_FORCE_INSTALL=1 or WINDO_INSTALL_NONINTERACTIVE=1 to launch after download, or run interactively." -ForegroundColor Yellow
+        throw "Bootstrap: non-interactive without WINDO_BOOTSTRAP_FORCE_INSTALL or WINDO_INSTALL_NONINTERACTIVE"
     }
 
     if (-not $doLaunch) {
         Write-Host "[windo] Cancelled; removing temporary installer." -ForegroundColor DarkYellow
         Remove-Item -LiteralPath $Temp -Force -ErrorAction SilentlyContinue
-        exit 0
+        Set-WindoBootstrapExitCode 0
+        exit $global:WINDO_EXIT_CODE
     }
 
     Write-WindoBootstrapStep -Status run -Label "Launching installer" -Detail "UAC may prompt for elevation"
-    Start-WindoBootstrapInstaller -ScriptPath $Temp
+    $installerExitCode = Start-WindoBootstrapInstaller -ScriptPath $Temp
+    if ($installerExitCode -eq 1223) {
+        Write-Host "[windo] Installer launch was declined. Bootstrap install was not applied." -ForegroundColor Yellow
+        Write-Host "  Approve UAC for this command, or rerun this same bootstrap command from an elevated PowerShell session after verifying command trust." -ForegroundColor DarkGray
+        Set-WindoBootstrapExitCode 2
+    } elseif ($installerExitCode -ne 0) {
+        Write-Host "[windo] Installer completed with exit code $installerExitCode. Check command output for details." -ForegroundColor Yellow
+        Set-WindoBootstrapExitCode $installerExitCode
+    }
 
 }
 catch {
     Write-Host ""
     Write-Host "WINDO bootstrap failed:" -ForegroundColor Red
     Write-Host $_
+    Set-WindoBootstrapExitCode 1
 }
 finally {
 
-    if (Test-Path $Temp) {
-        Remove-Item $Temp -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $Temp) {
+        Remove-Item -LiteralPath $Temp -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host ""
     Write-Host "Bootstrap finished." -ForegroundColor Green
 }
+
+exit $global:WINDO_EXIT_CODE

@@ -505,7 +505,63 @@ Example (`windo net-scan ping 10.10.10.0/24 --ports 22,443 --json`):
 
 ## `network-ops` payloads (optional module)
 
-The optional `extras/samples/network-ops` module registers these commands via `wincmd`. They return native PowerShell objects; they are not wrapped in the WINDO `command` envelope.
+The optional `extras/samples/network-ops` module registers these commands via `wincmd`.
+They return native PowerShell objects by default, and use the WINDO `_emit_json` command envelope when `-AsJson` is requested for telemetry-focused paths.
+
+### `netops-rdp-vnc` payload
+
+`netops-rdp-vnc` uses envelope command `rdp` when `-AsJson` is active.
+
+#### `netops-rdp-vnc status`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `subcommand` | string | Always `status` for status queries. |
+| `scannedAt` | string | ISO timestamp for the request snapshot. |
+| `service` | object | `name`, `status`, `startup`, and `exists` fields. |
+| `config` | object | Registry/config posture values used in evaluation. |
+| `firewall` | object | `count` and firewall rule rows. |
+| `exitCode` | number | `0` success, `2` when service state is unknown. |
+
+#### `netops-rdp-vnc firewall`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `subcommand` | string | Always `firewall` for firewall operations. |
+| `action` | string | `status`, `enable`, or `disable`. |
+| `requestedPorts` | array | Placeholder for port-specific payload shaping. |
+| `runCommand` | array | Commands prepared for mutating operations. |
+| `command-executed` | array | Commands executed for mutating operations. |
+| `updates` | array | Planned or applied rule updates. |
+| `exitCode` | number | `0` when update plan is prepared, `2` when no updates are found. |
+
+### `netops-wsl` payload
+
+`netops-wsl` uses envelope command `wsl` when `-AsJson` is active.
+
+#### `netops-wsl status`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | Always `status` for mode status output. |
+| `wslAvailable` | bool | `wsl.exe` discoverability check. |
+| `wslStatus` | array | Raw output from `wsl --status`. |
+| `wslExitCode` | number | Raw `wsl --status` exit code. |
+| `distros` | array | Parsed distro rows. |
+| `default` | string \| null | Default distro name. |
+| `exitCode` | number | `0` success, non-zero when preconditions fail. |
+
+#### `netops-wsl check install`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | Always `check install` for install preflight. |
+| `wslAvailable` | bool | `wsl.exe` discoverability check. |
+| `wslStatus` | array | Raw output from `wsl --status`. |
+| `distros` | array | Parsed distro rows. |
+| `default` | string \| null | Default distro name if available. |
+| `notes` | array | Preflight notes. |
+| `exitCode` | number | `0` on pass, `2` on preflight failure. |
 
 ### `netops-resolve`
 
@@ -525,7 +581,7 @@ Rows return:
 
 ### `netops-netcat-send`
 
-Rows/objects are native `netops-netcat-send` output objects. Not wrapped by WINDO envelope.
+Rows/objects are native `netops-netcat-send` output objects. Not wrapped by the WINDO `command` envelope.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -621,9 +677,35 @@ Returns one or both objects:
 ]
 ```
 
+When used with `-AsJson`, `netops-rdp-vnc` emits `rdp` command payloads:
+
+### `netops-rdp-vnc` `-Subcommand status`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `subcommand` | string | `status`. |
+| `service` | object | Service posture snapshot from local RDP service checks. |
+| `config` | object | Registry/posture snapshot used by status inspection. |
+| `firewall` | object | Firewall summary including rule count and candidate rule rows. |
+| `exitCode` | number | `0` success, `2` when service state is unknown. |
+
+### `netops-rdp-vnc` `-Subcommand firewall`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `subcommand` | string | `firewall`. |
+| `action` | string | `status`, `enable`, or `disable`. |
+| `requestedPorts` | array | Firewall rule input context for the command. |
+| `runCommand` | array | Command plan used to apply the firewall action. |
+| `command-executed` | array | Commands prepared for execution (when applicable). |
+| `updates` | array | Planned state updates for each matching rule. |
+| `exitCode` | number | `0` when command payload is prepared, `2` when no targets were found. |
+
 ### `netops-wsl`
 
 `status` returns rows with `Name`, `IsDefault`, `State`, `Version`, `Eth0Ip`; `ip` mode returns `Distro`, `IpAddress`, and `ProbeCommand`.
+
+When used with `-AsJson`, `netops-wsl` emits `wsl` command payloads.
 
 ```json
 [
@@ -636,6 +718,25 @@ Returns one or both objects:
   }
 ]
 ```
+
+#### `netops-wsl` status payload
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | `status`. |
+| `wslAvailable` | bool | `wsl.exe` discoverability at runtime. |
+| `distros` | array | Parsed distro rows from local scan (`$distros.distros`). |
+| `exitCode` | number | `0` for executable status path, otherwise non-zero. |
+
+#### `netops-wsl` preflight payload
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | `check install`. |
+| `wslAvailable` | bool | `wsl.exe` discoverability at runtime. |
+| `distros` | array | Parsed distro rows from local scan (`$distros.distros`). |
+| `notes` | array | Preflight notes for availability and command checks. |
+| `exitCode` | number | `0` when preflight passes, `2` on missing runtime or failed check. |
 
 ## `vault` payload (v4.1.0+)
 

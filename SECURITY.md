@@ -34,7 +34,27 @@ During installation, WINDO attempts to tighten `.pwsh_secure` ACLs to the curren
 
 ## Bootstrap and upgrade integrity
 
-`bootstrap.ps1`, **`windo install-latest`**, and **`windo upgrade`** (same as install-latest) download `windo_install.ps1` from the **`Genesis`** branch. **v3.1.1+:** that download is **refused while the shell is elevated** (Administrator), so remote content is not fetched under high privilege; run from a normal user PowerShell, confirm after verification, then the installer may prompt **UAC** for task registration. Unattended flows may set **`WINDO_BOOTSTRAP_FORCE_INSTALL`**, **`WINDO_INSTALL_NONINTERACTIVE`**, or **`CI`** as documented in the README. If [`checksums/installer.sha256`](checksums/installer.sha256) is present on that branch, the downloaded file’s SHA256 must match the **first 64 hex** characters read from that file (see **v3.2.7+** parsing), unless **`WINDO_SKIP_INSTALLER_SHA256`** is set. If the checksum file is missing (older branches) or the URL fails, the check is skipped.
+`bootstrap.ps1`, **`windo install-latest`**, and **`windo upgrade`** (same as install-latest) download `windo_install.ps1` from the canonical **`v6`** branch. **v3.1.1+:** that download is **refused while the shell is elevated** (Administrator), so remote content is not fetched under high privilege; run from a normal user PowerShell, confirm after verification, then the installer may prompt for **UAC** during repair or task registration. Unattended flows may set **`WINDO_BOOTSTRAP_FORCE_INSTALL`**, **`WINDO_INSTALL_NONINTERACTIVE`**, or **`CI`** as documented in the README.
+
+Hash behavior:
+
+- `WINDO_SKIP_INSTALLER_SHA256=1` disables `windo_install.ps1` checksum checks for both bootstrap and upgrade/install flows.
+- `WINDO_STRICT_INSTALLER_VERIFICATION=1` enables strict mode and suppresses compatibility fallback paths.
+- Without strict mode, installer integrity can still proceed with warnings on compatible hash paths (for example published version drift, metadata/branch drift, or checksum-source warnings when fallback checks are used).
+- If [`checksums/installer.sha256`](checksums/installer.sha256) is present on the branch, the downloaded file’s SHA256 must match the **first 64 hex** characters read from that file (see **v3.2.7+** parsing). In strict mode, checksum, source, and branch mismatches (including checksum-source failures) are treated as hard installation failures; otherwise they are warnings that preserve compatibility behavior.
+
+## Self-update path and non-interactive behavior
+
+`windo self-update` runs the `WindoSelfUpdate` scheduled task. If the task is missing or blocked, the command can route into an installer repair path:
+
+- In interactive sessions, WINDO prompts before launching the installer repair.
+- In non-interactive sessions (`--non-interactive`, `CI`, or non-interactive shell), the repair prompt is skipped and a repair recommendation is returned instead.
+- `windo self-update --dry-run` reports the planned repair/task-start behavior and does not execute either.
+
+## Known limitations
+
+- Bootstrap strictness can fail earlier than installer strict mode in some checksum-source availability edge cases.
+- A limited set of compatibility paths are treated as warnings only when strict mode is not set.
 
 ## AI tooling and API keys (v3.2.5+)
 
@@ -43,7 +63,7 @@ WINDO does **not** call OpenAI or other vendor inference APIs from the installer
 ## Optional modules and curated extras (v3.2.0+)
 
 - **Local modules:** `windo modules` stores enabled module ids in **`windo_prefs.json`** (`enabledModules`). Module files live under **`%USERPROFILE%\Documents\windo\modules\<id>\`** with a **`module.json`** plus an entry script (default **`Load.ps1`**). The profile stub dot-sources **only** enabled modules **after** the WINDO core block; load failures are non-fatal and emit a warning. This path never performs network fetches.
-- **Curated extras index:** the repo may ship **`extras/index.json`** (read-only catalog). **`windo extras search`** downloads the index from **`Genesis`** (override with **`WINDO_EXTRAS_INDEX_URL`**, also shown in **`windo config`** / **`windo config --json`**). **`windo extras fetch <id>`** downloads the listed artifact to **`%USERPROFILE%\Documents\windo\extras\<id>\`** **only from a non-elevated** interactive shell, verifies **SHA256** when the index publishes it, and refuses the download while **Administrator** (same spirit as **`install-latest`**). Treat catalog entries like any supply-chain input: prefer pinned checksums and review before execution. See also [`docs/modules-and-extras.md`](docs/modules-and-extras.md).
+- **Curated extras index:** the repo may ship **`extras/index.json`** (read-only catalog). **`windo extras search`** downloads the index from the canonical **`v6`** branch (override with **`WINDO_EXTRAS_INDEX_URL`**, also shown in **`windo config`** / **`windo config --json`**). **`windo extras fetch <id>`** downloads the listed artifact to **`%USERPROFILE%\Documents\windo\extras\<id>\`** **only from a non-elevated** interactive shell, verifies **SHA256** when the index publishes it, and refuses the download while **Administrator** (same spirit as **`install-latest`**). Treat catalog entries like any supply-chain input: prefer pinned checksums and review before execution. See also [`docs/modules-and-extras.md`](docs/modules-and-extras.md).
 
 ## JSON envelope (v3.0.0+)
 
