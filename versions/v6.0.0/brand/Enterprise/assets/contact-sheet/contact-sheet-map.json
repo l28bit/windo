@@ -1,0 +1,218 @@
+[
+  {
+    "filename": "assets/png/windo-brand-mark-contained-blue-256.png",
+    "row": 1,
+    "column": 1,
+    "x": 70,
+    "y": 140,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/logo/windo-logo-full-dark-512.png",
+    "row": 1,
+    "column": 2,
+    "x": 360,
+    "y": 140,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/tray/windo-tray-ready.png",
+    "row": 1,
+    "column": 3,
+    "x": 650,
+    "y": 140,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/tray/windo-tray-ok.png",
+    "row": 1,
+    "column": 4,
+    "x": 940,
+    "y": 140,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/tray/windo-tray-warning.png",
+    "row": 1,
+    "column": 5,
+    "x": 1230,
+    "y": 140,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/tray/windo-tray-denied.png",
+    "row": 1,
+    "column": 6,
+    "x": 1520,
+    "y": 140,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/tray/windo-tray-neutral.png",
+    "row": 2,
+    "column": 1,
+    "x": 70,
+    "y": 360,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/tray/windo-tray-elevated.png",
+    "row": 2,
+    "column": 2,
+    "x": 360,
+    "y": 360,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/status/status-ready-128.png",
+    "row": 2,
+    "column": 3,
+    "x": 650,
+    "y": 360,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/status/status-elevated-128.png",
+    "row": 2,
+    "column": 4,
+    "x": 940,
+    "y": 360,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/status/status-allowed-128.png",
+    "row": 2,
+    "column": 5,
+    "x": 1230,
+    "y": 360,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/status/status-warning-128.png",
+    "row": 2,
+    "column": 6,
+    "x": 1520,
+    "y": 360,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/status/status-denied-128.png",
+    "row": 3,
+    "column": 1,
+    "x": 70,
+    "y": 580,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/status/status-neutral-128.png",
+    "row": 3,
+    "column": 2,
+    "x": 360,
+    "y": 580,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/ui-icons/icon-elevate-128.png",
+    "row": 3,
+    "column": 3,
+    "x": 650,
+    "y": 580,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/ui-icons/icon-execute-128.png",
+    "row": 3,
+    "column": 4,
+    "x": 940,
+    "y": 580,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/ui-icons/icon-audit-128.png",
+    "row": 3,
+    "column": 5,
+    "x": 1230,
+    "y": 580,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/ui-icons/icon-approve-128.png",
+    "row": 3,
+    "column": 6,
+    "x": 1520,
+    "y": 580,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/ui-icons/icon-deny-128.png",
+    "row": 4,
+    "column": 1,
+    "x": 70,
+    "y": 800,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/ui-icons/icon-warning-128.png",
+    "row": 4,
+    "column": 2,
+    "x": 360,
+    "y": 800,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/ui-icons/icon-history-128.png",
+    "row": 4,
+    "column": 3,
+    "x": 650,
+    "y": 800,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/ui-icons/icon-settings-128.png",
+    "row": 4,
+    "column": 4,
+    "x": 940,
+    "y": 800,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/ui-icons/icon-secure-128.png",
+    "row": 4,
+    "column": 5,
+    "x": 1230,
+    "y": 800,
+    "width": 260,
+    "height": 190
+  },
+  {
+    "filename": "assets/ui-icons/icon-powershell-128.png",
+    "row": 4,
+    "column": 6,
+    "x": 1520,
+    "y": 800,
+    "width": 260,
+    "height": 190
+  }
+]

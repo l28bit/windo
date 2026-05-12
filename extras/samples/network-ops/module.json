@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Optional WINDO module with network and WSL operator helpers.",
   "entry": "Load.ps1",
-  "requiresWindoVersion": "6.0.0",
+  "requiresWindoVersion": "8.4.0",
   "commands": [
     "netops-resolve",
     "netops-subnet-scan",

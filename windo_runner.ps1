@@ -22,6 +22,32 @@ function Close-WindoRunnerMutex {
     try { $Mutex.Dispose() } catch {}
 }
 
+function Write-TextFileAtomic {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Content,
+        [Parameter()][System.Text.Encoding]$Encoding = (New-Object System.Text.UTF8Encoding($false))
+    )
+    $dir = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($dir) -and !(Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $tmp = Join-Path $dir (".windo_tmp_" + [Guid]::NewGuid().ToString("n") + ".tmp")
+    try {
+        [System.IO.File]::WriteAllText($tmp, $Content, $Encoding)
+        Move-Item -LiteralPath $tmp -Destination $Path -Force
+    } finally {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Write-RunnerTrace {
+    param([string]$Message, [switch]$Overwrite)
+    if ($Overwrite) {
+        Write-TextFileAtomic -Path $RunnerLast -Content $Message -Encoding (New-Object System.Text.UTF8Encoding($false))
+    } else {
+        $Message | Add-Content -Path $RunnerLast -Encoding UTF8
+    }
+}
+
 function Invoke-WindoRunnerChildExec {
     param(
         [Parameter(Mandatory = $true)][string]$CommandLine,
@@ -294,21 +320,21 @@ function _windo_join_output_streams([string]$StdOut, [string]$StdErr) {
     return ($out + "`n" + $err).TrimEnd()
 }
 
-"RUNNER START: $([DateTime]::Now.ToString('s'))" | Set-Content -Path $RunnerLast -Encoding UTF8
+Write-RunnerTrace -Overwrite "RUNNER START: $([DateTime]::Now.ToString('s'))"
 
 $createdNew = $false
 $m = New-WindoRunnerMutex -Name $MutexName -CreatedNew ([ref]$createdNew)
 
 try {
     if (-not $m.WaitOne(30000)) {
-        "EXIT 9: mutex wait timeout" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace "EXIT 9: mutex wait timeout"
         exit 9
     }
 
     $req = _windo_next_request $SecureDir
 
     if (-not $req) {
-        "NO WORK: no pending request files" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace "NO WORK: no pending request files"
         exit 0
     }
 
@@ -316,13 +342,13 @@ try {
         $pendingRaw = Get-Content -Raw -Path $req.FullName
         $pending = _windo_resolve_artifact_payload $pendingRaw
     } catch {
-        "BAD REQUEST JSON: $($req.FullName) :: $($_.Exception.Message)" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace ("BAD REQUEST JSON: $($req.FullName) :: $($_.Exception.Message)")
         try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".bad") -ErrorAction SilentlyContinue } catch {}
         exit 3
     }
 
     if ($null -eq $pending -or (-not ($pending.PSObject -or $pending -is [System.Collections.IDictionary])) ) {
-        "BAD REQUEST JSON: $($req.FullName) :: malformed request payload" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace ("BAD REQUEST JSON: $($req.FullName) :: malformed request payload")
         try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".bad") -ErrorAction SilentlyContinue } catch {}
         exit 3
     }
@@ -332,7 +358,7 @@ try {
     $reqId   = _windo_get_member_value $pending "RequestId"
 
     if ($null -eq $cmdLine -or $null -eq $outPath) {
-        "BAD REQUEST JSON: $($req.FullName) :: malformed request payload (missing Command or OutPath)" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace ("BAD REQUEST JSON: $($req.FullName) :: malformed request payload (missing Command or OutPath)")
         try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".bad") -ErrorAction SilentlyContinue } catch {}
         exit 3
     }
@@ -347,20 +373,20 @@ try {
         $preserveEnvironment = _windo_resolve_preserve_environment $pending.PreserveEnvironment
     }
 
-    "PROCESS: RequestId=$reqId  OutPath=$outPath" | Add-Content -Path $RunnerLast -Encoding UTF8
-    "CMD: $cmdLine" | Add-Content -Path $RunnerLast -Encoding UTF8
+    Write-RunnerTrace "PROCESS: RequestId=$reqId  OutPath=$outPath"
+    Write-RunnerTrace "CMD: $cmdLine"
 
     $badOut = Test-WindoResultPath $outPath $SecureDir
     if ($badOut) {
-        "VALIDATION FAILED (OutPath): $badOut" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace ("VALIDATION FAILED (OutPath): $badOut")
         try { Remove-Item -Path $req.FullName -Force -ErrorAction SilentlyContinue } catch {}
-        "RUNNER END: $([DateTime]::Now.ToString('s'))" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace "RUNNER END: $([DateTime]::Now.ToString('s'))"
         exit 5
     }
 
     $badCmd = Test-WindoCommandLine $cmdLine
     if ($badCmd) {
-        "VALIDATION FAILED (Command): $badCmd" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace ("VALIDATION FAILED (Command): $badCmd")
         $message = "<WINDO VALIDATION FAILED: $badCmd>"
         $stdout = $message
         $stderr = ""
@@ -378,13 +404,15 @@ try {
             OutputTruncated = $false
         }
         try {
-            $result | ConvertTo-Json -Compress | Set-Content -Path $outPath -Encoding UTF8
+            $result | ConvertTo-Json -Compress | Write-TextFileAtomic -Path $outPath -Encoding (New-Object System.Text.UTF8Encoding($false))
         } catch {
-            "EXIT 4: failed to write validation result: $($_.Exception.Message)" | Add-Content -Path $RunnerLast -Encoding UTF8
+            Write-RunnerTrace ("EXIT 4: failed to write validation result: $($_.Exception.Message)")
+            try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".failed") -ErrorAction SilentlyContinue } catch {}
+            Write-RunnerTrace ("RUNNER END: $([DateTime]::Now.ToString('s'))")
             exit 4
         }
         try { Remove-Item -Path $req.FullName -Force -ErrorAction SilentlyContinue } catch {}
-        "RUNNER END: $([DateTime]::Now.ToString('s'))" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace "RUNNER END: $([DateTime]::Now.ToString('s'))"
         exit 0
     }
 
@@ -441,21 +469,33 @@ try {
     }
 
     try {
-        $result | ConvertTo-Json -Compress | Set-Content -Path $outPath -Encoding UTF8
-        "WROTE RESULT: ExitCode=$exitCode DurationMs=$durationMs TimedOut=$timedOut Truncated=$truncated" | Add-Content -Path $RunnerLast -Encoding UTF8
+        $result | ConvertTo-Json -Compress | Write-TextFileAtomic -Path $outPath -Encoding (New-Object System.Text.UTF8Encoding($false))
+        Write-RunnerTrace "WROTE RESULT: ExitCode=$exitCode DurationMs=$durationMs TimedOut=$timedOut Truncated=$truncated"
     } catch {
-        "EXIT 4: failed to write result JSON: $($_.Exception.Message)" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace ("EXIT 4: failed to write result JSON: $($_.Exception.Message)")
+        try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".failed") -ErrorAction SilentlyContinue } catch {}
+        Write-RunnerTrace ("RUNNER END: $([DateTime]::Now.ToString('s'))")
         exit 4
     }
 
     try { Remove-Item -Path $req.FullName -Force -ErrorAction SilentlyContinue } catch {}
 
-    "RUNNER END: $([DateTime]::Now.ToString('s'))" | Add-Content -Path $RunnerLast -Encoding UTF8
+    Write-RunnerTrace "RUNNER END: $([DateTime]::Now.ToString('s'))"
     exit 0
 }
+catch {
+    Write-RunnerTrace ("UNHANDLED: " + $_.Exception.Message)
+    if ($req) {
+        try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".failed") -ErrorAction SilentlyContinue } catch {}
+    }
+    Write-RunnerTrace ("RUNNER END: $([DateTime]::Now.ToString('s'))")
+    exit 1
+}
 finally {
-    Release-WindoRunnerMutex -Mutex $m
-    Close-WindoRunnerMutex -Mutex $m
+    if ($m) {
+        Release-WindoRunnerMutex -Mutex $m
+        Close-WindoRunnerMutex -Mutex $m
+    }
 }
 
 

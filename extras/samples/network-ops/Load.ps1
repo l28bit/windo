@@ -144,8 +144,12 @@ function _netops_rdp_status {
         $svcState = 'Unknown'
         $svcStartup = 'Unknown'
     }
-    $fw = Get-NetFirewallRule -DisplayName 'Remote Desktop - User Mode (TCP-In)' -ErrorAction SilentlyContinue |
-        Where-Object { $_.Enabled -eq 'True' }
+    try {
+        $fw = Get-NetFirewallRule -DisplayName 'Remote Desktop - User Mode (TCP-In)' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Enabled -eq 'True' }
+    } catch {
+        $fw = @()
+    }
     return [pscustomobject]@{
         Protocol = 'RDP'
         AllowRegistry = $allowRdp
@@ -176,17 +180,23 @@ function _netops_vnc_status {
 }
 
 function _netops_wsl_distros {
-    $raw = & wsl.exe -l -v 2>$null
+    $wslExe = Get-Command wsl.exe -ErrorAction SilentlyContinue
+    if (-not $wslExe) { return @() }
+    try {
+        $raw = & $wslExe.Source -l -v 2>$null
+    } catch {
+        return @()
+    }
     $list = [System.Collections.ArrayList]@()
     if ($null -eq $raw) { return @() }
     foreach ($line in @($raw)) {
         $trim = [string]$line.Trim()
-        if ($trim -match '^(?:\*?\s+)?([^\s]+)\s+(\d+)\s+(\S+)$') {
+        if ($trim -match '^\*?\s+(?<name>[^\s]+)\s+(?<version>\d+)\s+(?<state>.+)$') {
             [void]$list.Add([pscustomobject]@{
                     IsDefault = $trim.StartsWith('*')
-                    Name = $Matches[1]
-                    Version = [int]$Matches[2]
-                    State = $Matches[3]
+                    Name = $Matches.name
+                    Version = [int]$Matches.version
+                    State = [string]$Matches.state.Trim()
                 })
         }
     }
@@ -195,7 +205,13 @@ function _netops_wsl_distros {
 
 function _netops_wsl_ip {
     param([Parameter(Mandatory)][string]$Distro)
-    $ipLine = & wsl.exe -d $Distro -- ip -4 -o addr show eth0 2>$null
+    $wslExe = Get-Command wsl.exe -ErrorAction SilentlyContinue
+    if (-not $wslExe) { return $null }
+    try {
+        $ipLine = & $wslExe.Source -d $Distro -- ip -4 -o addr show eth0 2>$null
+    } catch {
+        return $null
+    }
     if ($ipLine -match 'inet ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)') {
         return $Matches[1]
     }
@@ -1064,10 +1080,14 @@ $cmdRdpVnc = {
     )
 
     function _netops_build_rdp_payload {
-        param([Parameter(Mandatory)]$Rdp)
+        param(
+            [Parameter(Mandatory)]$Rdp,
+            [bool]$DryRun = $false
+        )
         return [ordered]@{
             subcommand = "status"
             scannedAt = (Get-Date -Format "o")
+            dryRun = [bool]$DryRun
             service = [ordered]@{
                 name = "TermService"
                 status = [string]$Rdp.Service
@@ -1090,6 +1110,45 @@ $cmdRdpVnc = {
         }
     }
 
+    function _netops_build_rdp_firewall_payload {
+        param(
+            [Parameter(Mandatory)][string]$Action,
+            [string[]]$RequestedPorts = @(),
+            [bool]$DryRun = $false,
+            [hashtable[]]$Rules = @(),
+            [string[]]$RunCommand = @(),
+            [string[]]$CommandExecuted = @(),
+            [hashtable[]]$Updates = @(),
+            [string]$Error = ""
+        )
+        $hasFailure = $false
+        if ($Action -eq 'status') {
+            $exitCode = if (@($Rules).Count -gt 0) { 0 } else { 2 }
+        } else {
+            foreach ($item in @($Updates)) {
+                if (-not $item.success) { $hasFailure = $true; break }
+            }
+            if ($DryRun) { $exitCode = 3 }
+            elseif ($hasFailure) { $exitCode = 2 }
+            elseif ($Error) { $exitCode = 2 }
+            elseif (@($Updates).Count -eq 0) { $exitCode = 2 }
+            else { $exitCode = 0 }
+        }
+        return [ordered]@{
+            subcommand = "firewall"
+            action = $Action
+            requestedPorts = @($RequestedPorts)
+            scannedAt = (Get-Date -Format "o")
+            dryRun = [bool]$DryRun
+            rules = @($Rules)
+            runCommand = @($RunCommand)
+            "command-executed" = @($CommandExecuted)
+            updates = @($Updates)
+            error = [string]$Error
+            exitCode = $exitCode
+        }
+    }
+
     if (-not _netops_is_admin) {
         if ($Mode -eq 'apply') {
             throw "apply mode requires an elevated shell."
@@ -1107,6 +1166,12 @@ $cmdRdpVnc = {
                 if (_netops_emit_payload -Command "rdp" -Payload @{
                         subcommand = "firewall"
                         action = "status"
+                        requestedPorts = @()
+                        dryRun = $false
+                        rules = @()
+                        runCommand = @()
+                        "command-executed" = @()
+                        updates = @()
                         error = "rdp protocol required for firewall operations"
                         exitCode = 2
                     } -AsJson:$AsJson) { return }
@@ -1115,11 +1180,27 @@ $cmdRdpVnc = {
             return
         }
 
-        $rules = Get-NetFirewallRule -DisplayName 'Remote Desktop - User Mode (TCP-In)' -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -and ($_.DisplayName.Contains("Remote Desktop")) }
+        $shouldApply = if ($Mode -eq 'apply' -and $FirewallAction -ne 'status' -and -not $Force) {
+            $PSCmdlet.ShouldProcess("RDP/VNC firewall settings", "apply")
+        } else {
+            $true
+        }
+        $dryRun = ($Mode -eq 'apply' -and $FirewallAction -ne 'status' -and -not $shouldApply)
+
+        try {
+            $rules = @(
+                Get-NetFirewallRule -DisplayName 'Remote Desktop - User Mode (TCP-In)' -ErrorAction SilentlyContinue |
+                    Where-Object { $_.DisplayName -and ($_.DisplayName.Contains("Remote Desktop")) }
+            )
+        } catch {
+            $rules = @()
+        }
+
         $ruleRows = [System.Collections.ArrayList]@()
         $runCommands = [System.Collections.ArrayList]@()
+        $executedCommands = [System.Collections.ArrayList]@()
         $updates = [System.Collections.ArrayList]@()
+        $errorMessage = ""
 
         foreach ($r in @($rules)) {
             [void]$ruleRows.Add([ordered]@{
@@ -1130,40 +1211,53 @@ $cmdRdpVnc = {
             if ($FirewallAction -in @('enable', 'disable')) {
                 $commandText = "{0} -Name '{1}' -Confirm:`$false" -f $(if ($FirewallAction -eq 'disable') { 'Disable-NetFirewallRule' } else { 'Enable-NetFirewallRule' }), [string]$r.Name
                 [void]$runCommands.Add($commandText)
-                [void]$updates.Add([ordered]@{
-                        name = [string]$r.Name
-                        action = $FirewallAction
-                        success = $true
-                    })
+                if (-not $shouldApply) {
+                    [void]$updates.Add([ordered]@{
+                            name = [string]$r.Name
+                            action = $FirewallAction
+                            success = $false
+                            error = "confirmation skipped"
+                            executed = $false
+                        })
+                    continue
+                }
+                try {
+                    if ($FirewallAction -eq 'disable') {
+                        Disable-NetFirewallRule -Name $r.Name -ErrorAction Stop | Out-Null
+                    } else {
+                        Enable-NetFirewallRule -Name $r.Name -ErrorAction Stop | Out-Null
+                    }
+                    [void]$executedCommands.Add($commandText)
+                    [void]$updates.Add([ordered]@{
+                            name = [string]$r.Name
+                            action = $FirewallAction
+                            success = $true
+                            error = ""
+                            executed = $true
+                        })
+                } catch {
+                    $message = $_.Exception.Message
+                    [void]$updates.Add([ordered]@{
+                            name = [string]$r.Name
+                            action = $FirewallAction
+                            success = $false
+                            error = [string]$message
+                            executed = $false
+                        })
+                    $errorMessage = [string]$message
+                }
             }
         }
 
         if ($FirewallAction -eq 'status') {
-            $firewallPayload = [ordered]@{
-                subcommand = "firewall"
-                action = "status"
-                requestedPorts = @()
-                rules = @($ruleRows)
-                scannedAt = (Get-Date -Format "o")
-                exitCode = 0
-            }
+            $firewallPayload = _netops_build_rdp_firewall_payload -Action "status" -RequestedPorts @('3389') -DryRun:$dryRun -RunCommand @($runCommands) -CommandExecuted @($executedCommands) -Rules @($ruleRows) -Updates @($updates)
             if (_netops_emit_payload -Command "rdp" -Payload $firewallPayload -AsJson:$AsJson) { return }
             return $firewallPayload
         }
 
-        $disablePayload = [ordered]@{
-            subcommand = "firewall"
-            action = [string]$FirewallAction
-            requestedPorts = @()
-            runCommand = @([string[]]$runCommands)
-            command = @([string[]]$runCommands)
-            "command-executed" = @([string[]]$runCommands)
-            updates = @($updates)
-            scannedAt = (Get-Date -Format "o")
-            exitCode = $(if ($updates.Count -gt 0) { 0 } else { 2 })
-        }
-        if (_netops_emit_payload -Command "rdp" -Payload $disablePayload -AsJson:$AsJson) { return }
-        return $disablePayload
+        $payload = _netops_build_rdp_firewall_payload -Action $FirewallAction -RequestedPorts @('3389') -DryRun:$dryRun -RunCommand @($runCommands) -CommandExecuted @($executedCommands) -Rules @($ruleRows) -Updates @($updates) -Error $errorMessage
+        if (_netops_emit_payload -Command "rdp" -Payload $payload -AsJson:$AsJson) { return }
+        return $payload
     }
 
     if ($Mode -eq 'check') {
@@ -1180,21 +1274,38 @@ $cmdRdpVnc = {
         return
     }
 
-    if (-not $Force -and -not $PSCmdlet.ShouldProcess("RDP/VNC control plane", "apply")) {
+    $shouldApply = if ($Mode -eq 'apply' -and -not $Force) {
+        $PSCmdlet.ShouldProcess("RDP/VNC control plane", "apply")
+    } else {
+        $true
+    }
+    if (-not $shouldApply) {
+        if ($rdpEnabled) {
+            if ($Protocol -eq 'rdp') {
+                $payload = _netops_build_rdp_payload -Rdp (_netops_rdp_status) -DryRun $true
+                if (_netops_emit_payload -Command "rdp" -Payload $payload -AsJson:$AsJson) { return }
+            }
+            if (-not $AsJson -or $Protocol -ne 'rdp') {
+                _netops_rdp_status
+            }
+        }
+        if ($vncEnabled) { _netops_vnc_status }
         return
     }
 
     if ($rdpEnabled) {
-        Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Type DWord -Value 0 -Force | Out-Null
-        Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name UserAuthentication -Type DWord -Value 1 -Force | Out-Null
-        try { Enable-NetFirewallRule -DisplayName 'Remote Desktop - User Mode (TCP-In)' | Out-Null } catch {}
-        try {
-            Get-Service -Name TermService -ErrorAction Stop | Set-Service -StartupType Automatic
-            if ((Get-Service -Name TermService).Status -ne 'Running') { Start-Service -Name TermService -ErrorAction SilentlyContinue }
-        } catch {}
+        if ($shouldApply) {
+            Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Type DWord -Value 0 -Force | Out-Null
+            Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name UserAuthentication -Type DWord -Value 1 -Force | Out-Null
+            try { Enable-NetFirewallRule -DisplayName 'Remote Desktop - User Mode (TCP-In)' | Out-Null } catch {}
+            try {
+                Get-Service -Name TermService -ErrorAction Stop | Set-Service -StartupType Automatic
+                if ((Get-Service -Name TermService).Status -ne 'Running') { Start-Service -Name TermService -ErrorAction SilentlyContinue }
+            } catch {}
+        }
     }
 
-    if ($vncEnabled) {
+    if ($vncEnabled -and $shouldApply) {
         foreach ($port in 5900, 5901) {
             $name = 'WINDO-VNC-' + $port
             if (-not (Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue)) {
@@ -1242,7 +1353,7 @@ $cmdWsl = {
     if ($Mode -in @('status', 'check')) {
         if ($wslExe) {
             try {
-                $statusOutput = & wsl.exe --status 2>&1
+                $statusOutput = & $wslExe.Source --status 2>&1
                 $statusExitCode = if ($LASTEXITCODE -ne $null) { [int]$LASTEXITCODE } else { 0 }
             } catch {
                 $statusOutput = @()

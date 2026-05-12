@@ -128,7 +128,9 @@ function Remove-ExistingWindoBlockFromProfile {
     $repaired = Repair-WindoProfileText -Text $text
     if ($repaired -ne $text) {
         Write-Utf8NoBomFile -Path $PROFILE -Content ($repaired.TrimEnd() + "`r`n")
+        return $true
     }
+    return $false
 }
 
 function Repair-WindoProfileText {
@@ -833,7 +835,12 @@ $Manifest | ConvertTo-Json -Depth 6 | Set-Content -Path $ManifestFile -Encoding 
 Write-WindoInstallStep -Status ok -Label "Integrity manifest written" -Color Green
 
 Write-WindoInstallStep -Status run -Label "Refreshing PowerShell profile block" -Detail $PROFILE
-Remove-ExistingWindoBlockFromProfile
+$repairedProfile = Remove-ExistingWindoBlockFromProfile
+if ($repairedProfile) {
+    Write-WindoInstallStep -Status ok -Label "Existing WINDO block normalized" -Detail "legacy markers removed from profile" -Color Green
+} else {
+    Write-WindoInstallStep -Status skip -Label "Profile block scan" -Detail "no legacy WINDO markers to remove" -Color DarkGray
+}
 Ensure-ProfileExists
 
 $WindoFunctionBody = @'
@@ -3113,7 +3120,8 @@ Use: windo prompt --json   (machine-readable bundle)
                 _windo_set_exit 0
                 return
             }
-            Write-Host "[windo] Starting installer. When it finishes, reload: . `$PROFILE" -ForegroundColor Yellow
+Write-Host '[windo] Starting installer. After it exits, reopen this shell and run . $PROFILE (or open a new shell) before continuing.' -ForegroundColor Yellow
+Write-Host "      This ensures the refreshed WINDO function is loaded in your active session." -ForegroundColor DarkGray
             _windo_start_downloaded_installer -ScriptPath $TempInst
         } catch {
             Write-Host "[windo] Could not install from Exodus: $($_.Exception.Message)" -ForegroundColor Red
@@ -10001,7 +10009,7 @@ if (Test-Path -LiteralPath $PROFILE) {
 }
 $block = $BeginMarker + "`r`n" + $WindoFunctionBody + "`r`n" + $WindoPsReadLineBlock + "`r`n" + $WindoCompleterBlock + "`r`n" + $WindoModulesLoaderBlock + "`r`n" + $EndMarker + "`r`n"
 Write-Utf8NoBomFile -Path $PROFILE -Content ($profileText.TrimEnd() + "`r`n`r`n" + $block)
-Write-WindoInstallStep -Status ok -Label "PowerShell profile refreshed" -Color Green
+Write-WindoInstallStep -Status ok -Label "WINDO profile block written" -Color Green
 
 Write-WindoInstallStep -Status run -Label "Writing local snapshot" -Detail $SnapshotDir
 if (!(Test-Path $SnapshotDir)) { New-Item -ItemType Directory -Path $SnapshotDir | Out-Null }
@@ -10026,7 +10034,8 @@ Write-Host ""
 Write-WindoInstallStep -Status ok -Label "WINDO v$WindoVersion Special Edition installed" -Detail "snapshot: $SnapshotDir" -Color Green
 Write-Host ""
 Write-Host "  Next in a normal shell:" -ForegroundColor Yellow
-Write-Host "    . `$PROFILE" -ForegroundColor Yellow
+Write-Host '    . $PROFILE' -ForegroundColor Yellow
+Write-Host '  After upgrade, run . $PROFILE in each long-lived host (or open a new shell) to load the updated function.' -ForegroundColor Yellow
 Write-Host "    windo preflight" -ForegroundColor Yellow
 Write-Host "    windo dashboard --html" -ForegroundColor Yellow
 Write-Host "    windo version" -ForegroundColor Yellow

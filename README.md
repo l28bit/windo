@@ -13,13 +13,18 @@ Experienced operators treat commands as intent. Elevation should not be accident
 
 **intent → choose elevation → execute with authority**
 
-The default GitHub branch for raw URLs is **`Exodus`** unless overridden by `WINDO_TRACKING_BRANCH`.
+The default GitHub branch for raw URLs is **`Prometheus`** unless overridden by `WINDO_TRACKING_BRANCH`.
+
+Release source contract:
+- `WINDO_RELEASE_COMMIT` (optional valid 40-hex commit) has highest priority.
+- `WINDO_TRACKING_BRANCH` (default `Prometheus`) is the fallback branch.
+- invalid overrides fall back to `Prometheus` automatically.
 
 ---
 
-## What's new in WINDO V6
+## What's new in WINDO V8.4
 
-- **V6 command surface and branding** — refreshed installer identity (`WINDO 6.0.0 V6`) and aligned README guidance for concise operator workflows.
+- **V8.4 command surface and branding** — refreshed installer identity (`WINDO 8.4.0 V8.4`) and aligned README guidance for concise operator workflows.
 - **Network posture in one command** — `windo net-scan` now covers `status`, `resolve`, `arp`, and `ping` with clear local-only behavior and bounded probing defaults.
 - **Container handoff** — `windo container` now provides a validated docker/podman control surface with `--runtime` explicitness and safe defaults.
 - **NetOps companion module** — `extras/network-ops` adds `netops-*` local helpers for subnet scan, ARP map, RDP/VNC posture checks, and WSL access helpers.
@@ -47,13 +52,13 @@ WINDO does **not** bypass Windows security boundaries; it uses a controlled elev
 
 ## Install / Update
 
-**Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1), saves `windo_install.ps1` to a **temp file**, verifies its checksum when published on the default `Exodus` branch (or overridden via `WINDO_TRACKING_BRANCH`), then starts it from the temp file. The **full installer is not** piped through `Invoke-Expression`. The temp file is removed afterward.
+- **Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/Prometheus/bootstrap.ps1), saves `windo_install.ps1` to a **temp file**, verifies its checksum when published on the configured tracking source (or overridden via `WINDO_TRACKING_BRANCH` / `WINDO_RELEASE_COMMIT`), then starts it from the temp file. The **full installer is not** piped through `Invoke-Expression`. The temp file is removed afterward.
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1)
+iex (irm https://raw.githubusercontent.com/l28bit/windo/Prometheus/bootstrap.ps1)
 ```
 
-Use a **standard (non-elevated)** session for bootstrap handoff. If you need strict install verification in automated `install-latest`/`upgrade` flows, pair `WINDO_STRICT_INSTALLER_VERIFICATION=1` with `windo install-latest --force` or `WINDO_INSTALL_NONINTERACTIVE=1`.
+Use a **standard (non-elevated)** session for bootstrap handoff. If you need strict install verification in automated `install-latest`/`upgrade` flows, pair `WINDO_STRICT_INSTALLER_VERIFICATION=1` with `windo install-latest --force --non-interactive` or `WINDO_INSTALL_NONINTERACTIVE=1`.
 
 **Upgrade from any installed v2.x / v3.x:** with WINDO loaded in your profile, run **`windo install-latest`** from a **normal (non-elevated)** window. The installer is **not** downloaded while Administrator (avoids high-privilege fetch). After checksum verification you get a **prompt** before the installer runs; in interactive sessions WINDO then requests **UAC elevation** so scheduled tasks and secure-dir ACL work can complete. Use **`windo install-latest --force`** or **`WINDO_INSTALL_NONINTERACTIVE=1`** in CI/automation.
 
@@ -65,6 +70,13 @@ windo install-latest
 
 After answering the installer confirmation prompt, WINDO performs a one-shot elevated handoff attempt (UAC) to complete runner/task registration and secure-dir updates.
 
+If elevation is blocked, use one of these recovery commands from a normal shell:
+
+```powershell
+Start-Process pwsh.exe -Verb RunAs -ArgumentList '-NoProfile','-Command','windo install-latest'
+windo self-update
+```
+
 **Bootstrap** (`iex (irm …/bootstrap.ps1)`): same rule—**do not run from an elevated shell**; the script exits with instructions. After download it is prompted before launch (or set **`WINDO_BOOTSTRAP_FORCE_INSTALL=1`** / **`WINDO_INSTALL_NONINTERACTIVE=1`** / **`CI`** for unattended).
 
 ## Troubleshooting install/update and verification behavior
@@ -75,7 +87,8 @@ After answering the installer confirmation prompt, WINDO performs a one-shot ele
   - run in a normal shell by default,
   - prompt before launch when interactive,
   - skip confirmation in non-interactive mode (`--non-interactive` / `CI` / `WINDO_INSTALL_NONINTERACTIVE` / `WINDO_BOOTSTRAP_FORCE_INSTALL`).
-  - source contract for prompts and checksum checks comes from the canonical `Exodus` branch artifacts.
+  - `--non-interactive` still requires `--force` for `install-latest`/`upgrade`; `CI` and bootstrap env flags auto-skip when set.
+- source contract for prompts and checksum checks comes from the canonical `Prometheus` branch artifacts.
   - `windo self-update` follows the same interactive contract and branch/source checks as install flows.
   - prompts before launching installer repair when required in interactive sessions,
   - skips the repair prompt in non-interactive mode and returns a repair recommendation instead.
@@ -111,7 +124,15 @@ If you see an old/foreign prompt (for example `Input content`) while running ins
 
 Or use the bootstrap one-liner above, or run `.\windo_install.ps1` from a clone. There is no version gate: the installer replaces the WINDO profile block and refreshes secure-dir artifacts.
 
-**Remove WINDO completely:** run **`windo uninstall`** (or **`windo remove`**) from a normal shell. WINDO prefers the bundled local **`%USERPROFILE%\.pwsh_secure\windo_uninstall.ps1`** and starts it elevated with UAC; if the local copy is missing it falls back to the published raw uninstaller from the configured raw branch (default `Exodus`). After your profile is loaded you can also run **`windo-uninstall`** (alias: **`windoremove`**) directly. Optional **`-KeepSnapshots`** / **`--keep-snapshots`** keeps `%USERPROFILE%\Documents\windo\`. The uninstaller removes WINDO marker blocks from the known **current-user** PowerShell profiles for **pwsh** and **Windows PowerShell**.
+### Legacy prompt recovery
+
+If an old/foreign installer prompt appears:
+
+- run the command from a clean **non-elevated** session,
+- set `WINDO_INSTALL_NONINTERACTIVE=1` for automation reruns (where prompts are intentionally suppressed),
+- sanitize unexpected host prompts by clearing `SUDO_PROMPT` (`Remove-Item Env:SUDO_PROMPT`).
+
+**Remove WINDO completely:** run **`windo uninstall`** (or **`windo remove`**) from a normal shell. WINDO prefers the bundled local **`%USERPROFILE%\.pwsh_secure\windo_uninstall.ps1`** and starts it elevated with UAC; if the local copy is missing it falls back to the published raw uninstaller from the configured raw branch (default `Prometheus`). After your profile is loaded you can also run **`windo-uninstall`** (alias: **`windoremove`**) directly. Optional **`-KeepSnapshots`** / **`--keep-snapshots`** keeps `%USERPROFILE%\Documents\windo\`. The uninstaller removes WINDO marker blocks from the known **current-user** PowerShell profiles for **pwsh** and **Windows PowerShell**.
 
 **Offline / clone:** run the installer from disk:
 
@@ -178,12 +199,12 @@ For a concise terminal workflow that covers install → upgrade → self-update 
 | `windo source [--json]` | **v3.6.4+** Show published installer source/version/checksum and local snapshot alignment. |
 | `windo trust [--online] [--json]` | **v3.5.0+** Score local trust posture and optionally compare the installer snapshot against the published checksum. |
 | `windo scan [path...] [--recurse] [--max-mb N] [--no-hash] [--json]` | **v4.1.0+** Local posture scanner for scripts, launchable files, Mark-of-the-Web, hashes, and suspicious text patterns. |
-| `windo net-scan [status] [--json]` \| `windo net-scan resolve <host...> [--json]` \| `windo net-scan arp [--interface <alias>] [--include-stale] [--json]` \| `windo net-scan ping <cidr \| host...> [--timeout <seconds>] [--host-limit N] [--ports <port,...>] [--json]` | **v6.0.0+** Local network posture and reachable-host checks (`status`, `resolve`, `arp`, `ping`) with bounded default probing (`hostLimit=254`, `timeout=1`) and consistent JSON payloads. |
-| `windo rdp [status\|firewall\|config\|troubleshoot] [--json]` | **v6.0.0+** RDP posture checks and firewall posture actions with consistent JSON payloads (`status`, `firewall`, `config`, `troubleshoot`). |
-| `windo wsl [status\|list\|ls\|check\|version\|install\|convert\|inspect\|exec\|launch\|path\|import\|export] [--json]` | **v6.0.0+** WSL availability, conversion/import/export workflows, inspection, command forwarding, and runtime launch strategies with `--dry-run` and JSON payloads. |
+| `windo net-scan [status] [--json]` \| `windo net-scan resolve <host...> [--json]` \| `windo net-scan arp [--interface <alias>] [--include-stale] [--json]` \| `windo net-scan ping <cidr \| host...> [--timeout <seconds>] [--host-limit N] [--ports <port,...>] [--json]` | **v8.4.0+** Local network posture and reachable-host checks (`status`, `resolve`, `arp`, `ping`) with bounded default probing (`hostLimit=254`, `timeout=1`) and consistent JSON payloads. |
+| `windo rdp [status\|firewall\|config\|troubleshoot] [--json]` | **v8.4.0+** RDP posture checks and firewall posture actions with consistent JSON payloads (`status`, `firewall`, `config`, `troubleshoot`). |
+| `windo wsl [status\|list\|ls\|check\|version\|install\|convert\|inspect\|exec\|launch\|path\|import\|export] [--json]` | **v8.4.0+** WSL availability, conversion/import/export workflows, inspection, command forwarding, and runtime launch strategies with `--dry-run` and JSON payloads. |
 | `windo vault status\|list\|set\|get\|remove` | **v4.1.0+** DPAPI CurrentUser secret vault under `.pwsh_secure`. Useful for API keys and local operator secrets. |
 | `windo sshx status\|keygen\|config\|test` | **v4.1.0+** OpenSSH helper for tool status, ed25519 key generation, `.ssh\config`, and SSH tests. |
-| `windo container [ps\|images\|status\|logs\|restart\|start\|stop\|rmi\|rm\|pull] [--runtime docker\|podman\|auto]` | **v6.0.0+** Container runtime passthrough (docker/podman) with explicit runtime selection (`--runtime auto` prefers docker when both are available). |
+| `windo container [ps\|images\|status\|logs\|restart\|start\|stop\|rmi\|rm\|pull] [--runtime docker\|podman\|auto]` | **v8.4.0+** Container runtime passthrough (docker/podman) with explicit runtime selection (`--runtime auto` prefers docker when both are available). |
 | `windo crypto status\|cert\|key\|hash` | **v4.1.0+** Certificate, key, and SHA256 helper backed by local OpenSSL/certutil/Get-FileHash. |
 | `windo syntax [query] [--json]` / `windo syntax doctor [query] [--json]` | **v3.6.0+** Read-only intent-to-command planner with preview commands, risk notes, aliases, and **v3.6.5+** intent diagnosis. |
 | `windo mesh [doctor\|workbench] [--json] [--html [--output path\|--output=path]] [--open]` | **v3.6.6+** Read-only Operator Mesh preview; **v3.6.8+** readiness scoring; **v4.0.0+** workflow workbench lanes and optional local HTML workbench. |
@@ -198,11 +219,11 @@ For a concise terminal workflow that covers install → upgrade → self-update 
 | `windo stats [--since YYYY-MM-DD] [--last-days N]` | Audit log summary; optional filters on decrypted entry **`Timestamp`** (still scans full log to decrypt). **`--last-days`** must be a **positive** integer; **`--since`** and **`--last-days`** are mutually exclusive. |
 | `windo profile [status\|doctor\|repair] [--prompt-init] [--all] [--json]` | Show known profile paths, WINDO block state, and prompt-init issues. **v4.2.0+** can guard oh-my-posh init so missing cached prompt scripts do not break profile load. |
 | `windo cleanup [-w]` | Back up log to `.pwsh_secure`, clear active log, remove pending req/res JSON. Optional `-w` is accepted for compatibility and ignored. |
-| `windo install-latest [--force] [--non-interactive] [--timeout <seconds|ms>] [--preserve-env [ALL\|name1,name2]]` | **v3.1.0+** Download and run the latest `windo_install.ps1` from **`v6`**. **v3.1.1+:** download only in a **non-elevated** shell; **confirm** after verify, then run installer ( **`--force`** / env for CI). |
+| `windo install-latest [--force] [--non-interactive] [--timeout <seconds|ms>] [--preserve-env [ALL\|name1,name2]]` | **v3.1.0+** Download and run the latest `windo_install.ps1` from the configured tracking source (default `Prometheus`). **v3.1.1+:** download only in a **non-elevated** shell; **confirm** after verify, then run installer ( **`--force`** / env for CI). |
 | `windo upgrade` | Alias of **`install-latest`**. |
 | `windo theme [classic \| modern \| auto]` | **v3.1.0+** Choose **CLI JSON** “look” only: **`classic`** = `schemaVersion` **2.6** without **`meta`**; **`modern`** = **3.0** + **`meta`**; **`auto`** = follow the embedded profile. Runner, tasks, and audit **do not** change—see [`docs/json-schema.md`](docs/json-schema.md). |
 | `windo modules list \| enable \| disable \| doctor \| verify` | **v3.2.0+** Optional modules under **`Documents\windo\modules`** (see **`windo help modules`**); enabled ids persist in **`windo_prefs.json`**. |
-| `windo netops-resolve \| netops-subnet-scan \| netops-arp-map \| netops-rdp-vnc \| netops-wsl` | **v6.0.0+ (module)** Optional **`extras/samples/network-ops`** module helpers; return local PowerShell objects (no WINDO JSON envelope). |
+| `windo netops-resolve \| netops-subnet-scan \| netops-arp-map \| netops-rdp-vnc \| netops-wsl` | **v8.4.0+ (module)** Optional **`extras/samples/network-ops`** module helpers; return local PowerShell objects (no WINDO JSON envelope). |
 | `windo recipes [list] \| show \| preview \| run` / `windo run --recipe <name>` | **v3.2.0+** Built-in elevated **recipe** templates (bundled data, not arbitrary script). **v3.6.0+** adds first-class preview and recipe dry-run payloads. **v3.6.9+** expands the catalog into a broad read-only operator atlas; optional tool recipes report gracefully when the tool is absent. |
 | `windo venv create\|activate\|deactivate\|status\|remove` | **v4.0.1+** Local Python virtual environment helper. Activation affects the current shell by dot-sourcing `Activate.ps1`. |
 | `windo pkg status` / `windo pkg winget\|choco\|scoop <args...>` | **v4.0.1+** Package-manager handoff with clearer status and manager-specific guidance before elevation. |
@@ -218,7 +239,7 @@ Append **`--json`** or **`-Json`** to supported commands for structured output. 
 
 Append **`--dry-run`** (or **`-DryRun`**) on elevated commands or `windo replay` / `windo !!` to print what would run **without** starting the task, writing req/res files, or appending the audit log. **`windo self-update --dry-run`** prints that the update task would be started only.
 
-### V6 example commands
+### V8.4 example commands
 
 These show the safer defaults and explicit options introduced for network scanning and container handoff:
 
@@ -239,7 +260,7 @@ Representative `windo net-scan ping` JSON payload (safe default `hostLimit=254`,
 ```json
 {
   "schemaVersion": "3.0",
-  "windoVersion": "6.0.0",
+  "windoVersion": "8.4.0",
   "command": "net-scan",
   "generatedAt": "2026-05-08T18:00:00.0000000-05:00",
   "meta": {
@@ -306,7 +327,7 @@ windo keybindings safe-reset
 
 `safe-reset` removes legacy WINDO handlers, reapplies `Alt+w`, and then applies fallback logic in one command.
 
-**Shortcut:** **`windo repair`** (same as **`windo repair all`**) runs that safe-reset and prints reminders to **`. $PROFILE`** and run **`windo install-latest`** from a normal shell when your installed profile lags **`v6`**.
+**Shortcut:** **`windo repair`** (same as **`windo repair all`**) runs that safe-reset and prints reminders to **`. $PROFILE`** and run **`windo install-latest`** from a normal shell when your installed profile is behind the configured release source.
 
 To keep the classic style everywhere, set `WINDO_PREFIX_CHORD=Alt+w` (or your preferred chord) in your profile session and avoid `windo keybindings` edits for that machine.
 
@@ -364,11 +385,14 @@ Optional **modules** and **extras** (v3.2+): [`docs/modules-and-extras.md`](docs
 | `WINDO_RUNNER_TIMEOUT_MS` | Max wait for the elevated child process (default **7200000** ms = 2 h; max **86400000**). |
 | `WINDO_RUNNER_MAX_OUTPUT_BYTES` | Approximate cap on captured stdout+stderr (default **4194304**; split per stream in the runner). |
 | `WINDO_MAX_COMMAND_CHARS` | Max length of the command line passed to `cmd.exe` (default **8191**). |
+| `WINDO_TRACKING_BRANCH` | Override tracking branch used for installer source checks (default `Prometheus`). |
+| `WINDO_RELEASE_COMMIT` | Optional pinned 40-hex commit hash for release artifact lookups (`bootstrap.ps1`, `windo_install.ps1`). |
 | `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the configured branch (`bootstrap.ps1`, **`windo install-latest`** / **`upgrade`**). |
 | `WINDO_STRICT_INSTALLER_VERIFICATION` | Set to `1` for strict installer hash checking. |
 | `WINDO_JSON_ENVELOPE` | **v3.1.0+** Optional override for **`--json`** envelope shape: **`classic`** (2.6, no **`meta`**), **`modern`** (3.0 + **`meta`**), or **`auto`**. Overrides **`windo_prefs.json`** when set (see [`docs/json-schema.md`](docs/json-schema.md)). Does not change runner or security behavior. |
 | `SUDO_TIMEOUT` | Per-command override (seconds or `ms`, e.g. `10`, `10s`, `500ms`) for the `--timeout` flag when not passed explicitly. |
 | `SUDO_PROMPT` | Optional custom text for the `windo install-latest` confirmation prompt. |
+| `WINDO_SESSION_AUDIT` | Set to `1` to include caller context and handoff correlation fields in elevated install handoff audit entries (`windo_history.enc`). |
 | `WINDO_PREFIX_CHORD` | Set explicit prefix chord for keybinding injection (`Alt+w`, `Ctrl+Alt+w`, etc). Avoid plain `w,w` unless you intentionally accept that keying any line starting with `w` may be affected. |
 | `WINDO_DISABLE_PSREADLINE_BINDINGS` | Set to `1`/`true` to disable WINDO keybindings for the session. |
 | `WINDO_AUTO_DETECT_ALT_BINDINGS` | Set to `0`/`false` to disable automatic fallback for Alt-based chords (default: enabled). |

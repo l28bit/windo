@@ -2,9 +2,13 @@
 
 This concise flow covers install/upgrade/self-update/task repair/history from one terminal.
 
+Default source contract:
+- Bootstrap/install flows use the `Prometheus` branch by default.
+- override with `WINDO_TRACKING_BRANCH` or pin via `WINDO_RELEASE_COMMIT`.
+
 ```powershell
 # 1) Fresh install (official path)
-iex (irm https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1)
+iex (irm https://raw.githubusercontent.com/l28bit/windo/Prometheus/bootstrap.ps1)
 ```
 
 ```text
@@ -23,11 +27,17 @@ windo upgrade
 
 ```text
 [windo] install-latest: download is not performed while running as Administrator.
-[windo] Download finished; checksum verified when published on Exodus.
+[windo] Download finished; checksum verified when published on the configured branch (default `Prometheus`).
 [windo] The installer is ready. You can review the file before continuing: %TEMP%\windo_install.ps1
 [windo] Run the installer now? (If approved, this same command relaunches elevated to register tasks.) [y/N]
-[windo] Starting installer (pwsh.exe). When it finishes, reload: . $PROFILE
+[windo] Starting installer (pwsh.exe). After it exits, reopen this shell and run `. $PROFILE` (or open a new shell) to load the upgraded profile block.
+[windo] Installer launch was declined. Update handoff was not applied.
+[windo] Recovery one-liners:
+[windo]   Start-Process pwsh.exe -Verb RunAs -ArgumentList '-NoProfile','-Command','windo install-latest'
+[windo]   windo self-update
 ```
+
+### Legacy prompt recovery
 
 ```powershell
 # 2d) Legacy prompt check: if you see unfamiliar text like `Input content`
@@ -39,6 +49,8 @@ windo install-latest
 If WINDO is showing an extra legacy `Read-Host`-style prompt, start from a clean, non-elevated shell (or clear `SUDO_PROMPT`) and rerun.
 ```
 
+### Compatibility behavior check
+
 ```powershell
 # 2c) Contract note: strict mode is opt-in and fail-fast
 $env:WINDO_STRICT_INSTALLER_VERIFICATION = 1
@@ -47,7 +59,7 @@ windo install-latest --force
 
 ```text
 [windo] strict mode is enabled: checksum/source/branch compatibility mismatches now fail fast.
-[windo] Installer path remains the same default branch artifact path on v6.
+[windo] Installer path remains the same default branch artifact path on `Prometheus`.
 ```
 
 ```powershell
@@ -72,7 +84,7 @@ windo self-update
 ```
 
 ```powershell
-# 3c) Contract note: repair prompts are interactive-only
+# 3c) Contract note: repair prompts and non-interactive flow
 $env:CI = 1
 windo self-update
 ```

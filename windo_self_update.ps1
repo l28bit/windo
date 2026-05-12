@@ -1,9 +1,9 @@
 $ErrorActionPreference = "Stop"
 
-$RunnerPath = "C:\Users\<user>\.pwsh_secure\windo_runner.ps1"
-$StampFile  = "C:\Users\<user>\.pwsh_secure\windo_self_update_last.txt"
+$RunnerPath = "__RUNNER_PATH__"
+$StampFile  = "__STAMP_FILE__"
 $TaskName   = "WindoElevatedRunner"
-$UserId     = "DOMAIN\User"
+$UserId     = "__USER_ID__"
 
 function Write-TextFileAtomic {
     param(
@@ -33,15 +33,15 @@ function Get-WindoScheduledTask {
 }
 
 function Set-WindoScheduledTask {
-    param([Parameter(Mandatory=$true)][string]$TaskName, [Parameter(Mandatory=$true)][object]$Action)
+    param([Parameter(Mandatory=$true)][string]$TaskName, [Parameter(Mandatory=$true)]$Action)
     Set-ScheduledTask -TaskName $TaskName -Action $Action | Out-Null
 }
 
 function Register-WindoScheduledTask {
     param(
         [Parameter(Mandatory=$true)][string]$TaskName,
-        [Parameter(Mandatory=$true)][object]$Action,
-        [Parameter(Mandatory=$true)][object]$Principal,
+        [Parameter(Mandatory=$true)]$Action,
+        [Parameter(Mandatory=$true)]$Principal,
         [Parameter(Mandatory=$true)]$Settings
     )
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Principal $Principal -Settings $Settings -Force | Out-Null
@@ -65,17 +65,24 @@ function New-WindoScheduledTaskSettingsSet {
 "SELF-UPDATE START" | Write-TextFileAtomic -Path $StampFile -Encoding (New-Object System.Text.UTF8Encoding($false))
 
 try {
-    Import-Module ScheduledTasks -ErrorAction Stop
-    Write-Trace "Imported ScheduledTasks"
+    try {
+        Import-Module ScheduledTasks -ErrorAction Stop
+        Write-Trace "Imported ScheduledTasks"
+    } catch {
+        Write-Trace "ScheduledTasks module unavailable; task maintenance is not possible in this context."
+        Write-Trace "SELF-UPDATE END (SKIPPED)"
+        exit 0
+    }
 
     $PwshwCmd = Get-Command "pwshw.exe" -ErrorAction SilentlyContinue
+    $escapedRunnerPath = $RunnerPath.Replace("'", "''")
     if ($PwshwCmd) {
         $Exe = $PwshwCmd.Source
-        $Arg = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $RunnerPath + '"'
+        $Arg = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '$escapedRunnerPath'"
         Write-Trace ("Using pwshw.exe: " + $Exe)
     } else {
         $Exe = "powershell.exe"
-        $Arg = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $RunnerPath + '"'
+        $Arg = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File '$escapedRunnerPath'"
         Write-Trace "Using powershell.exe hidden fallback"
     }
 
@@ -83,12 +90,57 @@ try {
 
     try {
         Get-WindoScheduledTask -TaskName $TaskName | Out-Null
-        Set-WindoScheduledTask -TaskName $TaskName -Action $Action
+        Set-WindoScheduledTask -TaskName $TaskName -Action $Action | Out-Null
+        $updated = Get-WindoScheduledTask -TaskName $TaskName -ErrorAction Stop
+        $updatedAction = @($updated.Actions | Select-Object -First 1)
+        if (
+            $null -eq $updatedAction -or
+            $updatedAction.Count -eq 0 -or
+            ([string]$updatedAction[0].Execute -ine $Exe) -or
+            ([string]$updatedAction[0].Arguments -ine $Arg) -or
+            ($null -eq $updated.Principal) -or
+            ([string]$updated.Principal.UserId -ine $UserId) -or
+            ([string]$updated.Principal.RunLevel -ne "Highest") -or
+            ($null -eq $updated.Settings) -or
+            (-not $updated.Settings.StartWhenAvailable) -or
+            (-not $updated.Settings.AllowStartIfOnBatteries) -or
+            (-not $updated.Settings.DontStopIfGoingOnBatteries)
+        ) {
+            Write-Trace ("VERIFY failed for " + $TaskName + " after update")
+            Write-Trace ("EXPECTED: " + $Exe + " " + $Arg)
+            if ($null -ne $updatedAction -and $updatedAction.Count -gt 0) {
+                Write-Trace ("ACTUAL: " + [string]$updatedAction[0].Execute + " " + [string]$updatedAction[0].Arguments)
+            }
+            exit 1
+        }
         Write-Trace ("Updated main task action -> " + $Exe + " " + $Arg)
     } catch {
         $Principal = New-WindoScheduledTaskPrincipal -UserId $UserId -LogonType Interactive
         $Settings  = New-WindoScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-        Register-WindoScheduledTask -TaskName $TaskName -Action $Action -Principal $Principal -Settings $Settings
+        Register-WindoScheduledTask -TaskName $TaskName -Action $Action -Principal $Principal -Settings $Settings | Out-Null
+        $updated = Get-WindoScheduledTask -TaskName $TaskName -ErrorAction Stop
+        $updatedAction = @($updated.Actions | Select-Object -First 1)
+        if (
+            $null -eq $updated -or
+            $null -eq $updatedAction -or
+            $updatedAction.Count -eq 0 -or
+            ([string]$updatedAction[0].Execute -ine $Exe) -or
+            ([string]$updatedAction[0].Arguments -ine $Arg) -or
+            $null -eq $updated.Principal -or
+            ([string]$updated.Principal.UserId -ine $UserId) -or
+            ([string]$updated.Principal.RunLevel -ne "Highest") -or
+            ($null -eq $updated.Settings) -or
+            (-not $updated.Settings.StartWhenAvailable) -or
+            (-not $updated.Settings.AllowStartIfOnBatteries) -or
+            (-not $updated.Settings.DontStopIfGoingOnBatteries)
+        ) {
+            Write-Trace ("VERIFY failed for recreated " + $TaskName + " after registration")
+            Write-Trace ("EXPECTED: " + $Exe + " " + $Arg)
+            if ($null -ne $updatedAction -and $updatedAction.Count -gt 0) {
+                Write-Trace ("ACTUAL: " + [string]$updatedAction[0].Execute + " " + [string]$updatedAction[0].Arguments)
+            }
+            exit 1
+        }
         Write-Trace ("Recreated main task -> " + $Exe + " " + $Arg)
     }
 

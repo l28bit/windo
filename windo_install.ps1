@@ -51,12 +51,12 @@ $script:WindoScheduledTasksAvailable = $false
 $script:WindoWindowsFormsDrawingAvailable = $false
 
 function Get-WindoRuntimeProfile {
-$isWindowsRuntime = $null -ne $IsWindows -and [bool]$IsWindows
-if (-not $isWindowsRuntime) {
+    $isWindows = $null -ne $IsWindows -and [bool]$IsWindows
+    if (-not $isWindows) {
         try {
-        $isWindowsRuntime = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
+            $isWindows = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
         } catch {
-        $isWindowsRuntime = $false
+            $isWindows = $false
         }
     }
 
@@ -81,7 +81,7 @@ if (-not $isWindowsRuntime) {
     $supportsWebCmdlets = [bool](Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue) -and [bool](Get-Command Invoke-RestMethod -ErrorAction SilentlyContinue)
 
     $windowsFormsDrawingAvailable = $false
-    if ($isWindowsRuntime) {
+    if ($isWindows) {
         try {
             Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop | Out-Null
             Add-Type -AssemblyName System.Drawing -ErrorAction Stop | Out-Null
@@ -92,7 +92,7 @@ if (-not $isWindowsRuntime) {
     }
 
     return [pscustomobject]@{
-        IsWindows = [bool]$isWindowsRuntime
+        IsWindows = [bool]$isWindows
         IsWindows10OrLater = if ($null -ne $osVersion) { $osVersion.Major -ge 10 } else { $false }
         IsPowerShellSupported = if ($null -ne $psVersion) { $psVersion -ge [version]'5.1' } else { $false }
         PSVersion = if ($null -ne $psVersion) { [string]$psVersion } else { "unknown" }
@@ -108,44 +108,44 @@ if (-not $isWindowsRuntime) {
 }
 
 function Assert-WindoHostCompatibility {
-    $runtimeProfile = Get-WindoRuntimeProfile
-    Write-WindoInstallStep -Status run -Label "Runtime preflight" -Detail "PS $($runtimeProfile.PSVersion) / Windows $($runtimeProfile.IsWindows10OrLater) / arch=$($runtimeProfile.Environment)"
+    $profile = Get-WindoRuntimeProfile
+    Write-WindoInstallStep -Status run -Label "Runtime preflight" -Detail "PS $($profile.PSVersion) / Windows $($profile.IsWindows10OrLater) / arch=$($profile.Environment)"
 
-    if (-not $runtimeProfile.IsWindows) {
+    if (-not $profile.IsWindows) {
         throw "WINDO installer requires Windows."
     }
-    if (-not $runtimeProfile.IsWindows10OrLater) {
+    if (-not $profile.IsWindows10OrLater) {
         throw "WINDO installer requires Windows 10 or newer."
     }
-    if (-not $runtimeProfile.IsPowerShellSupported) {
+    if (-not $profile.IsPowerShellSupported) {
         throw "WINDO installer requires PowerShell 5.1+."
     }
-    if ($runtimeProfile.LanguageMode -ne "FullLanguage") {
+    if ($profile.LanguageMode -ne "FullLanguage") {
         Write-WindoInstallStep -Status warn -Label "Constrained language mode" -Detail "Installer will keep to supported command paths for constrained hosts."
     }
-    if (-not $runtimeProfile.SupportsWebCmdlets) {
+    if (-not $profile.SupportsWebCmdlets) {
         throw "WINDO installer requires Invoke-WebRequest and Invoke-RestMethod."
     }
-    if (-not $runtimeProfile.SupportsBackgroundJobs) {
+    if (-not $profile.SupportsBackgroundJobs) {
         Write-WindoInstallStep -Status warn -Label "Background jobs unavailable" -Detail "Motion spinner and async download paths will use synchronous execution."
     }
 
-    $script:WindoScheduledTasksAvailable = $runtimeProfile.ScheduledTasksAvailable
+    $script:WindoScheduledTasksAvailable = $profile.ScheduledTasksAvailable
     if (-not $script:WindoScheduledTasksAvailable) {
         Write-WindoInstallStep -Status warn -Label "ScheduledTasks module missing" -Detail "Proceeding with best-effort non-task mode."
     }
-    if (-not $runtimeProfile.AddTypeCapable) {
+    if (-not $profile.AddTypeCapable) {
         Write-WindoInstallStep -Status warn -Label "CSharp compilation blocked" -Detail "Runner features will be limited; some elevated execution paths can be degraded."
     }
-    if (-not $runtimeProfile.WindowsFormsDrawingAvailable) {
+    if (-not $profile.WindowsFormsDrawingAvailable) {
         Write-WindoInstallStep -Status warn -Label "Windows Forms unavailable" -Detail "Native GUI surfaces (tray/panel/studio) will be disabled."
     }
-    if (-not $runtimeProfile.PSReadLineAvailable) {
+    if (-not $profile.PSReadLineAvailable) {
         Write-WindoInstallStep -Status warn -Label "PSReadLine unavailable" -Detail "Keybindings/completion setup will be skipped when unsupported."
     }
 
-    $script:WindoWindowsFormsDrawingAvailable = [bool]$runtimeProfile.WindowsFormsDrawingAvailable
-    return $runtimeProfile
+    $script:WindoWindowsFormsDrawingAvailable = [bool]$profile.WindowsFormsDrawingAvailable
+    return $profile
 }
 
 function Assert-WindoScheduledTasksAvailable {
@@ -237,7 +237,7 @@ function Write-Utf8NoBomFile {
 function Write-TextFileAtomic {
     param(
         [Parameter(Mandatory=$true)][string]$Path,
-        [Parameter(Mandatory=$true)][string]$Content,
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true)][string]$Content,
         [Parameter()][System.Text.Encoding]$Encoding = (New-Object System.Text.UTF8Encoding($false))
     )
     $dir = Split-Path -Parent $Path
@@ -280,10 +280,10 @@ function Repair-WindoProfileText {
     $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
     while ($firstBeginMatch.Success) {
         $prefix = $Text.Substring(0, $firstBeginMatch.Index)
-        $anchorMatches = [regex]::Matches($prefix, $anchorPattern)
-        if ($anchorMatches.Count -eq 0) { break }
+        $matches = [regex]::Matches($prefix, $anchorPattern)
+        if ($matches.Count -eq 0) { break }
 
-        $start = $anchorMatches[$anchorMatches.Count - 1].Index
+        $start = $matches[$matches.Count - 1].Index
         if ($Text[$start] -eq "`r") {
             $start++
             if ($start -lt $Text.Length -and $Text[$start] -eq "`n") { $start++ }
@@ -301,10 +301,10 @@ function Repair-WindoProfileText {
     $firstEndMatch = [regex]::Match($Text, $endLinePattern)
     while ($firstEndMatch.Success -and (-not $firstBeginMatch.Success -or $firstEndMatch.Index -lt $firstBeginMatch.Index)) {
         $prefix = $Text.Substring(0, $firstEndMatch.Index)
-        $anchorMatches = [regex]::Matches($prefix, $anchorPattern)
-        if ($anchorMatches.Count -eq 0) { break }
+        $matches = [regex]::Matches($prefix, $anchorPattern)
+        if ($matches.Count -eq 0) { break }
 
-        $start = $anchorMatches[$anchorMatches.Count - 1].Index
+        $start = $matches[$matches.Count - 1].Index
         if ($Text[$start] -eq "`r") {
             $start++
             if ($start -lt $Text.Length -and $Text[$start] -eq "`n") { $start++ }
@@ -1286,7 +1286,7 @@ function Invoke-WindoBundledUninstall {
     $SecureDir = Join-Path $HOME ".pwsh_secure"
     $BundledUninstallPath = Join-Path $SecureDir "windo_uninstall.ps1"
     $SnapshotUninstallPath = Join-Path (Join-Path $HOME "Documents") "windo\windo_uninstall.ps1"
-    $UnUrl = "https://raw.githubusercontent.com/l28bit/windo/$(_windo_release_ref)/windo_uninstall.ps1"
+    $UnUrl = "https://raw.githubusercontent.com/l28bit/windo/v6/windo_uninstall.ps1"
     $TempUn = $null
     $ScriptPath = $null
 
@@ -1383,22 +1383,15 @@ function windo {
     $HelpTopic = $null
     if ($Command -and $Command.Count -gt 0) {
         $rawCommand = [System.Collections.ArrayList]@($Command)
-        $normalizeHelpTopic = {
-            param([string]$Value)
-            if ([string]::IsNullOrWhiteSpace($Value)) { return $Value }
-            $normalized = [string]$Value.Trim()
-            if ($normalized -in @("?", "/?", "-?")) { return "" }
-            return $normalized
-        }
         $leading = 0
         while ($leading -lt $rawCommand.Count) {
             $tx = [string]$rawCommand[$leading]
-        if ($tx -eq "/?" -or $tx -eq "?" -or $tx -eq "-?") {
+        if ($tx -eq "/?" -or $tx -eq "?") {
                 $HelpRequested = $true
                 if (($leading + 1) -lt $rawCommand.Count) {
                     $next = [string]$rawCommand[$leading + 1]
-                    if ($next -notlike '-*' -and $next -ne '/?' -and $next -ne "?" -and $next -ne '-?') {
-                        $HelpTopic = & $normalizeHelpTopic $next
+                    if ($next -notlike '-*' -and $next -ne '/?' -and $next -ne "?") {
+                        $HelpTopic = $next
                         $leading += 2
                         continue
                     }
@@ -1423,8 +1416,8 @@ function windo {
                 $HelpRequested = $true
                 if (($leading + 1) -lt $rawCommand.Count) {
                     $next = [string]$rawCommand[$leading + 1]
-                    if ($next -notlike '-*' -and $next -ne '/?' -and $next -ne "?" -and $next -ne '-?') {
-                        $HelpTopic = & $normalizeHelpTopic $next
+                    if ($next -notlike '-*' -and $next -ne '/?' -and $next -ne "?") {
+                        $HelpTopic = $next
                         $leading += 2
                         continue
                     }
@@ -1514,12 +1507,12 @@ function windo {
             break
         }
         $Command = if ($leading -eq 0) { @($rawCommand) } elseif ($leading -ge $rawCommand.Count) { @() } else { @($rawCommand[$leading..($rawCommand.Count - 1)]) }
-        if ($Command.Count -ge 1 -and ($Command[-1] -eq "/?" -or $Command[-1] -eq "?" -or $Command[-1] -eq "-?")) {
+        if ($Command.Count -ge 1 -and ($Command[-1] -eq "/?" -or $Command[-1] -eq "?")) {
             $trimmed = @($Command[0..($Command.Count - 2)])
             $HelpRequested = $true
             if ([string]::IsNullOrWhiteSpace($HelpTopic)) {
                 if ($trimmed.Count -gt 1 -and ($trimmed[0] -ieq 'help')) { $HelpTopic = [string]$trimmed[1] }
-                elseif ($trimmed.Count -ge 1) { $HelpTopic = (& $normalizeHelpTopic [string]$trimmed[0]) }
+                elseif ($trimmed.Count -ge 1) { $HelpTopic = [string]$trimmed[0] }
             }
             $Command = @($trimmed)
         }
@@ -1576,13 +1569,13 @@ function windo {
                 }
 
                 $isBuiltinHelpTarget = $hasCmd -and ($cmd -eq 'help' -or $WindoBuiltins -contains $cmd)
-            if ($tx -eq '/?' -or $tx -eq '?' -or $tx -eq '-?' -or (($tx -eq '--help' -or $tx -eq '-h') -and $isBuiltinHelpTarget)) {
+                if ($tx -eq '/?' -or (($tx -eq '--help' -or $tx -eq '-h' -or $tx -eq '-?') -and $isBuiltinHelpTarget)) {
                     $HelpRequested = $true
                     if ([string]::IsNullOrWhiteSpace($HelpTopic)) {
                         if ($hasCmd -and $cmd -eq 'help' -and ($i + 1) -lt $cl.Count) {
-                        $HelpTopic = & $normalizeHelpTopic [string]$cl[$i + 1]
+                            $HelpTopic = [string]$cl[$i + 1]
                         } else {
-                        $HelpTopic = & $normalizeHelpTopic $cmd
+                            $HelpTopic = $cmd
                         }
                     }
                     $null = $cl.RemoveAt($i)
@@ -2229,6 +2222,7 @@ function _windo_parse_runner_result([string]$OutPath, [string]$RequestId, [strin
             $raw = $prefMode
         }
         $mode = _windo_normalize_output_mode $raw
+        if ($env:CI -and $mode -eq "legacy") { $mode = "compact" }
         $desc = switch ($mode) {
             "legacy" { "multi-line status, duration, and output labels" }
             "quiet" { "only command output and errors" }
@@ -3454,7 +3448,7 @@ function _windo_parse_runner_result([string]$OutPath, [string]$RequestId, [strin
     function _windo_extras_index_url {
         $raw = [string]$env:WINDO_EXTRAS_INDEX_URL
         if (-not [string]::IsNullOrWhiteSpace($raw)) { return $raw.Trim() }
-        return "https://raw.githubusercontent.com/l28bit/windo/$(_windo_release_ref)/extras/index.json"
+        return "https://raw.githubusercontent.com/l28bit/windo/v6/extras/index.json"
     }
 
     function _windo_fetch_text_url([string]$Uri) {
@@ -3822,26 +3816,6 @@ Use: windo prompt --json   (machine-readable bundle)
                 preview = "windo dashboard"
                 risk = "read-only"
                 notes = "Use before install-latest, support handoff, or troubleshooting."
-            },
-    [pscustomobject]@{
-        id = "windo-folder"
-        aliases = @("windo folder", "artifacts", "evidence folder", "exports", "records")
-        category = "Diagnostics"
-        summary = "Open the local WINDO artifacts folder for exports, snapshots, and evidence files."
-        command = "Invoke-Item (Join-Path $HOME 'Documents\windo')"
-        preview = "windo control actions"
-        risk = "local path open"
-        notes = "Open the folder used by health snapshots, exports, and handoff artifacts."
-    },
-            [pscustomobject]@{
-                id = "system-diagnostics-open"
-                aliases = @("event log", "event viewer", "event diagnostics", "windo diagnostics", "open event")
-                category = "Diagnostics"
-                summary = "Open Event Viewer and local Windows Event Log artifacts in a read-only workflow."
-                command = "windo control run system-diagnostics-open"
-                preview = "windo control actions"
-                risk = "local process launch"
-                notes = "This opens the local Event Viewer and event log folder for inspection; no elevated writes are required."
             },
             [pscustomobject]@{
                 id = "repair-keys"
@@ -4623,36 +4597,6 @@ Use: windo prompt --json   (machine-readable bundle)
         (_json_envelope $commandName $payload) | ConvertTo-Json -Depth 14 | Write-Host
     }
 
-    function _windo_normalize_handoff_prompt {
-        param(
-            [string]$PromptText,
-            [string]$DefaultPrompt
-        )
-
-        $raw = if ($null -eq $PromptText) { "" } else { [string]$PromptText.Trim() }
-        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $DefaultPrompt }
-        if ($raw -match '(?i)^\s*Input\s+content\b') { $raw = $DefaultPrompt }
-        if ($raw -notmatch '(?i)\[y\/n\]') { $raw = "$raw [y/N]" }
-        return $raw
-    }
-
-    function _windo_prompt_installer_handoff {
-        param(
-            [string]$DisplayCommand,
-            [bool]$SelfUpdate
-        )
-
-        $defaultPrompt = if ($SelfUpdate) {
-            "Run the self-update installer now? (If approved, this command relaunches elevated to repair tasks.)"
-        } else {
-            "Run the downloaded ${DisplayCommand} installer now? (If approved, this same command relaunches elevated to register tasks.)"
-        }
-
-        $prompt = _windo_normalize_handoff_prompt -PromptText $env:SUDO_PROMPT -DefaultPrompt $defaultPrompt
-        $ans = Read-Host $prompt
-        return ($ans -eq 'y' -or $ans -eq 'Y' -or $ans -eq 'yes')
-    }
-
     function _windo_start_downloaded_installer([string]$ScriptPath) {
         $runnerExe = "powershell.exe"
         $pwshExe = Get-Command pwsh.exe -ErrorAction SilentlyContinue
@@ -4734,8 +4678,11 @@ Use: windo prompt --json   (machine-readable bundle)
                 _windo_set_exit 2
                 return $false
             } else {
+                $defaultPrompt = "Run the installer now? (If approved, this same command relaunches elevated to register tasks.) [y/N]"
+                $prompt = _windo_normalize_handoff_prompt -PromptText $env:SUDO_PROMPT -DefaultPrompt $defaultPrompt
                 Write-Host "[windo] The installer payload is ready. You can review it before continuing: $TempInst" -ForegroundColor Cyan
-                $runNow = _windo_prompt_installer_handoff -DisplayCommand $DisplayCommand
+                $ans = Read-Host $prompt
+                if ($ans -eq 'y' -or $ans -eq 'Y' -or $ans -eq 'yes') { $runNow = $true }
             }
             if (-not $runNow) {
                 Write-Host "[windo] Update handoff cancelled; temporary installer removed." -ForegroundColor DarkYellow
@@ -4816,6 +4763,32 @@ Use: windo prompt --json   (machine-readable bundle)
         return ($low -match 'access is denied|access denied|denied\.|requires elevation|must be run from|insufficient privilege|requires admin|elevation')
     }
 
+    function _windo_normalize_handoff_prompt {
+        param(
+            [string]$PromptText,
+            [string]$DefaultPrompt
+        )
+
+        $raw = if ($null -eq $PromptText) { "" } else { [string]$PromptText }
+        $raw = $raw -replace '[\r\n\t]', ' '
+        $raw = [regex]::Replace($raw, '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '')
+        $raw = [regex]::Replace($raw, "`e\[[0-9;]*[ -/]*[@-~]", '')
+        $raw = $raw -replace '\s{2,}', ' '
+        $raw = $raw.Trim()
+        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $DefaultPrompt }
+        if ($raw -match '(?i)^\s*Input\s+content\b') { $raw = $DefaultPrompt }
+        $raw = $raw -replace '(?i)\[y\s*/\s*n\]', '[y/N]'
+        $raw = $raw -replace '\s{2,}', ' '
+        if ($raw -notmatch '(?i)\[y\/n\]') { $raw = "$raw [y/N]" }
+        $maxPromptChars = 220
+        if ($raw.Length -gt $maxPromptChars) {
+            $maxBody = [Math]::Max(1, $maxPromptChars - 8)
+            $raw = "$($raw.Substring(0, $maxBody).TrimEnd()) [y/N]"
+        }
+        $raw = $raw.Trim()
+        return $raw
+    }
+
     function _suggest_if_denied([int]$exitCode, [string]$output) {
         $low = ($output | Out-String).ToLowerInvariant()
         if ($exitCode -eq 5 -or $exitCode -eq 740 -or (_windo_is_task_access_denied $low)) {
@@ -4827,8 +4800,13 @@ Use: windo prompt --json   (machine-readable bundle)
     function _windo_prompt_self_update_installer {
         param([bool]$NonInteractive)
         if ($NonInteractive -or $env:CI -or -not [Environment]::UserInteractive) { return $false }
+
+        $defaultPrompt = "Run the installer now? (If approved, this same command relaunches elevated to repair tasks.) [y/N]"
+        $prompt = _windo_normalize_handoff_prompt -PromptText $env:SUDO_PROMPT -DefaultPrompt $defaultPrompt
+
         Write-Host "[windo] Self-update repair can relaunch the installer elevated." -ForegroundColor Cyan
-        return _windo_prompt_installer_handoff -DisplayCommand "self-update" -SelfUpdate:$true
+        $ans = Read-Host $prompt
+        return ($ans -eq 'y' -or $ans -eq 'Y' -or $ans -eq 'yes')
     }
 
     function _pretty_print([string]$cmdLine, [int]$exitCode, [string]$output, [int]$durationMs) {
@@ -6267,10 +6245,6 @@ function _windo_draw_ascii_startup_frame {
             [pscustomobject]@{ title = "Preflight"; command = "windo preflight"; note = "Readiness scan with fix commands." },
             [pscustomobject]@{ title = "Diagnostics Snapshot"; command = "windo control run diagnostics-snapshot"; note = "Run preflight, trust, surface, and integration checks in one pass." },
             [pscustomobject]@{ title = "Open Log Bundle"; command = "windo control run log-bundle-open"; note = "Create and open a redacted audit log bundle." },
-        [pscustomobject]@{ title = "Upgrade History"; command = "windo control run upgrade-history-open"; note = "Export recent upgrade history and open results for inspection." },
-            [pscustomobject]@{ title = "Open Event Diagnostics"; command = "windo control run system-diagnostics-open"; note = "Open read-only Event Viewer and local event-log artifacts." },
-            [pscustomobject]@{ title = "Health Snapshot"; command = "windo control run health-snapshot-html"; note = "Generate a timestamped dashboard + history health snapshot." },
-            [pscustomobject]@{ title = "Open WINDO Folder"; command = "$homeWindo = Join-Path $HOME 'Documents\\windo'; if (Test-Path -LiteralPath $homeWindo) { Invoke-Item $homeWindo } else { Invoke-Item $HOME }"; note = "Open WINDO artifacts folder (or HOME if not present)." },
             [pscustomobject]@{ title = "Trust Console"; command = "windo trust"; note = "Local trust posture and checksum readiness." },
             [pscustomobject]@{ title = "Dashboard HTML"; command = "windo dashboard --html"; note = "Local visual health report." },
             [pscustomobject]@{ title = "Launchpad"; command = "windo launchpad --open"; note = "Open the V6 command center." },
@@ -6474,9 +6448,7 @@ try {
     @{ Title = "Open Tray"; Command = "windo center tray"; Tone = "cyan"; Note = "Start the persistent tray surface." },
     @{ Title = "Edition Console"; Command = "windo edition open"; Tone = "blue"; Note = "Open the command-center visual console." },
     @{ Title = "Dashboard HTML"; Command = "windo dashboard --html --open"; Tone = "blue"; Note = "Generate the local operator dashboard." },
-            @{ Title = "Open WINDO Folder"; Command = "$homeWindo = Join-Path $HOME 'Documents\\windo'; if (Test-Path -LiteralPath $homeWindo) { Invoke-Item $homeWindo } else { Invoke-Item $HOME }"; Tone = "blue"; Note = "Open WINDO artifacts folder (or HOME if not present)." },
     @{ Title = "Signal Deck"; Command = "windo signal open"; Tone = "green"; Note = "Open evidence-first diagnostics." },
-    @{ Title = "Open Event Diagnostics"; Command = "windo control run system-diagnostics-open"; Tone = "green"; Note = "Open Event Viewer and %SystemRoot% logs." },
     @{ Title = "Control Actions"; Command = "windo control actions"; Tone = "green"; Note = "List curated command-center actions." },
     @{ Title = "Control History"; Command = "windo control history"; Tone = "green"; Note = "Review request lifecycle history." },
     @{ Title = "Run Next Queued"; Command = "windo control execute-next"; Tone = "warn"; Note = "Explicitly launch the next queued action." },
@@ -6621,7 +6593,6 @@ try {
     @{ Group = "Start"; Title = "Start Tray"; ActionId = "launchpad-tray"; Command = "windo launchpad --tray"; Detail = "Keep WINDO available from the task tray."; Tone = "cyan" },
     @{ Group = "Start"; Title = "Windows Integration"; ActionId = "integrate-status"; Command = "windo integrate status"; Detail = "Inspect Start Menu, startup, shim, and shortcut wiring."; Tone = "cyan" },
     @{ Group = "Trust"; Title = "Trust Console"; ActionId = "trust-online"; Command = "windo trust --online"; Detail = "Validate local trust and published checksum posture."; Tone = "green" },
-            @{ Group = "Trust"; Title = "Open WINDO Folder"; ActionId = "open-windo-folder"; Command = "$homeWindo = Join-Path $HOME 'Documents\\windo'; if (Test-Path -LiteralPath $homeWindo) { Invoke-Item $homeWindo } else { Invoke-Item $HOME }"; Detail = "Open WINDO artifacts folder (or HOME if not present)."; Tone = "blue" },
     @{ Group = "Trust"; Title = "Source of Truth"; ActionId = "source-status"; Command = "windo source"; Detail = "Inspect published installer source and checksum state."; Tone = "green" },
     @{ Group = "Trust"; Title = "Verify Audit Chain"; ActionId = "verify-audit"; Command = "windo verify"; Detail = "Validate encrypted audit log hash chain."; Tone = "green" },
     @{ Group = "Repair"; Title = "Surface Doctor"; ActionId = "surface-doctor"; Command = "windo surface doctor"; Detail = "Check Windows Forms, manifests, prompt, and motion readiness."; Tone = "warn" },
@@ -6630,7 +6601,6 @@ try {
     @{ Group = "Repair"; Title = "Integration Doctor"; ActionId = "integrate-doctor"; Command = "windo integrate doctor"; Detail = "Check current-user Windows shell integration health."; Tone = "warn" },
     @{ Group = "Repair"; Title = "Repair Integration"; ActionId = "integrate-repair"; Command = "windo integrate repair"; Detail = "Refresh shortcuts, startup tray wiring, and command shim."; Tone = "warn" },
     @{ Group = "Security"; Title = "Scan Home"; ActionId = "scan-home"; Command = "windo scan `$HOME --recurse --max-mb 2"; Detail = "Local-first file posture scan with hashes and script findings."; Tone = "danger" },
-    @{ Group = "Security"; Title = "Open Event Diagnostics"; ActionId = "system-diagnostics-open"; Command = "windo control run system-diagnostics-open"; Detail = "Inspect Event Viewer and event log artifacts."; Tone = "danger" },
     @{ Group = "Security"; Title = "Vault Status"; ActionId = "vault-status"; Command = "windo vault status"; Detail = "Inspect DPAPI vault count without exposing secrets."; Tone = "danger" },
     @{ Group = "Security"; Title = "Crypto Status"; ActionId = "crypto-status"; Command = "windo crypto status"; Detail = "Check OpenSSL and certutil availability."; Tone = "danger" },
     @{ Group = "Developer"; Title = "Python Venv Status"; ActionId = "venv-status"; Command = "windo venv status"; Detail = "Inspect active/local Python virtual environment state."; Tone = "blue" },
@@ -6810,7 +6780,6 @@ Write-TextFileAtomic -Path $studioPath -Content $studioScript -Encoding ([System
             '    @{ Text = "Surface Panel"; Command = "windo surface panel" },',
             '    @{ Text = "Power Studio"; Command = "windo center studio" },',
             '    @{ Text = "Windows Integration"; Command = "windo integrate status" },',
-            '    @{ Text = "Open Event Diagnostics"; Command = "windo control run system-diagnostics-open" },',
             '    @{ Text = "Repair Integration"; Command = "windo integrate repair" },',
             '    @{ Text = "Control Plane"; Command = "windo control status" },',
             '    @{ Text = "Control Prime"; Command = "windo control prime" },',
@@ -6818,7 +6787,6 @@ Write-TextFileAtomic -Path $studioPath -Content $studioScript -Encoding ([System
             '    @{ Text = "Run Next Queued"; Command = "windo control execute-next" },',
             '    @{ Text = "Command Center Console"; Command = "windo edition open" },',
             '    @{ Text = "Open Control Folder"; Command = "Invoke-Item (Join-Path $HOME ''.pwsh_secure\control'')" },',
-            '    @{ Text = "Open WINDO Folder"; Command = "$homeWindo = Join-Path $HOME ''Documents\windo''; if (Test-Path -LiteralPath $homeWindo) { Invoke-Item $homeWindo } else { Invoke-Item $HOME }" },',
             '    @{ Text = "Last Control Result"; Command = "windo signal last" },',
             '    @{ Text = "Signal Deck"; Command = "windo signal timeline" },',
             '    @{ Text = "Motion Pulse"; Command = "windo motion pulse" },',
@@ -7484,132 +7452,7 @@ if ($changed) { Write-TextFileAtomic -Path $path -Content $body -Encoding ([Syst
             [pscustomobject]@{ id = "center-status"; title = "Center Status"; command = "windo center status"; group = "native"; execution = "visible-shell"; description = "Inspect unified command-center status." },
             [pscustomobject]@{ id = "launchpad-tray"; title = "Start Tray"; command = "windo launchpad --tray"; group = "native"; execution = "visible-shell"; description = "Start the browser-independent tray command center." },
             [pscustomobject]@{ id = "diagnostics-snapshot"; title = "Diagnostics Snapshot"; command = "`$exitCode = 0; windo preflight --json; `$stepCode = if (`$global:WINDO_EXIT_CODE -is [int]) { [int]`$global:WINDO_EXIT_CODE } elseif (`$LASTEXITCODE -is [int]) { [int]`$LASTEXITCODE } else { 0 }; if (`$stepCode -gt `$exitCode) { `$exitCode = `$stepCode }; windo trust --json; `$stepCode = if (`$global:WINDO_EXIT_CODE -is [int]) { [int]`$global:WINDO_EXIT_CODE } elseif (`$LASTEXITCODE -is [int]) { [int]`$LASTEXITCODE } else { 0 }; if (`$stepCode -gt `$exitCode) { `$exitCode = `$stepCode }; windo surface doctor --json; `$stepCode = if (`$global:WINDO_EXIT_CODE -is [int]) { [int]`$global:WINDO_EXIT_CODE } elseif (`$LASTEXITCODE -is [int]) { [int]`$LASTEXITCODE } else { 0 }; if (`$stepCode -gt `$exitCode) { `$exitCode = `$stepCode }; windo integrate doctor --json; `$stepCode = if (`$global:WINDO_EXIT_CODE -is [int]) { [int]`$global:WINDO_EXIT_CODE } elseif (`$LASTEXITCODE -is [int]) { [int]`$LASTEXITCODE } else { 0 }; if (`$stepCode -gt `$exitCode) { `$exitCode = `$stepCode }; exit `$exitCode"; group = "repair"; execution = "visible-shell"; description = "Run preflight, trust, surface, and integration diagnostics in one action." },
-            [pscustomobject]@{ id = "log-bundle-open"; title = "Open Log Bundle"; command = "`$bundleDir = Join-Path `$HOME 'Documents\windo\exports'; if (!(Test-Path -LiteralPath `$bundleDir)) { New-Item -ItemType Directory -Path `$bundleDir -Force | Out-Null }; `$bundlePath = Join-Path `$bundleDir ('windo_log_bundle_{0}.zip' -f (Get-Date -Format 'yyyyMMdd-HHmmss')); windo export --redact -n 80 -o `$bundlePath --json; `$exitCode = if (`$global:WINDO_EXIT_CODE -is [int]) { [int]`$global:WINDO_EXIT_CODE } elseif (`$LASTEXITCODE -is [int]) { [int]`$LASTEXITCODE } else { 0 }; if (`$exitCode -ne 0) { `$LASTEXITCODE = [int]`$exitCode; `$global:WINDO_EXIT_CODE = `$exitCode; exit [int]`$exitCode }; if (-not (Test-Path -LiteralPath `$bundlePath)) { `$exitCode = 2; Write-Error \"[windo control] Export did not create expected bundle: `$bundlePath\"; `$LASTEXITCODE = [int]`$exitCode; `$global:WINDO_EXIT_CODE = `$exitCode; exit [int]`$exitCode }; if (Get-Command explorer -ErrorAction SilentlyContinue) { try { Start-Process -FilePath explorer.exe -ArgumentList @('/select,', `$bundlePath) -ErrorAction Stop | Out-Null } catch { Write-Host \"[windo control] Bundle ready: `$bundlePath\" -ForegroundColor Yellow } }; if (-not (Get-Command explorer -ErrorAction SilentlyContinue)) { Write-Host \"[windo control] Bundle ready: `$bundlePath\" -ForegroundColor Cyan }; `$LASTEXITCODE = [int]`$exitCode; `$global:WINDO_EXIT_CODE = `$exitCode; exit [int]`$exitCode"; group = "security"; execution = "visible-shell"; description = "Create a redacted diagnostic bundle and open it for review/share." },
-            [pscustomobject]@{ id = "system-diagnostics-open"; title = "Open Event Diagnostics"; command = '$ErrorActionPreference = "Stop"; $exitCode = 0; $failure = $null; $opened = $false; $systemRoot = [Environment]::GetEnvironmentVariable("SystemRoot"); if ([string]::IsNullOrWhiteSpace($systemRoot)) { $systemRoot = "C:\Windows" }; $eventLogPath = Join-Path $systemRoot "System32\winevt\Logs"; $eventViewer = Join-Path $systemRoot "System32\eventvwr.msc"; if (Test-Path -LiteralPath $eventViewer) { try { Start-Process -FilePath $eventViewer | Out-Null; $opened = $true } catch { $failure = $_.Exception.Message } } else { $failure = "Event Viewer artifact not found: $eventViewer" }; if (Get-Command explorer -ErrorAction SilentlyContinue) { if (Test-Path -LiteralPath $eventLogPath) { try { Start-Process -FilePath explorer.exe -ArgumentList @("/e,", $eventLogPath) | Out-Null; $opened = $true } catch { } } }; if (-not $opened) { $exitCode = 2 }; if ($exitCode -eq 0) { Write-Host "[windo control] Opened Event Viewer artifacts: $eventLogPath" -ForegroundColor Cyan } else { Write-Error "[windo control] system-diagnostics-open failed: $failure" }; $LASTEXITCODE = [int]$exitCode; $global:WINDO_EXIT_CODE = $exitCode; exit [int]$exitCode'; group = "security"; execution = "visible-shell"; description = "Open Event Viewer and local `%SystemRoot%\\System32\\winevt\\Logs` artifacts." },
-            [pscustomobject]@{ id = "upgrade-history-open"; title = "Upgrade History"; command = '$ErrorActionPreference = "Stop"
-$ProgressPreference = "SilentlyContinue"
-$exitCode = 0
-$failure = $null
-$homeRoot = if ([string]::IsNullOrWhiteSpace($HOME)) { [Environment]::GetFolderPath("UserProfile") } else { $HOME }
-$exportsDir = Join-Path (Join-Path $homeRoot "Documents") "windo\exports"
-$artifactBase = "windo_upgrade_history"
-$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$historyPath = Join-Path $exportsDir ("{0}_{1}.txt" -f $artifactBase, $stamp)
-$historyLatestPath = Join-Path $exportsDir ("{0}_latest.txt" -f $artifactBase)
-$header = @(
-    "[windo] upgrade-history-open"
-    ("Generated: {0}" -f (Get-Date -Format "o"))
-    ("Path: {0}" -f $historyPath)
-    ""
-)
-$historyPayload = @()
-try {
-    if (!(Test-Path -LiteralPath $exportsDir)) { New-Item -ItemType Directory -Path $exportsDir -Force | Out-Null }
-    $historyPayload = @((windo history -n 50 2>&1))
-    if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { $exitCode = [Math]::Max([int]$exitCode, [int]$LASTEXITCODE) }
-    if (-not $historyPayload) { $historyPayload = @("[windo] history returned no rows") }
-    $historyLines = @($header + $historyPayload)
-    Set-Content -Path $historyPath -Value ($historyLines -join [Environment]::NewLine) -Encoding UTF8
-    Set-Content -Path $historyLatestPath -Value ($historyLines -join [Environment]::NewLine) -Encoding UTF8
-    if (!(Test-Path -LiteralPath $historyPath)) { $exitCode = 2; $failure = "missing output file: $historyPath" }
-    if (!(Test-Path -LiteralPath $historyLatestPath)) { $exitCode = 2; $failure = "missing output file: $historyLatestPath" }
-} catch {
-    $exitCode = 2
-    $failure = $_.Exception.Message
-}
-if ($exitCode -eq 0) {
-    Write-Host "[windo control] history export: $historyPath" -ForegroundColor Cyan
-    Write-Host "[windo control] latest history export: $historyLatestPath" -ForegroundColor Cyan
-    if (Get-Command explorer -ErrorAction SilentlyContinue) {
-        try {
-            Start-Process -FilePath explorer.exe -ArgumentList @("/select,", $historyPath) | Out-Null
-        } catch {
-            Write-Host "[windo control] Open with Explorer manually: $historyPath" -ForegroundColor Yellow
-        }
-    } else {
-        Write-Host "[windo control] Explorer unavailable; open manually: $historyPath" -ForegroundColor Yellow
-    }
-} else {
-    Write-Error "[windo control] upgrade-history-open failed: $failure"
-}
-$LASTEXITCODE = [int]$exitCode
-$global:WINDO_EXIT_CODE = $exitCode
-exit [int]$exitCode' ; group = "maintenance"; execution = "visible-shell"; description = "Export the latest 50 control history entries to Documents\windo\exports and open the result in Explorer." },
-            [pscustomobject]@{ id = "health-snapshot-html"; title = "Health Snapshot"; command = '$ErrorActionPreference = "Stop"
-$ProgressPreference = "SilentlyContinue"
-$exitCode = 0
-$failure = $null
-$historyWarning = $null
-$historyLines = @()
-$snapshotDir = Join-Path (Join-Path $HOME "Documents") "windo\health-snapshots"
-$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$htmlPath = Join-Path $snapshotDir ("windo_health_snapshot_{0}.html" -f $stamp)
-$mdPath = Join-Path $snapshotDir ("windo_health_snapshot_{0}.md" -f $stamp)
-$htmlLatestPath = Join-Path $snapshotDir "windo_health_snapshot_latest.html"
-$mdLatestPath = Join-Path $snapshotDir "windo_health_snapshot_latest.md"
-try {
-    if (!(Test-Path -LiteralPath $snapshotDir)) { New-Item -ItemType Directory -Path $snapshotDir -Force | Out-Null }
-    windo dashboard --html -o $htmlPath
-    if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { $exitCode = [Math]::Max([int]$exitCode, [int]$LASTEXITCODE) }
-    if ($exitCode -eq 0 -and -not (Test-Path -LiteralPath $htmlPath)) {
-        $exitCode = 2
-        $failure = "expected HTML artifact was not created: $htmlPath"
-    }
-    if ($exitCode -eq 0) {
-        try {
-            $historyLines = @((windo history -n 50 2>&1))
-            if (-not $historyLines -or $historyLines.Count -eq 0) { $historyLines = @("(history unavailable)") }
-            $historyExitCode = if ($LASTEXITCODE -is [int]) { [int]$LASTEXITCODE } else { 0 }
-            if ($historyExitCode -ne 0) { $historyWarning = "history retrieval returned exit code $historyExitCode" }
-        } catch {
-            $historyWarning = $_.Exception.Message
-        }
-        $historyText = $historyLines -join [Environment]::NewLine
-        $mdLines = @(
-            "# WINDO Health Snapshot"
-            ""
-            ("Generated: {0}" -f (Get-Date -Format "o"))
-            ("Dashboard: {0}" -f $htmlPath)
-            ("Markdown: {0}" -f $mdPath)
-            ""
-            "## Quick note"
-            "- Dashboard artifact is generated via `windo dashboard --html`."
-            ""
-            "## History (last 50)"
-            "```text"
-            $historyText
-            "```"
-        )
-        Set-Content -Path $mdPath -Value ($mdLines -join [Environment]::NewLine) -Encoding UTF8
-        if ($exitCode -eq 0 -and -not (Test-Path -LiteralPath $mdPath)) { $exitCode = 2; $failure = "expected markdown artifact was not created: $mdPath" }
-        Copy-Item -Path $htmlPath -Destination $htmlLatestPath -Force
-        Copy-Item -Path $mdPath -Destination $mdLatestPath -Force
-    }
-} catch {
-    $exitCode = 2
-    $failure = $_.Exception.Message
-}
-if ($exitCode -eq 0) {
-    Write-Host "[windo control] health snapshot html: $htmlPath" -ForegroundColor Cyan
-    Write-Host "[windo control] health snapshot markdown: $mdPath" -ForegroundColor Cyan
-    Write-Host "[windo control] latest html: $htmlLatestPath" -ForegroundColor Cyan
-    Write-Host "[windo control] latest markdown: $mdLatestPath" -ForegroundColor Cyan
-    if ($historyWarning) { Write-Host "[windo control] history warning: $historyWarning" -ForegroundColor Yellow }
-    if (Get-Command explorer -ErrorAction SilentlyContinue) {
-        try {
-            Start-Process -FilePath explorer.exe -ArgumentList @("/select,", $htmlPath) | Out-Null
-        } catch {
-            Write-Host "[windo control] Open with Explorer manually: $htmlPath" -ForegroundColor Yellow
-        }
-    } else {
-        Write-Host "[windo control] Explorer unavailable; open manually: $htmlPath" -ForegroundColor Yellow
-    }
-} else {
-    Write-Error "[windo control] health-snapshot-html failed: $failure"
-}
-$LASTEXITCODE = [int]$exitCode
-$global:WINDO_EXIT_CODE = $exitCode
-exit [int]$exitCode' ; group = "maintenance"; execution = "visible-shell"; description = "Create timestamped health artifacts by combining dashboard HTML with recent history context." },
+            [pscustomobject]@{ id = "log-bundle-open"; title = "Open Log Bundle"; command = "`$bundleDir = Join-Path `$HOME 'Documents\windo\exports'; if (!(Test-Path -LiteralPath `$bundleDir)) { New-Item -ItemType Directory -Path `$bundleDir -Force | Out-Null }; `$bundlePath = Join-Path `$bundleDir ('windo_log_bundle_{0}.zip' -f (Get-Date -Format 'yyyyMMdd-HHmmss')); windo export --redact -n 80 -o `$bundlePath --json; `$exitCode = if (`$global:WINDO_EXIT_CODE -is [int]) { [int]`$global:WINDO_EXIT_CODE } elseif (`$LASTEXITCODE -is [int]) { [int]`$LASTEXITCODE } else { 0 }; if (`$exitCode -ne 0) { exit `$exitCode }; if (-not (Test-Path -LiteralPath `$bundlePath)) { Write-Error \"[windo control] Export did not create expected bundle: `$bundlePath\"; exit 2 }; if (Get-Command explorer -ErrorAction SilentlyContinue) { try { Start-Process -FilePath explorer.exe -ArgumentList @('/select,', `$bundlePath) -ErrorAction Stop | Out-Null } catch { Write-Host \"[windo control] Bundle ready: `$bundlePath\" -ForegroundColor Yellow } }; if (-not (Get-Command explorer -ErrorAction SilentlyContinue)) { Write-Host \"[windo control] Bundle ready: `$bundlePath\" -ForegroundColor Cyan }; exit 0"; group = "security"; execution = "visible-shell"; description = "Create a redacted diagnostic bundle and open it for review/share." },
             [pscustomobject]@{ id = "workbench-html"; title = "Open Workbench"; command = "windo mesh workbench --open"; group = "visual"; execution = "visible-shell"; description = "Render and open the local visual operator workbench." },
             [pscustomobject]@{ id = "edition-open"; title = "Open Command Center"; command = "windo edition open"; group = "visual"; execution = "visible-shell"; description = "Render and open the WINDO command surface." },
             [pscustomobject]@{ id = "motion-pulse"; title = "Motion Pulse"; command = "windo motion pulse"; group = "visual"; execution = "visible-shell"; description = "Render the configured terminal pulse animation when allowed." },
@@ -7627,21 +7470,6 @@ exit [int]$exitCode' ; group = "maintenance"; execution = "visible-shell"; descr
             [pscustomobject]@{ id = "recipes-list"; title = "Recipes"; command = "windo recipes"; group = "developer"; execution = "visible-shell"; description = "List built-in operator recipes." },
             [pscustomobject]@{ id = "pkg-status"; title = "Package Managers"; command = "windo pkg status"; group = "lifecycle"; execution = "visible-shell"; description = "Inspect winget, choco, and scoop availability." },
             [pscustomobject]@{ id = "preflight"; title = "Preflight"; command = "windo preflight"; group = "trust"; execution = "visible-shell"; description = "Run local readiness checks before privileged work." },
-            [pscustomobject]@{ id = "open-windo-folder"; title = "Open WINDO Folder"; command = '$ErrorActionPreference = "Stop"
-$ProgressPreference = "SilentlyContinue"
-$exitCode = 0
-$failure = $null
-try {
-    $homeWindo = Join-Path $HOME "Documents\\windo"
-    if (Test-Path -LiteralPath $homeWindo) { Invoke-Item $homeWindo } else { Invoke-Item $HOME }
-} catch {
-    $exitCode = 2
-    $failure = $_.Exception.Message
-}
-if ($failure) { Write-Error "[windo control] open-windo-folder failed: $failure" }
-$LASTEXITCODE = [int]$exitCode
-$global:WINDO_EXIT_CODE = $exitCode
-exit [int]$exitCode'; group = "maintenance"; execution = "visible-shell"; description = "Open the WINDO artifacts folder (or HOME if not present)." },
             [pscustomobject]@{ id = "install-latest"; title = "Install Latest"; command = "windo install-latest"; group = "lifecycle"; execution = "visible-shell"; description = "Run the WINDO V6 installer/update handoff." }
         )
     }
@@ -7945,58 +7773,14 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
 
     function _windo_control_start_action([string]$ActionId) {
         $action = _windo_control_get_action $ActionId
-        $requestId = [Guid]::NewGuid().ToString("N")
-        if ($null -eq $action) { return [pscustomobject]@{ ok = $false; error = "unknown action"; actionId = $ActionId; requestId = $requestId; command = $null; exitCode = 2 } }
+        if ($null -eq $action) { return [pscustomobject]@{ ok = $false; error = "unknown action"; actionId = $ActionId; command = $null } }
         $exe = "powershell.exe"
         $pwsh = Get-Command pwsh.exe -ErrorAction SilentlyContinue
         if ($pwsh -and $pwsh.Source) { $exe = [string]$pwsh.Source }
         $commandText = [string]$action.command
         $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($commandText))
-        $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $proc = $null
-        $actionExitCode = 0
-        try {
-            $proc = Start-Process -FilePath $exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encodedCommand) -PassThru
-            if ($null -ne $proc) {
-                $proc.WaitForExit()
-                if ($proc.HasExited) {
-                    $rawActionExitCode = $proc.ExitCode
-                    if ($rawActionExitCode -is [int]) { $actionExitCode = [int]$rawActionExitCode } else {
-                        try {
-                            $actionExitCode = [int]$rawActionExitCode
-                        } catch {
-                            $actionExitCode = 2
-                        }
-                    }
-                }
-            }
-        } catch {
-            $actionExitCode = 2
-        } finally {
-            $sw.Stop()
-            try {
-                if ($null -ne $proc) { $proc.Dispose() | Out-Null } else { }
-            } catch { }
-            try {
-                _append_log @{
-                    Timestamp  = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-                    User       = "$env:USERDOMAIN\$env:USERNAME"
-                    Host       = $env:COMPUTERNAME
-                    Command    = "windo control run $ActionId"
-                    ExitCode   = [int]$actionExitCode
-                    Output     = ""
-                    Elevation  = "VISUAL"
-                    DurationMs = [int]$sw.Elapsed.TotalMilliseconds
-                    Version    = $WindoVersion
-                    RequestId  = $requestId
-                }
-            } catch { }
-        }
-        if ($proc -and (-not $proc.HasExited)) {
-            return [pscustomobject]@{ ok = $false; error = "control action window did not exit"; actionId = [string]$action.id; requestId = $requestId; command = [string]$action.command; exe = $exe; exitCode = 2 }
-        }
-        _windo_set_exit ([int]$actionExitCode)
-        return [pscustomobject]@{ ok = $true; actionId = [string]$action.id; requestId = $requestId; command = [string]$action.command; exe = $exe; exitCode = [int]$actionExitCode }
+        Start-Process -FilePath $exe -ArgumentList @("-NoExit", "-EncodedCommand", $encodedCommand) | Out-Null
+        return [pscustomobject]@{ ok = $true; actionId = [string]$action.id; command = [string]$action.command; exe = $exe }
     }
 
     function _windo_surface_doctor {
@@ -8130,10 +7914,10 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
         return @(
             [pscustomobject]@{
                 Name        = "help"
-                Aliases     = @("?","--help","-h","-?")
+                Aliases     = @("?","--help","-h")
                 Category    = "Core"
                 Summary     = "Display WINDO usage and command docs."
-                Syntax      = @("windo help [topic]", "windo /? [topic]", "windo --help [topic]", "windo -h [topic]", "windo -? [topic]")
+                Syntax      = @("windo help [topic]", "windo /? [topic]", "windo --help [topic]", "windo -h [topic]")
                 Description = "Use this command to discover WINDO capabilities. Omit topic for a full command index."
                 Notes       = "Global options like --json and --dry-run are accepted before any built-in command."
                 Examples    = @("windo help", "windo help --json", "windo /? install-latest", "windo --help install")
@@ -8432,7 +8216,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Syntax      = @("windo control [status] [--json]", "windo control prime|actions|history|pulse|clear", "windo control preview <action-id>", "windo control queue <action-id> [note]", "windo control execute-next|next", "windo control execute|inspect|cancel <request-id>", "windo control run <action-id>")
                 Description = "Builds a local action catalog, manifest, request queue, result files, and visible-shell executor under .pwsh_secure so tray/native surfaces can orchestrate known commands without a browser."
                 Notes       = "Only curated WINDO action IDs can run. preview is read-only. execute-next consumes the oldest queued request; execute <request-id> runs a specific queued request."
-                Examples    = @("windo control", "windo control actions", "windo control preview surface-prime", "windo control queue surface-prime", "windo control run diagnostics-snapshot", "windo control run log-bundle-open", "windo control run upgrade-history-open", "windo control run health-snapshot-html", "windo control run open-windo-folder", "windo control execute-next", "windo control execute <id>")
+                Examples    = @("windo control", "windo control actions", "windo control preview surface-prime", "windo control queue surface-prime", "windo control run diagnostics-snapshot", "windo control run log-bundle-open", "windo control execute-next", "windo control execute <id>")
             },
             [pscustomobject]@{
                 Name        = "signal"
@@ -8450,7 +8234,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Syntax      = @("windo center [status] [--json]", "windo center open|tray|panel|studio", "windo center actions|signal|history", "windo center preview|run|queue <action-id>", "windo center execute-next|next", "windo center execute <request-id>")
                 Description = "Unifies tray, Power Studio, control plane, Signal Deck, native surface, motion, trust, recipes, modules, extras, audit, and export into a native-feeling Windows command center."
                 Notes       = "The first V6 center is PowerShell-native. A compiled companion helper is scaffolded for a later major release but is not required."
-                Examples    = @("windo center", "windo center studio", "windo center panel", "windo center actions", "windo center preview power-studio", "windo center queue diagnostics-snapshot", "windo center queue log-bundle-open", "windo center queue upgrade-history-open", "windo center queue health-snapshot-html", "windo center queue open-windo-folder", "windo center run diagnostics-snapshot", "windo center run upgrade-history-open", "windo center run health-snapshot-html", "windo center run open-windo-folder", "windo center execute-next", "windo center signal")
+                Examples    = @("windo center", "windo center studio", "windo center panel", "windo center actions", "windo center preview power-studio", "windo center queue diagnostics-snapshot", "windo center queue log-bundle-open", "windo center run diagnostics-snapshot", "windo center execute-next", "windo center signal")
             },
             [pscustomobject]@{
                 Name        = "studio"
@@ -8887,16 +8671,16 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
 
     if ($Command.Count -ge 1 -and $Command[0] -eq "/?") {
         $topic = $null
-        if ($Command.Count -ge 2) { $topic = [string]$Command[1].TrimEnd("?") }
+        if ($Command.Count -ge 2) { $topic = [string]$Command[1] }
         _windo_show_help $topic
         _windo_set_exit 0
         return
     }
 
-        if ($Command.Count -ge 1 -and $Command[0] -eq "help") {
-            $topic = $null
-            if ($Command.Count -ge 2) { $topic = (& $normalizeHelpTopic [string]$Command[1]) }
-            _windo_show_help $topic
+    if ($Command.Count -ge 1 -and $Command[0] -eq "help") {
+        $topic = $null
+        if ($Command.Count -ge 2) { $topic = [string]$Command[1] }
+        _windo_show_help $topic
         return
     }
 
@@ -9429,7 +9213,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 return
             }
             $result = _windo_control_start_action ([string]$Command[2])
-        $exit = if ($result.ok) { [int]$result.exitCode } else { 2 }
+            $exit = if ($result.ok) { 0 } else { 2 }
             if ($JsonOutput) { _emit_json "control" @{ subcommand = "run"; result = $result; exitCode = $exit } }
             else {
                 if ($result.ok) {
@@ -15237,9 +15021,9 @@ function __windo_completion_specs {
         motion = @('status','auto','on','quiet','off','reset','pulse','demo','--json')
         surface = @('status','prime','pulse','demo','doctor','repair','open','panel','window','--json')
         integrate = @('status','doctor','prime','repair','shortcuts','startup','shim','open','--json')
-        control = @('status','prime','actions','preview','queue','run','execute-next','next','execute','inspect','cancel','history','pulse','demo','clear','system-diagnostics-open','surface-status','surface-prime','surface-panel','power-studio','integrate-status','integrate-doctor','integrate-repair','integrate-open','integrate-shim','integrate-startup','center-status','source-status','verify-audit','surface-doctor','surface-repair','scan-home','vault-status','crypto-status','venv-status','sshx-status','recipes-list','pkg-status','launchpad-tray','diagnostics-snapshot','upgrade-history-open','health-snapshot-html','open-windo-folder','log-bundle-open','workbench-html','edition-open','motion-pulse','profile-doctor','trust-online','preflight','install-latest','--json')
+        control = @('status','prime','actions','preview','queue','run','execute-next','next','execute','inspect','cancel','history','pulse','demo','clear','surface-status','surface-prime','surface-panel','power-studio','integrate-status','integrate-doctor','integrate-repair','integrate-open','integrate-shim','integrate-startup','center-status','source-status','verify-audit','surface-doctor','surface-repair','scan-home','vault-status','crypto-status','venv-status','sshx-status','recipes-list','pkg-status','launchpad-tray','diagnostics-snapshot','log-bundle-open','workbench-html','edition-open','motion-pulse','profile-doctor','trust-online','preflight','install-latest','--json')
         signal = @('status','timeline','last','export','open','html','--html','--open','--output','--json')
-        center = @('status','open','tray','panel','surface','studio','wizard','power','actions','preview','run','queue','execute-next','next','execute','history','signal','system-diagnostics-open','surface-status','surface-prime','surface-panel','power-studio','integrate-status','integrate-doctor','integrate-repair','integrate-open','integrate-shim','integrate-startup','center-status','source-status','verify-audit','surface-doctor','surface-repair','scan-home','vault-status','crypto-status','venv-status','sshx-status','recipes-list','pkg-status','launchpad-tray','diagnostics-snapshot','upgrade-history-open','health-snapshot-html','open-windo-folder','log-bundle-open','workbench-html','edition-open','motion-pulse','profile-doctor','trust-online','preflight','install-latest','--json')
+        center = @('status','open','tray','panel','surface','studio','wizard','power','actions','preview','run','queue','execute-next','next','execute','history','signal','surface-status','surface-prime','surface-panel','power-studio','integrate-status','integrate-doctor','integrate-repair','integrate-open','integrate-shim','integrate-startup','center-status','source-status','verify-audit','surface-doctor','surface-repair','scan-home','vault-status','crypto-status','venv-status','sshx-status','recipes-list','pkg-status','launchpad-tray','diagnostics-snapshot','log-bundle-open','workbench-html','edition-open','motion-pulse','profile-doctor','trust-online','preflight','install-latest','--json')
         studio = @('--json')
         edition = @('status','open','html','export','pulse','--open','--output','--json')
         trust = @('--online','--offline','--json')

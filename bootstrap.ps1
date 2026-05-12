@@ -21,11 +21,11 @@ function Test-WindoBootstrapProcessElevated {
 }
 
 function Get-WindoBootstrapReleaseBranch {
-    $raw = if ($null -ne $env:WINDO_TRACKING_BRANCH -and -not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { [string]$env:WINDO_TRACKING_BRANCH } else { "Exodus" }
+    $raw = if ($null -ne $env:WINDO_TRACKING_BRANCH -and -not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { [string]$env:WINDO_TRACKING_BRANCH } else { "Prometheus" }
     $trimmed = $raw.Trim()
     $lower = $trimmed.ToLowerInvariant()
-    if ($lower -eq "genesis" -or $lower -eq "genisis") { return "Exodus" }
-    if ($trimmed -notmatch '^[A-Za-z0-9._-]{1,64}$') { return "Exodus" }
+    if ($lower -eq "genesis" -or $lower -eq "genisis") { return "Prometheus" }
+    if ($trimmed -notmatch '^[A-Za-z0-9._-]{1,64}$') { return "Prometheus" }
     return $trimmed
 }
 $script:_windo_bootstrap_release_ref = $null
@@ -294,7 +294,7 @@ function Write-WindoBootstrapBanner {
     Write-Host "    \ V  V /  | || |\  | |_| | |_| |" -ForegroundColor Cyan
     Write-Host "     \_/\_/  |___|_| \_|____/ \___/" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  WINDO 6.0.0 V6 bootstrap" -ForegroundColor White
+    Write-Host "  WINDO 8.4.0 V8.4 bootstrap" -ForegroundColor White
     Write-Host "  API-first verified download | UAC handoff | Windows integration plane" -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -543,6 +543,11 @@ function Get-WindoBootstrapVersionedPublishedChecksum([string]$Version) {
 
 function Get-WindoBootstrapPublishedChecksum {
     $apiUrl = Get-WindoBootstrapChecksumApiUrl
+    $releaseRef = Get-WindoBootstrapReleaseRef
+    $releaseBranch = Get-WindoBootstrapReleaseBranch
+    $requestedType = if ($env:WINDO_RELEASE_COMMIT -and [string]$env:WINDO_RELEASE_COMMIT -match '^[a-fA-F0-9]{40}$') { "commit" } else { "branch" }
+    $requestedRef = if ($requestedType -eq "commit") { [string]$env:WINDO_RELEASE_COMMIT } else { $releaseBranch }
+    $sourceReleaseBranch = if ($releaseRef -match '^[a-fA-F0-9]{40}$') { $releaseBranch } else { $releaseRef }
     $apiError = $null
 
     for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -556,6 +561,7 @@ function Get-WindoBootstrapPublishedChecksum {
                 $releaseCommit = $payload.releaseCommit
                 $releaseBranch = $payload.releaseBranch
                 $blobSha = if ($obj.sha) { [string]$obj.sha } else { $null }
+                $metadataState = Get-WindoBootstrapReleaseMetadataState -ReleaseRef $releaseRef -ReleaseCommit $releaseCommit -ReleaseCommitRaw $payload.releaseCommitRaw -ReleaseBranch $payload.releaseBranch
                 if ($sha) {
                     return [pscustomobject]@{
                         status = "available"
@@ -563,12 +569,38 @@ function Get-WindoBootstrapPublishedChecksum {
                         url = $apiUrl
                         sha256 = $sha
                         blobSha = $blobSha
-                        releaseCommit = $payload.releaseCommit
+                        requestedRef = $requestedRef
+                        requestedType = $requestedType
+                        releaseRef = $releaseRef
                         releaseBranch = $payload.releaseBranch
+                        sourceReleaseRef = $releaseRef
+                        sourceReleaseBranch = $sourceReleaseBranch
+                        compatibilityMode = $metadataState.CompatibilityMode
+                        compatibilityReason = $metadataState.Detail
+                        releaseCommit = $payload.releaseCommit
                         releaseCommitRaw = $payload.releaseCommitRaw
                         releaseBranchRaw = $payload.releaseBranchRaw
                         error = $null
                     }
+                }
+                return [pscustomobject]@{
+                    status = "invalid"
+                    source = "github-api"
+                    url = $apiUrl
+                    sha256 = $null
+                    blobSha = $blobSha
+                    requestedRef = $requestedRef
+                    requestedType = $requestedType
+                    releaseRef = $releaseRef
+                    releaseBranch = $payload.releaseBranch
+                    sourceReleaseRef = $releaseRef
+                    sourceReleaseBranch = $sourceReleaseBranch
+                    compatibilityMode = $metadataState.CompatibilityMode
+                    compatibilityReason = $metadataState.Detail
+                    releaseCommit = $payload.releaseCommit
+                    releaseCommitRaw = $payload.releaseCommitRaw
+                    releaseBranchRaw = $payload.releaseBranchRaw
+                    error = "published checksum payload was present but did not contain a valid SHA256"
                 }
                 throw "Published checksum payload was present but did not contain a valid SHA256."
             }
@@ -591,6 +623,7 @@ function Get-WindoBootstrapPublishedChecksum {
                 $sha = $payload.sha256
                 $releaseCommit = $payload.releaseCommit
                 $releaseBranch = $payload.releaseBranch
+                $metadataState = Get-WindoBootstrapReleaseMetadataState -ReleaseRef $releaseRef -ReleaseCommit $releaseCommit -ReleaseCommitRaw $payload.releaseCommitRaw -ReleaseBranch $payload.releaseBranch
                 if ($sha) {
                     return [pscustomobject]@{
                         status = "available"
@@ -598,14 +631,39 @@ function Get-WindoBootstrapPublishedChecksum {
                         url = $rawUrl
                         sha256 = $sha
                         blobSha = $null
-                        releaseCommit = $payload.releaseCommit
+                        requestedRef = $requestedRef
+                        requestedType = $requestedType
+                        releaseRef = $releaseRef
                         releaseBranch = $payload.releaseBranch
+                        sourceReleaseRef = $releaseRef
+                        sourceReleaseBranch = $sourceReleaseBranch
+                        compatibilityMode = $metadataState.CompatibilityMode
+                        compatibilityReason = $metadataState.Detail
+                        releaseCommit = $payload.releaseCommit
                         releaseCommitRaw = $payload.releaseCommitRaw
                         releaseBranchRaw = $payload.releaseBranchRaw
                         error = $null
                     }
                 }
-                throw "Published checksum payload was present but did not contain a valid SHA256."
+                return [pscustomobject]@{
+                    status = "invalid"
+                    source = "raw-fallback"
+                    url = $rawUrl
+                    sha256 = $null
+                    blobSha = $null
+                    requestedRef = $requestedRef
+                    requestedType = $requestedType
+                    releaseRef = $releaseRef
+                    releaseBranch = $payload.releaseBranch
+                    sourceReleaseRef = $releaseRef
+                    sourceReleaseBranch = $sourceReleaseBranch
+                    compatibilityMode = $metadataState.CompatibilityMode
+                    compatibilityReason = if ($metadataState.Detail) { $metadataState.Detail } else { "published checksum payload did not include a valid SHA256." }
+                    releaseCommit = $payload.releaseCommit
+                    releaseCommitRaw = $payload.releaseCommitRaw
+                    releaseBranchRaw = $payload.releaseBranchRaw
+                    error = "Published checksum payload was present but did not contain a valid SHA256."
+                }
             }
             throw "Published checksum raw response was empty."
         } catch {
@@ -623,10 +681,17 @@ function Get-WindoBootstrapPublishedChecksum {
         url = $rawUrl
         sha256 = $null
         blobSha = $null
+        requestedRef = $requestedRef
+        requestedType = $requestedType
+        releaseRef = $releaseRef
+        releaseBranch = $releaseBranch
+        sourceReleaseRef = $releaseRef
+        sourceReleaseBranch = $sourceReleaseBranch
+        compatibilityMode = $false
+        compatibilityReason = $apiError
         releaseCommit = "unknown"
-        releaseBranch = Get-WindoBootstrapReleaseBranch
         releaseCommitRaw = "unknown"
-        releaseBranchRaw = Get-WindoBootstrapReleaseBranch
+        releaseBranchRaw = $sourceReleaseBranch
         error = $apiError
     }
 }
@@ -646,19 +711,23 @@ function Start-WindoBootstrapInstaller {
     $shouldElevate = [Environment]::UserInteractive -and -not $env:CI
 
     if ($shouldElevate) {
-        Write-Host "[windo] Requesting elevated installer launch..." -ForegroundColor Cyan
+        Write-Host "[windo] Requesting elevation for installer..." -ForegroundColor Cyan
         try {
             $installerProcess = Start-WindoBootstrapProcess -FilePath $runnerExe -Verb RunAs -ArgumentList $argList -Wait -PassThru
             return [int]($installerProcess.ExitCode)
         } catch [System.ComponentModel.Win32Exception] {
             if ($_.Exception.NativeErrorCode -eq 1223) {
+                Write-Host "[windo] Installer launch was blocked: UAC consent was denied." -ForegroundColor Yellow
+                Write-Host "  Recovery one-liners:" -ForegroundColor Yellow
+                Write-Host "    Start-Process pwsh.exe -Verb RunAs -ArgumentList '-NoProfile','-Command','windo install-latest'" -ForegroundColor DarkGray
+                Write-Host "    Start-Process pwsh.exe -Verb RunAs -ArgumentList '-NoProfile','-Command','windo self-update'" -ForegroundColor DarkGray
                 return 1223
             }
             throw
         }
     }
 
-    Write-Host "[windo] Running bootstrap installer without elevation (non-interactive or CI session)." -ForegroundColor Cyan
+    Write-Host "[windo] Running installer without elevation (non-interactive/CI mode)." -ForegroundColor Cyan
     & $runnerExe @argList
     if ($LASTEXITCODE -is [int]) {
         return [int]$LASTEXITCODE

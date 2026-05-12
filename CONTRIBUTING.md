@@ -12,7 +12,7 @@ Contributions are welcome.
 
 ## Default branch name
 
-The public default branch is **`Genesis`**. Raw GitHub URLs depend on it; do not rename it casually without a documented migration and coordination.
+The public default branch is **`Prometheus`**. Raw GitHub URLs depend on it; update branch overrides through migration-safe procedures instead of casual renames.
 
 ## Workflow
 

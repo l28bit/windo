@@ -42,14 +42,14 @@ function Test-WindoHex64([string]$Value) {
 }
 
 function Get-WindoReleaseTargetMeta {
-    $rawBranch = "Exodus"
+    $rawBranch = "Prometheus"
     try {
         $resolvedBranch = (git -C $root rev-parse --abbrev-ref HEAD).Trim()
         if (-not [string]::IsNullOrWhiteSpace($resolvedBranch)) { $rawBranch = $resolvedBranch }
     } catch {}
 
-    if ($rawBranch -match '^(?i:genesis|genisis)$') { $rawBranch = "Exodus" }
-    if ($rawBranch -notmatch '^[A-Za-z0-9._-]{1,64}$') { $rawBranch = "Exodus" }
+    if ($rawBranch -match '^(?i:genesis|genisis)$') { $rawBranch = "Prometheus" }
+    if ($rawBranch -notmatch '^[A-Za-z0-9._-]{1,64}$') { $rawBranch = "Prometheus" }
 
     $rawCommit = $null
     try {

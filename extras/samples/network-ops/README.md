@@ -7,7 +7,7 @@ Local module for host/network diagnostics and WSL integration helpers.
 - Put this folder under `%USERPROFILE%\Documents\windo\modules`.
 - `module.json` declares:
   - `entry` = `Load.ps1`
-  - `requiresWindoVersion` = `6.0.0`
+- `requiresWindoVersion` = `8.4.0`
 - After enabling, WINDO's generated profile loader block will load `Load.ps1` at shell startup.
 - Commands are added with `wincmd` only if they do not already exist, so loading remains non-destructive.
 
@@ -35,9 +35,9 @@ Local module for host/network diagnostics and WSL integration helpers.
 - `netops-rdp-vnc`:
   - Uses WINDO `_emit_json` and the `rdp` envelope command when `-AsJson`/`--json` is active.
   - `-Subcommand status` payload fields:
-    - `command` (`"status"`), `subcommand`, `service`, `config`, `firewall`, `scannedAt`, `exitCode`.
+    - `command` (`"status"`), `subcommand`, `dryRun`, `service`, `config`, `firewall`, `scannedAt`, `exitCode`.
   - `-Subcommand firewall` payload fields:
-    - `command` (`"firewall"`), `subcommand`, `action`, `requestedPorts`, `runCommand`, `command-executed`, `updates`, `dryRun`, `scannedAt`, `exitCode`.
+    - `command` (`"firewall"`), `subcommand`, `action`, `requestedPorts`, `dryRun`, `rules`, `runCommand`, `command-executed`, `updates`, `scannedAt`, `exitCode`.
 - `netops-wsl`:
   - Uses WINDO `_emit_json` and the `wsl` envelope command when `-AsJson`/`--json` is active.
   - `-Mode status|list` payload fields:

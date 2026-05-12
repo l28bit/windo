@@ -19,7 +19,7 @@ WINDO’s core remains **deliberate elevation + auditability**. Optional **modul
 ## Curated extras (`windo extras`)
 
 - **Index:** the repository ships **`extras/index.json`** (schema **`schemaVersion`**). Each item should include **`id`**, **`description`**, **`maintainer`**, **`sourceUrl`**, and **`sha256`** when publishing a downloadable artifact.
-- **Search:** `windo extras search [query]` downloads the index from the **`v6`** branch unless you set **`WINDO_EXTRAS_INDEX_URL`** (also shown in **`windo config`** / **`windo config --json`** as **`extrasIndexUrl`**).
+- **Search:** `windo extras search [query]` downloads the index from the **`Prometheus`** branch unless you set **`WINDO_EXTRAS_INDEX_URL`** (also shown in **`windo config`** / **`windo config --json`** as **`extrasIndexUrl`**).
 - **Fetch:** `windo extras fetch <id>` downloads to **`%USERPROFILE%\Documents\windo\extras\<id>\`**, verifies **SHA256** when the index provides it, and **refuses to run while elevated (Administrator)**—same spirit as **`windo install-latest`**. Use **`--force`** only when the catalog entry intentionally omits a hash (discouraged for production use).
 
 See **[`SECURITY.md`](../SECURITY.md)** for the full rules on optional remote extras.
