@@ -8204,7 +8204,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Name        = "surface"
                 Category    = "Shell Experience"
                 Summary     = "Inspect and prime the native Windows surface layer."
-                Syntax      = @("windo surface [status] [--json]", "windo surface prime|pulse|doctor|repair|open|panel [--json]")
+                Syntax      = @("windo surface [status] [--json]", "windo surface prime|pulse|doctor|repair|open|panel|window [--json]")
                 Description = "Reports tray support, Windows Forms readiness, brand/tray paths, motion policy, prompt-init issues, and native surface readiness. Repair primes manifests and guards prompt init where needed."
                 Notes       = "Open starts the browser-independent tray path. Repair writes local manifest/control files and may update the current profile prompt guard with a backup."
                 Examples    = @("windo surface", "windo surface panel", "windo surface doctor", "windo surface repair", "windo surface open")
@@ -8231,10 +8231,10 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Name        = "center"
                 Category    = "Shell Experience"
                 Summary     = "PowerShell-native WINDO Command Center."
-                Syntax      = @("windo center [status] [--json]", "windo center open|tray|panel|studio", "windo center actions|signal|history", "windo center preview|run|queue <action-id>", "windo center execute-next|next", "windo center execute <request-id>")
+                Syntax      = @("windo center [status] [--json]", "windo center open|tray|panel|studio|surface|wizard|power", "windo center actions|signal|history", "windo center preview|run|queue <action-id>", "windo center execute-next|next", "windo center execute <request-id>")
                 Description = "Unifies tray, Power Studio, control plane, Signal Deck, native surface, motion, trust, recipes, modules, extras, audit, and export into a native-feeling Windows command center."
                 Notes       = "The first V6 center is PowerShell-native. A compiled companion helper is scaffolded for a later major release but is not required."
-                Examples    = @("windo center", "windo center studio", "windo center panel", "windo center actions", "windo center preview power-studio", "windo center queue diagnostics-snapshot", "windo center queue log-bundle-open", "windo center run diagnostics-snapshot", "windo center execute-next", "windo center signal")
+                Examples    = @("windo center", "windo center studio", "windo center wizard", "windo center power", "windo center surface", "windo center panel", "windo center actions", "windo center preview power-studio", "windo center queue diagnostics-snapshot", "windo center queue log-bundle-open", "windo center run diagnostics-snapshot", "windo center execute-next", "windo center signal")
             },
             [pscustomobject]@{
                 Name        = "studio"
@@ -8428,7 +8428,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             },
             [pscustomobject]@{
                 Name        = "venv"
-                Aliases     = @("python venv", "pyenv")
+                Aliases     = @("python", "pyenv")
                 Category    = "Developer"
                 Summary     = "Create and activate local Python virtual environments."
                 Syntax      = @("windo venv status [path] [--json]", "windo venv create [path] [--python <exe>]", "windo venv activate [path]", "windo venv deactivate", "windo venv remove <path> --force")
@@ -8919,8 +8919,8 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             return
         }
         if ($sub -notin @("status", "")) {
-            if ($JsonOutput) { _emit_json "surface" @{ error = "expected status | prime | pulse | doctor | repair | open | panel"; exitCode = 2 } }
-            else { Write-Host "[windo] surface: expected status | prime | pulse | doctor | repair | open | panel" -ForegroundColor Yellow }
+            if ($JsonOutput) { _emit_json "surface" @{ error = "expected status | prime | pulse | doctor | repair | open | panel | window"; exitCode = 2 } }
+            else { Write-Host "[windo] surface: expected status | prime | pulse | doctor | repair | open | panel | window" -ForegroundColor Yellow }
             _windo_set_exit 2
             return
         }
@@ -9509,7 +9509,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             return
         }
         if ($sub -notin @("status", "")) {
-            if ($JsonOutput) { _emit_json "center" @{ error = "expected status | open | tray | panel | studio | actions | preview | run | queue | execute-next | next | execute | history | signal"; exitCode = 2 } } else { Write-Host "[windo] center: expected status | open | tray | panel | studio | actions | preview | run | queue | execute-next | next | execute | history | signal" -ForegroundColor Yellow }
+            if ($JsonOutput) { _emit_json "center" @{ error = "expected status | open | tray | panel | studio | surface | wizard | power | actions | preview | run | queue | execute-next | next | execute | history | signal"; exitCode = 2 } } else { Write-Host "[windo] center: expected status | open | tray | panel | studio | surface | wizard | power | actions | preview | run | queue | execute-next | next | execute | history | signal" -ForegroundColor Yellow }
             _windo_set_exit 2
             return
         }
@@ -15261,19 +15261,6 @@ Write-Host "  Next in a normal shell:" -ForegroundColor Yellow
 Write-Host "    . `$PROFILE" -ForegroundColor Yellow
 Write-Host "    windo preflight" -ForegroundColor Yellow
 Write-Host "    windo dashboard --html" -ForegroundColor Yellow
-Write-Host "    windo version" -ForegroundColor Yellow
-Write-Host ""
-
-tallStep -Status ok -Label "WINDO v$WindoVersion installed" -Detail "snapshot: $SnapshotDir" -Color Green
-Write-Host ""
-Write-Host "  Next in a normal shell:" -ForegroundColor Yellow
-Write-Host "    . `$PROFILE" -ForegroundColor Yellow
-Write-Host "    windo preflight" -ForegroundColor Yellow
-Write-Host "    windo dashboard --html" -ForegroundColor Yellow
-Write-Host "    windo version" -ForegroundColor Yellow
-Write-Host ""
-
-oregroundColor Yellow
 Write-Host "    windo version" -ForegroundColor Yellow
 Write-Host ""
 
