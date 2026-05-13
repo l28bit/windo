@@ -42,11 +42,8 @@ function Test-WindoHex64([string]$Value) {
 }
 
 function Get-WindoReleaseTargetMeta {
-    $rawBranch = "Prometheus"
-    try {
-        $resolvedBranch = (git -C $root rev-parse --abbrev-ref HEAD).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($resolvedBranch)) { $rawBranch = $resolvedBranch }
-    } catch {}
+    $envBranch = [string]$env:WINDO_TRACKING_BRANCH
+    $rawBranch = if ([string]::IsNullOrWhiteSpace($envBranch)) { "Prometheus" } else { $envBranch.Trim() }
 
     if ($rawBranch -match '^(?i:genesis|genisis)$') { $rawBranch = "Prometheus" }
     if ($rawBranch -notmatch '^[A-Za-z0-9._-]{1,64}$') { $rawBranch = "Prometheus" }

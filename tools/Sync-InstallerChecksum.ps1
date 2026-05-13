@@ -10,7 +10,12 @@ $script:WindoRepoRoot = Split-Path $PSScriptRoot -Parent
 function Get-WindoReleaseBranch {
     param([string]$Branch)
 
-    $resolved = if ([string]::IsNullOrWhiteSpace($Branch)) { "Prometheus" } else { [string]$Branch.Trim() }
+    $rawBranch = if ([string]::IsNullOrWhiteSpace($Branch)) {
+        if ([string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { "Prometheus" } else { [string]$env:WINDO_TRACKING_BRANCH }
+    } else {
+        [string]$Branch.Trim()
+    }
+    $resolved = $rawBranch.Trim()
     if ($resolved -notmatch '^[A-Za-z0-9._-]{1,64}$') {
         return "Prometheus"
     }

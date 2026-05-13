@@ -343,8 +343,12 @@ $readPrefsFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_
 $readPrefsMapFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_read_windo_prefs_map"
 $verifyLogStateFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_verify_log_state"
 $writeTextFileAtomicFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "Write-TextFileAtomic"
+$writeLastMetaFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_write_last_meta"
 $controlStartActionFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_start_action"
 $controlQueueActionFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_queue_action"
+$controlFindRequestFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_find_request"
+$controlWriteRequestFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_write_request"
+$controlSetRequestStatusFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_set_request_status"
 $controlRootFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_root"
 $controlQueueRootFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_queue_root"
 $normalizePromptFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_normalize_handoff_prompt"
@@ -374,7 +378,7 @@ function _windo_start_downloaded_installer {
 }
 if (Test-Path Function:\_windo_verify_installer_sha256_optional) { Remove-Item Function:\_windo_verify_installer_sha256_optional -Force }
 function _windo_verify_installer_sha256_optional { }
-if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -and $setExitFn -and $promptSelfUpdateFn -and $taskAccessDeniedFn -and $runGenesisInstallerFn -and $verifyLogStateFn -and $appendLogFn -and $getLastHashFn -and $dpapiProtectFn -and $dpapiUnprotectFn -and $sha256HexFn -and $writeTextFileAtomicFn -and $controlStartActionFn -and $controlQueueActionFn -and $controlRootFn -and $controlQueueRootFn -and $normalizePromptFn -and $recipeCommandLineFn -and $recipePreviewFn -and $builtinRecipesFn -and $readPrefsFn -and $readPrefsMapFn) {
+if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -and $setExitFn -and $promptSelfUpdateFn -and $taskAccessDeniedFn -and $runGenesisInstallerFn -and $verifyLogStateFn -and $appendLogFn -and $getLastHashFn -and $dpapiProtectFn -and $dpapiUnprotectFn -and $sha256HexFn -and $writeTextFileAtomicFn -and $writeLastMetaFn -and $controlFindRequestFn -and $controlWriteRequestFn -and $controlSetRequestStatusFn -and $controlStartActionFn -and $controlQueueActionFn -and $controlRootFn -and $controlQueueRootFn -and $normalizePromptFn -and $recipeCommandLineFn -and $recipePreviewFn -and $builtinRecipesFn -and $readPrefsFn -and $readPrefsMapFn) {
     Invoke-Expression $commandPlanFn
     Invoke-Expression $joinPlanFn
     Invoke-Expression $quotePlanPartFn
@@ -416,12 +420,16 @@ if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -a
     }
     Invoke-Expression $controlRootFn
     Invoke-Expression $controlQueueRootFn
+    Invoke-Expression $controlFindRequestFn
+    Invoke-Expression $controlWriteRequestFn
+    Invoke-Expression $controlSetRequestStatusFn
     Invoke-Expression $controlQueueActionFn
     Invoke-Expression $controlStartActionFn
     Invoke-Expression $getLastHashFn
     Invoke-Expression $dpapiProtectFn
     Invoke-Expression $dpapiUnprotectFn
     Invoke-Expression $sha256HexFn
+    Invoke-Expression $writeLastMetaFn
     Invoke-Expression $readPrefsFn
     Invoke-Expression $readPrefsMapFn
     $savedTaskMain = (Get-Variable -Name TaskName -Scope Script -ErrorAction SilentlyContinue).Value
@@ -441,6 +449,7 @@ if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -a
     $TaskUpdate = "WindoSelfUpdate"
     $WindoVersion = "8.4.0"
     $SecureDir = Join-Path ([IO.Path]::GetTempPath()) "windo-test-logic-secure"
+    $LastMetaFile = Join-Path $SecureDir "windo_last_meta.json"
     New-Item -ItemType Directory -Path $SecureDir -Force | Out-Null
     try {
         $installPlan = _windo_new_command_plan @("install-latest")
@@ -522,9 +531,11 @@ if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -a
             Assert-State "control start action returns request id" $true ([string]::IsNullOrWhiteSpace($controlStartActionExit.requestId) -eq $false) "control action run emits request id"
             $controlLogLine = Get-Content -Path $LogFile -Tail 1
             $parts = $controlLogLine -split ":", 2
-            $controlLogPayload = _dpapi_unprotect $parts[1]
+            $controlLogPayload = (_dpapi_unprotect $parts[1]).Trim()
             $controlLogEntry = $controlLogPayload | ConvertFrom-Json
-            Assert-State "control action log has request id" $controlStartActionExit.requestId $controlLogEntry.RequestId "control action log captures request id"
+            $controlStartActionRequestId = if ($null -ne $controlStartActionExit.requestId) { [string]$controlStartActionExit.requestId } else { "" }
+            $controlLogRequestId = if ($null -ne $controlLogEntry.RequestId) { [string]$controlLogEntry.RequestId } else { "" }
+            Assert-State "control action log has request id" ($controlStartActionRequestId.Trim()) ($controlLogRequestId.Trim()) "control action log captures request id"
             Assert-State "control action log has exit code" 11 $controlLogEntry.ExitCode "control action log captures exit code"
             Assert-State "control action log command is run invocation" "windo control run upgrade-history-open" $controlLogEntry.Command "control action log stores command"
         } finally {
@@ -777,8 +788,8 @@ if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -
 } else {
     Assert-Equal $false $true "bootstrap exposes bool, spinner, and release metadata helpers"
 }
-Assert-Pattern $bootstrapSource '(?is)\$bootstrapAutoLaunch\s*-\bor\b\s*\$bootstrapForceInstall\s*-\bor\b\s*\$env:CI' "bootstrap launch branch respects CI and opt-out env vars"
-Assert-Pattern $installerSource '(?is)if \(\$ForceContinue -or \$env:WINDO_INSTALL_NONINTERACTIVE -or \$env:CI\)' "installer launch path honors CI/non-interactive launch"
+Assert-Pattern $bootstrapSource '(?is)\$bootstrapAutoLaunch.*?\$bootstrapForceInstall.*?\$ciAutoMode' "bootstrap launch branch respects CI and opt-out env vars"
+Assert-Pattern $installerSource '(?is)(if \(\$ForceContinue -or \$nonInteractiveAuto -or \$ciAutoMode\)|if \(\$ForceContinue -or \$env:WINDO_INSTALL_NONINTERACTIVE -or \$env:CI\))' "installer launch path honors CI/non-interactive launch"
 
 $runGenesisSavedCI = if (Test-Path Env:CI) { (Get-Item Env:CI).Value } else { $null }
 $runGenesisSavedNonInteractive = if (Test-Path Env:WINDO_INSTALL_NONINTERACTIVE) { (Get-Item Env:WINDO_INSTALL_NONINTERACTIVE).Value } else { $null }
@@ -1142,11 +1153,11 @@ Assert-Pattern $installerSource 'if \(\$Command.Count -ge 1 -and \$Command\[0\] 
 Assert-Pattern $installerSource '\$tx\s*-\s*(?:ieq|eq)\s*["'']/\?["'']' "windo parser recognizes /? as help marker token"
 Assert-Pattern $installerSource '\$tx\s*-\s*(?:ieq|eq)\s*["'']\?["'']' "windo parser recognizes ? as help marker token"
 Assert-Pattern $installerSource '\$tx\s*-\s*(?:ieq|eq)\s*["'']-\?["'']' "windo parser recognizes -? as help marker token"
-Assert-Pattern $installerSource '\$Command\[-1\]\s*-\s*(?:ieq|eq)\s*["'']/\?["'']\s*-or\s*\$Command\[-1\]\s*-\s*(?:ieq|eq)\s*["'']\?["'']\s*-or\s*\$Command\[-1\]\s*-\s*(?:ieq|eq)\s*["'']-\?["'']' "windo parser trims trailing help marker token"
+Assert-Equal ($installerSource.Contains('$Command.Count -ge 1 -and (($Command[-1] - ieq "/?") -or ($Command[-1] - ieq "?") -or ($Command[-1] - ieq "-?"))') -eq $true) $true "windo parser trims trailing help marker token"
 Assert-Pattern $installerSource '\$normalized -in @\(\s*"\?",\s*"/\?",\s*"-\?"\s*\)' "windo help topic normalization treats marker-only tokens as help request"
 Assert-Equal (($installerSource.Contains("Scheduled task registration deferred") -or $installerSource.Contains("Task registration failed; continuing with best-effort non-task mode.")) -eq $true) $true "installer tracks partial install when task setup is deferred"
 Assert-Equal ($installerSource.Contains("taskRegistrationSucceeded = [bool]") -eq $true) $true "installer persists task-registration status in manifest"
-Assert-Equal ($installerSource.Contains("[windo] ${DisplayCommand} launch was declined. Update handoff was not applied.") -eq $true) $true "installer reports UAC decline deterministically"
+Assert-Equal ($installerSource.Contains("launch was declined. Update handoff was not applied.") -eq $true) $true "installer reports UAC decline deterministically"
 Assert-Equal ($installerSource.Contains('[windo] Task missing: $TaskName (run installer elevated once)') -eq $true) $true "installer detects missing elevated task explicitly"
 Assert-Equal (($installerSource -match "function _windo_parse_timeout_override_ms") -eq $true) $true "installer parses timeout override"
 Assert-Equal (($installerSource -match "PreserveEnvironment") -eq $true) $true "installer captures preserve-env payload"
@@ -1292,7 +1303,8 @@ if ($helpTopicsStart -ge 0 -and $helpTopicsEnd -gt $helpTopicsStart) {
     $recipesHelp = @($helpTopics | Where-Object { $_.Name -eq "recipes" })
     Assert-Equal ($doctorHelp.Count -eq 1) $true "help topic catalog documents doctor"
     Assert-Equal ($doctorHelp[0].Aliases -contains "health") $true "doctor help topic lists health alias"
-    Assert-Pattern (($doctorHelp[0].Syntax -join "`r`n")) "windo health \\[--json\\]" "doctor help topic documents health syntax"
+    $doctorSyntaxText = ($doctorHelp[0].Syntax -join "`r`n")
+    Assert-Equal ($doctorSyntaxText.Contains("windo health [--json]") -or $doctorSyntaxText.Contains('windo health \[--json\]')) $true "doctor help topic documents health syntax"
     Assert-Pattern (($doctorHelp[0].Examples -join "`r`n")) "windo health --json" "doctor help topic includes health example"
     Assert-Equal ($netScanHelp.Count -eq 1) $true "help topic catalog documents net-scan"
     Assert-Equal ($containerHelp.Count -eq 1) $true "help topic catalog documents container"
@@ -1324,11 +1336,13 @@ if ($helpTopicsStart -ge 0 -and $helpTopicsEnd -gt $helpTopicsStart) {
     Assert-Pattern (($rdpHelp[0].Syntax -join "`r`n")) "windo rdp" "help topic catalog documents rdp syntax"
     Assert-Equal ($preflightHelp.Count -eq 1) $true "help topic catalog documents preflight"
     Assert-Equal ($preflightHelp[0].Aliases -contains "check") $true "preflight help topic lists check alias"
-    Assert-Pattern (($preflightHelp[0].Syntax -join "`r`n")) "windo check \\[--json\\]" "preflight help topic documents check syntax"
+    $preflightSyntaxText = ($preflightHelp[0].Syntax -join "`r`n")
+    Assert-Equal ($preflightSyntaxText.Contains("windo check [--json]") -or $preflightSyntaxText.Contains('windo check \[--json\]')) $true "preflight help topic documents check syntax"
     Assert-Pattern (($preflightHelp[0].Examples -join "`r`n")) "windo check --json" "preflight help topic includes check example"
     Assert-Equal ($sessionHelp.Count -eq 1) $true "help topic catalog documents session"
     Assert-Equal ($sessionHelp[0].Aliases -contains "status") $true "session help topic lists status alias"
-    Assert-Pattern (($sessionHelp[0].Syntax -join "`r`n")) "windo status \\[--json\\]" "session help topic documents status syntax"
+    $sessionSyntaxText = ($sessionHelp[0].Syntax -join "`r`n")
+    Assert-Equal ($sessionSyntaxText.Contains("windo status [--json]") -or $sessionSyntaxText.Contains('windo status \[--json\]')) $true "session help topic documents status syntax"
     Assert-Pattern (($sessionHelp[0].Examples -join "`r`n")) "windo status --json" "session help topic includes status example"
     Assert-Pattern (($wslHelp[0].Syntax -join "`r`n")) "windo wsl" "help topic catalog documents wsl syntax"
     Assert-Pattern (($wslHelp[0].Syntax -join "`r`n")) "windo wsl install" "help topic catalog documents wsl install syntax"

@@ -335,8 +335,8 @@ function Get-WindoBootstrapFileBlobSha1 {
 
 function Test-WindoBootstrapSpinnerEnabled {
     if (-not $script:WindoBootstrapSupportsBackgroundJobs) { return $false }
-    if ($env:WINDO_NO_SPINNER) { return $false }
-    if ($env:CI) { return $false }
+    if (ConvertFrom-WindoBootstrapBool -Name WINDO_NO_SPINNER) { return $false }
+    if (ConvertFrom-WindoBootstrapBool -Name CI) { return $false }
     try {
         if ([Console]::IsOutputRedirected) { return $false }
     } catch {
@@ -708,7 +708,8 @@ function Start-WindoBootstrapInstaller {
     } catch {}
 
     $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath)
-    $shouldElevate = [Environment]::UserInteractive -and -not $env:CI
+    $ciMode = ConvertFrom-WindoBootstrapBool -Name CI -Default $false
+    $shouldElevate = [Environment]::UserInteractive -and -not $ciMode
 
     if ($shouldElevate) {
         Write-Host "[windo] Requesting elevation for installer..." -ForegroundColor Cyan
@@ -837,7 +838,8 @@ $got = Get-WindoBootstrapFileHash -Path $Temp
     $doLaunch = $false
     $bootstrapForceInstall = ConvertFrom-WindoBootstrapBool -Name WINDO_BOOTSTRAP_FORCE_INSTALL
     $bootstrapAutoLaunch = ConvertFrom-WindoBootstrapBool -Name WINDO_INSTALL_NONINTERACTIVE
-    if ($bootstrapAutoLaunch -or $bootstrapForceInstall -or $env:CI) {
+    $ciAutoMode = ConvertFrom-WindoBootstrapBool -Name CI
+    if ($bootstrapAutoLaunch -or $bootstrapForceInstall -or $ciAutoMode) {
         $doLaunch = $true
         Write-Host "[windo] Proceeding without prompt (CI or WINDO_BOOTSTRAP_FORCE_INSTALL or WINDO_INSTALL_NONINTERACTIVE)." -ForegroundColor DarkGray
     } elseif ([Environment]::UserInteractive) {
