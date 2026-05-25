@@ -2,11 +2,33 @@
 
 ## Summary
 
-This release keeps the installer behavior stable while switching the canonical source contract to a new branch name for bootstrap, install/update, and checksum operations:
+This release unifies installer identity under **V8.4** while preserving upgrade behavior and audit boundaries:
 
-- Canonical branch: `Prometheus`
-- Installer metadata release branch entries: `releaseBranch=Prometheus`, `releaseBranchRaw=Prometheus`
-- Install/update handoff remains via the same script entrypoints and environment-variable controls
+- Canonical branch: `Prometheus` (published contract)
+- Development integration branch: `Exodus` (active until next Special Edition)
+- Installer semver: `8.4.0` with `V8.4` branding
+- Installer metadata: `releaseBranch=Prometheus`, `releaseBranchRaw=Prometheus`
+
+## Features in this release
+
+### Version contract
+
+- `windo version --contract` shows edition, branch, schema, and branding.
+- JSON `version` payloads include a `contract` object for automation.
+
+### Network ops (6.x lineage)
+
+- `windo net-scan`, `windo rdp`, `windo wsl`, `windo container`, and `extras/network-ops`.
+
+### Sudo-like shell (7.x lineage)
+
+- Aliases: `do`, `recdo`, `upd`, `health`, `check`, `status`.
+- Explicit install/self-update `[y/N]` handoff with non-interactive paths.
+
+### Command center (8.4 polish)
+
+- V8.4 HTML/branding across launchpad, edition, and installer surfaces.
+- New control actions: `open-windo-folder`, `health-snapshot-html`, `net-scan-status`, `studio-open`, `upgrade-history-open`, `center-open`.
 
 ## Migration
 

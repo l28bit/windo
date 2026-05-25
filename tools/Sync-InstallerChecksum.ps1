@@ -49,13 +49,6 @@ function Resolve-WindoReleaseMetadata {
     $branchWasProvided = -not [string]::IsNullOrWhiteSpace($Branch)
     $rawBranch = if ($branchWasProvided) { [string]$Branch.Trim() } else { $null }
     $releaseBranch = Get-WindoReleaseBranch $rawBranch
-    if (-not $branchWasProvided) {
-        $gitBranch = Get-WindoGitBranch
-        if ($gitBranch) {
-            $rawBranch = $gitBranch
-            $releaseBranch = Get-WindoReleaseBranch $gitBranch
-        }
-    }
 
     if ([string]::IsNullOrWhiteSpace($releaseBranch)) {
         $releaseBranch = "Prometheus"

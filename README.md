@@ -15,6 +15,8 @@ Experienced operators treat commands as intent. Elevation should not be accident
 
 The default GitHub branch for raw URLs is **`Prometheus`** unless overridden by `WINDO_TRACKING_BRANCH`.
 
+**Version story:** the live installer reports **`8.4.0`** with **`V8.4`** branding. **`Prometheus`** is the published release contract for bootstrap, upgrade, and checksum verification. **`Exodus`** remains the active development integration branch until the next Special Edition milestone. Use `windo version --contract` to inspect the effective contract on any machine.
+
 Release source contract:
 - `WINDO_RELEASE_COMMIT` (optional valid 40-hex commit) has highest priority.
 - `WINDO_TRACKING_BRANCH` (default `Prometheus`) is the fallback branch.
@@ -24,8 +26,11 @@ Release source contract:
 
 ## What's new in WINDO V8.4
 
+- **Single version contract** — `windo version --contract` shows semver (`8.4.0`), edition (`V8.4`), branch (`Prometheus` by default), and JSON schema version in one place.
 - **V8.4 command surface and branding** — refreshed installer identity (`WINDO 8.4.0 V8.4`) and aligned README guidance for concise operator workflows.
+- **Sudo-like aliases** — `windo do`, `windo recdo`, `windo upd`, `windo health`, `windo check`, and `windo status` map to the underlying WINDO verbs without weakening elevation gates.
 - **Network posture in one command** — `windo net-scan` now covers `status`, `resolve`, `arp`, and `ping` with clear local-only behavior and bounded probing defaults.
+- **Tray/studio quick actions** — control/center actions for network status, Power Studio, health snapshots, and workspace folder open.
 - **Container handoff** — `windo container` now provides a validated docker/podman control surface with `--runtime` explicitness and safe defaults.
 - **NetOps companion module** — `extras/network-ops` adds `netops-*` local helpers for subnet scan, ARP map, RDP/VNC posture checks, and WSL access helpers.
 - **Safety defaults documented** — `net-scan` defaults keep scans bounded (`--host-limit 254`, `--timeout 1`) and do not transmit probe data off the host unless user commands do.

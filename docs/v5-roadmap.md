@@ -33,7 +33,9 @@ WINDO's major-version path should keep the product useful every step of the way.
 | 5.3.0 | Power Studio | Turn the native surface into guided Windows wizard workflows. | Shipped |
 | 5.4.0 | Windows Integration Plane | Make WINDO feel like a current-user Windows system tool. | Shipped |
 | 5.4.1 | Completion Recovery | Keep command discovery available when keybinding setup is skipped. | Shipped |
-| 8.4.0 | Prometheus Contract | Reanchor canonical source and checksum metadata to `Prometheus` while preserving upgrade behavior. | In progress |
+| 6.0.0 | Network Ops Plane | Local network posture, RDP/WSL/container helpers, and bounded net-scan probing. | Shipped |
+| 7.0.0 | Sudo Shell | Shorter admin verbs (`do`, `recdo`, `upd`, `health`, `check`, `status`) with explicit elevation. | Shipped |
+| 8.4.0 | Prometheus Contract | Single V8.4 installer identity, checksum manifest, and command center branding. | Current |
 
 ## Scope by phase
 
@@ -180,6 +182,28 @@ WINDO's major-version path should keep the product useful every step of the way.
 - `windo completion doctor` verifies completion registration and sample WINDO command results.
 - `windo completion repair` re-registers the completer in the current session.
 - Completion diagnostics become part of the Windows integration hardening path.
+
+### 6.0.0 Network Ops Plane
+
+- `windo net-scan` covers status, resolve, ARP, ping, probe, nmap, RDP/VNC apply controls, and WSL posture.
+- `windo rdp`, `windo vnc`, `windo container`, and `windo wsl` provide structured JSON operator surfaces.
+- `extras/samples/network-ops` adds curated `netops-*` helpers for subnet scan, firewall posture, and access workflows.
+- Probing defaults stay bounded and local-first (`--host-limit`, short timeouts).
+
+### 7.0.0 Sudo Shell
+
+- `windo do` mirrors `windo run --recipe` for recipe elevation; `windo recdo` mirrors `windo recipes run`.
+- Lifecycle aliases: `windo upd`, `windo up`, `windo health`, `windo check`, `windo status`.
+- Install/self-update handoff uses explicit `[y/N]` prompts with non-interactive escape hatches.
+- Global sudo-style flags (`-E`, `-n`, `-k`, `SUDO_TIMEOUT`) remain compatible with elevation routing.
+
+### 8.4.0 Prometheus Contract
+
+- Installer/bootstrap branding: `WINDO 8.4.0 V8.4`.
+- Published source branch defaults to `Prometheus`; `WINDO_TRACKING_BRANCH` and `WINDO_RELEASE_COMMIT` still override.
+- `windo version --contract` exposes edition, branch, schema, and branding in one view.
+- Command center/control actions expand with folder open, health snapshot, network status, studio open, and upgrade history surfaces.
+- Checksum manifest uses `releaseBranch=Prometheus` with strict-mode optional verification.
 
 ### Future companion package
 

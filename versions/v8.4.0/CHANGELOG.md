@@ -17,32 +17,24 @@ Release notes: [`docs/releases/RELEASE_NOTES_v8.4.0.md`](docs/releases/RELEASE_N
 - Contract migration for V8.4: canonical source branch moved from `Exodus`/`v6` to `Prometheus`.
 - Dual-release migration notes added for V6.x and V7.x operators.
 - Installer manifest checks readiness for `Prometheus` and `8.4.0` release metadata.
+- Release train entries for **6.0.0 Network Ops Plane**, **7.0.0 Sudo Shell**, and **8.4.0 Prometheus Contract**.
+- `windo version --contract` for edition, branch, and schema visibility in human and JSON output.
+- Control/center quick actions: `net-scan-status`, `studio-open`.
+- Runtime alias wiring for `windo do` → `run` and `windo recdo` → `recipes run`.
 
 ### Changed
 
 - Installer and bootstrap identity updated to `WINDO 8.4.0 V8.4` while preserving existing installer behavior and upgrade handshake.
+- Published installer handoff function renamed to `_windo_run_published_installer` (replacing legacy `genisis` naming).
+- `windo roadmap` now reports V8.4 as the active target major instead of the retired V4-only runway copy.
 
 ### Fixed
 
 - Internal branch-selection and checksum tooling now normalize default branch selection to `Prometheus`, reducing contract ambiguity for upgrade and self-update paths.
 
-## [6.0.0] - Unreleased
+## [6.0.0] - Superseded
 
-Release notes: [`docs/releases/RELEASE_NOTES_v6.0.0.md`](docs/releases/RELEASE_NOTES_v6.0.0.md).
-
-### Added
-
-- _None in this release._
-
-### Changed
-
-- Canonical `bootstrap.ps1`/`windo install-latest`/`windo upgrade` source wording is normalized to **`Exodus`** across README, SECURITY, and release notes. Historical branch names (`Genesis`) remain in older release notes and are not current contract.
-- `WINDO_STRICT_INSTALLER_VERIFICATION=1` strict-mode behavior is documented as fail-fast on checksum/source/branch divergence, while non-strict mode remains warning-based compatibility.
-- Release notes now include the stabilized diagnostics contract for install/update integrity and self-update repair prompting.
-
-### Fixed
-
-- Clarified installation/update strictness and branch-source contract drift messaging so interactive and non-interactive prompts have consistent documentation.
+This line was consolidated into the **8.4.0** release contract. Historical notes remain in [`docs/releases/RELEASE_NOTES_v6.0.0.md`](docs/releases/RELEASE_NOTES_v6.0.0.md) for operators who pinned older branch wording (`Exodus`, `v6`). The live installer semver and branding are **8.4.0 / V8.4** with **`Prometheus`** as the published source branch unless overridden.
 
 ## [5.4.1] - 2026-05-07
 

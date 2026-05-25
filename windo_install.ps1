@@ -1554,6 +1554,11 @@ function windo {
             elseif ($firstToken -eq "health") { $Command[0] = "doctor" }
             elseif ($firstToken -eq "check") { $Command[0] = "preflight" }
             elseif ($firstToken -eq "status") { $Command[0] = "session" }
+            elseif ($firstToken -eq "do") { $Command[0] = "run" }
+            elseif ($firstToken -eq "recdo") {
+                if ($Command.Count -gt 1) { $Command = @("recipes", "run") + @($Command[1..($Command.Count - 1)]) }
+                else { $Command = @("recipes", "run") }
+            }
         }
 
         if ($null -eq $CommandTimeoutOverrideMs -and -not [string]::IsNullOrWhiteSpace($env:SUDO_TIMEOUT)) {
@@ -3793,6 +3798,30 @@ Use: windo prompt --json   (machine-readable bundle)
                 focus = @("profile completion registration", "completion doctor", "completion repair", "keybinding early-exit hardening", "integration completion checks")
                 status = "shipped"
                 operatorValue = "Operators can validate and repair tab completion from the shell instead of discovering a silent path-completion fallback."
+            },
+            [pscustomobject]@{
+                version = "6.0.0"
+                codename = "Network Ops Plane"
+                theme = "Bring local network posture, remote access helpers, and container handoff into one operator surface."
+                focus = @("windo net-scan", "windo rdp", "windo wsl", "windo container", "network-ops extras", "bounded probing defaults")
+                status = "shipped"
+                operatorValue = "Operators can inspect adapters, sweep subnets, probe ports, and review RDP/WSL/container posture without leaving the WINDO shell."
+            },
+            [pscustomobject]@{
+                version = "7.0.0"
+                codename = "Sudo Shell"
+                theme = "Make deliberate elevation feel as natural as Linux sudo while preserving WINDO audit boundaries."
+                focus = @("windo do", "windo recdo", "health check status aliases", "install handoff prompts", "self-update y/N repair", "sudo-like global flags")
+                status = "shipped"
+                operatorValue = "Common admin verbs become shorter (`do`, `upd`, `health`, `check`, `status`) while elevation, logging, and checksum gates stay explicit."
+            },
+            [pscustomobject]@{
+                version = "8.4.0"
+                codename = "Prometheus Contract"
+                theme = "Reanchor installer identity, checksum manifest, and command center branding to a single V8.4 release contract."
+                focus = @("Prometheus branch contract", "V8.4 command center", "control/center action expansion", "strict installer verification", "version contract visibility", "Wave 11+ migration")
+                status = "in-progress"
+                operatorValue = "Upgrade, bootstrap, and self-update paths share one coherent source branch, semver, and operator-facing V8.4 identity."
             }
         )
     }
@@ -4632,7 +4661,7 @@ Use: windo prompt --json   (machine-readable bundle)
         return $true
     }
 
-    function _windo_run_genisis_installer {
+    function _windo_run_published_installer {
         param(
             [switch]$ForceContinue,
             [switch]$NonInteractive,
@@ -5432,6 +5461,18 @@ function _windo_draw_ascii_startup_frame {
         if ($lower -eq "genesis" -or $lower -eq "genisis") { return "Prometheus" }
         if ($trimmed -notmatch '^[A-Za-z0-9._-]{1,64}$') { return "Prometheus" }
         return $trimmed
+    }
+
+    function _windo_release_contract {
+        return [ordered]@{
+            semver = $WindoVersion
+            edition = "V8.4"
+            releaseBranch = (_windo_release_branch)
+            schemaVersion = "3.0"
+            installerBranding = "WINDO V8.4 Installer"
+            publishedContractBranch = "Prometheus"
+            developmentBranchNote = "Exodus is the active integration branch until the next Special Edition release."
+        }
     }
 
     function _windo_release_ref {
@@ -7464,6 +7505,8 @@ if ($changed) { Write-TextFileAtomic -Path $path -Content $body -Encoding ([Syst
             [pscustomobject]@{ id = "launchpad-tray"; title = "Start Tray"; command = "windo launchpad --tray"; group = "native"; execution = "visible-shell"; description = "Start the browser-independent tray command center." },
             [pscustomobject]@{ id = "open-windo-folder"; title = "Open WINDO Folder"; command = 'Invoke-Item (Join-Path $env:USERPROFILE "Documents\windo")'; group = "native"; execution = "visible-shell"; description = "Open the WINDO workspace folder under Documents." },
             [pscustomobject]@{ id = "health-snapshot-html"; title = "Health Snapshot HTML"; command = "windo dashboard --html"; group = "visual"; execution = "visible-shell"; description = "Generate and open the local health dashboard HTML snapshot." },
+            [pscustomobject]@{ id = "net-scan-status"; title = "Network Status"; command = "windo net-scan status --json"; group = "security"; execution = "visible-shell"; description = "Show local adapter, DNS, and gateway posture from the V8.4 network ops plane." },
+            [pscustomobject]@{ id = "studio-open"; title = "Open Power Studio"; command = "windo center studio"; group = "visual"; execution = "visible-shell"; description = "Launch the guided Power Studio wizard surface for trust, repair, and package workflows." },
             [pscustomobject]@{ id = "upgrade-history-open"; title = "Upgrade History"; command = "windo roadmap"; group = "trust"; execution = "visible-shell"; description = "Open the WINDO upgrade and release history." },
             [pscustomobject]@{ id = "center-open"; title = "Open Command Center"; command = "windo center open"; group = "visual"; execution = "visible-shell"; description = "Open the command center immediately." },
             [pscustomobject]@{ id = "diagnostics-snapshot"; title = "Diagnostics Snapshot"; command = "`$exitCode = 0; windo preflight --json; `$stepCode = if (`$global:WINDO_EXIT_CODE -is [int]) { [int]`$global:WINDO_EXIT_CODE } elseif (`$LASTEXITCODE -is [int]) { [int]`$LASTEXITCODE } else { 0 }; if (`$stepCode -gt `$exitCode) { `$exitCode = `$stepCode }; windo trust --json; `$stepCode = if (`$global:WINDO_EXIT_CODE -is [int]) { [int]`$global:WINDO_EXIT_CODE } elseif (`$LASTEXITCODE -is [int]) { [int]`$LASTEXITCODE } else { 0 }; if (`$stepCode -gt `$exitCode) { `$exitCode = `$stepCode }; windo surface doctor --json; `$stepCode = if (`$global:WINDO_EXIT_CODE -is [int]) { [int]`$global:WINDO_EXIT_CODE } elseif (`$LASTEXITCODE -is [int]) { [int]`$LASTEXITCODE } else { 0 }; if (`$stepCode -gt `$exitCode) { `$exitCode = `$stepCode }; windo integrate doctor --json; `$stepCode = if (`$global:WINDO_EXIT_CODE -is [int]) { [int]`$global:WINDO_EXIT_CODE } elseif (`$LASTEXITCODE -is [int]) { [int]`$LASTEXITCODE } else { 0 }; if (`$stepCode -gt `$exitCode) { `$exitCode = `$stepCode }; exit `$exitCode"; group = "repair"; execution = "visible-shell"; description = "Run preflight, trust, surface, and integration diagnostics in one action." },
@@ -8016,11 +8059,11 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             [pscustomobject]@{
                 Name        = "version"
                 Category    = "Core"
-                Summary     = "Show WINDO version, file paths, and integrity checks."
-                Syntax      = @("windo version [--json]")
-                Description = "Use for quick operational checks after profile load or automation."
-                Notes       = "Use with `windo doctor` to correlate task/path state."
-                Examples    = @("windo version", "windo version --json")
+                Summary     = "Show WINDO version, release contract, file paths, and integrity checks."
+                Syntax      = @("windo version [--json]", "windo version --contract [--json]")
+                Description = "Use for quick operational checks after profile load or automation. Includes V8.4 edition and branch contract metadata."
+                Notes       = "Use with `windo doctor` to correlate task/path state. `--contract` prints contract fields only."
+                Examples    = @("windo version", "windo version --contract", "windo version --json")
             },
             [pscustomobject]@{
                 Name        = "install-latest"
@@ -8308,7 +8351,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 Syntax      = @("windo control [status] [--json]", "windo control prime|actions|history|pulse|clear", "windo control preview <action-id>", "windo control queue <action-id> [note]", "windo control execute-next|next", "windo control execute|inspect|cancel <request-id>", "windo control run <action-id>")
                 Description = "Builds a local action catalog, manifest, request queue, result files, and visible-shell executor under .pwsh_secure so tray/native surfaces can orchestrate known commands without a browser."
                 Notes       = "Only curated WINDO action IDs can run. preview is read-only. execute-next consumes the oldest queued request; execute <request-id> runs a specific queued request."
-                Examples    = @("windo control", "windo control actions", "windo control preview surface-prime", "windo control queue surface-prime", "windo control run diagnostics-snapshot", "windo control run log-bundle-open", "windo control run open-windo-folder", "windo control queue upgrade-history-open", "windo control run health-snapshot-html", "windo control run center-open", "windo control execute-next", "windo control execute <id>")
+                Examples    = @("windo control", "windo control actions", "windo control preview surface-prime", "windo control queue surface-prime", "windo control run diagnostics-snapshot", "windo control run log-bundle-open", "windo control run open-windo-folder", "windo control queue upgrade-history-open", "windo control run health-snapshot-html", "windo control run net-scan-status", "windo control run studio-open", "windo control run center-open", "windo control execute-next", "windo control execute <id>")
             },
             [pscustomobject]@{
                 Name        = "signal"
@@ -10059,7 +10102,7 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
         $releases = @(_windo_roadmap_releases)
         $payload = [ordered]@{
             currentVersion = $WindoVersion
-            targetMajor = "reserved"
+            targetMajor = "8.4"
             releaseTrain = @($releases)
             principles = @(
                 "Keep deliberate elevation and auditability as the core.",
@@ -10073,8 +10116,8 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
             _emit_json "roadmap" $payload
         } else {
             Write-Host "[windo] Release runway" -ForegroundColor Cyan
-            Write-Host "  Current : $WindoVersion" -ForegroundColor DarkGray
-            Write-Host "  Target  : V4 Operator Mesh shipped; future major reserved" -ForegroundColor Yellow
+            Write-Host "  Current : $WindoVersion (V8.4)" -ForegroundColor DarkGray
+            Write-Host "  Target  : V8.4 Prometheus contract (Wave 11+ operator surface)" -ForegroundColor Green
             foreach ($r in $releases) {
                 $color = if ($r.status -in @("in-progress", "late-stage")) { "Green" } elseif ($r.status -eq "reserved") { "Magenta" } else { "DarkGray" }
                 Write-Host ("  {0,-7} {1,-30} {2}" -f $r.version, $r.codename, $r.status) -ForegroundColor $color
@@ -13978,7 +14021,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
                 }
             }
         }
-        _windo_run_genisis_installer -ForceContinue:$forceInst -NonInteractive:$NonInteractive -DisplayCommand:$requestedUpdateCommand
+        _windo_run_published_installer -ForceContinue:$forceInst -NonInteractive:$NonInteractive -DisplayCommand:$requestedUpdateCommand
         return
     }
 
@@ -14415,7 +14458,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
                 Write-Host "[windo] Self-update task '$TaskUpdate' is missing: $($_.Exception.Message)" -ForegroundColor Yellow
                 if (_windo_prompt_self_update_installer -NonInteractive:$NonInteractive) {
                     Write-Host "[windo] Running installer repair now. Re-run windo self-update after repair completes." -ForegroundColor Yellow
-                    $repairStarted = [bool](_windo_run_genisis_installer -ForceContinue:$true -DisplayCommand "self-update")
+                    $repairStarted = [bool](_windo_run_published_installer -ForceContinue:$true -DisplayCommand "self-update")
                     if ($repairStarted) {
                         _windo_draw_ascii_startup_frame -Context "self-update" -Label "windo self-update handoff" -State "REPAIRED-VIA-INSTALLER" -Color Cyan
                     } elseif ($global:WINDO_EXIT_CODE -eq 2) {
@@ -14444,7 +14487,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
                 if (_windo_is_task_access_denied $errText) {
                     if (_windo_prompt_self_update_installer -NonInteractive:$NonInteractive) {
                         Write-Host "[windo] Task execution was blocked by elevation policy; running installer repair now." -ForegroundColor Yellow
-                        $repairStarted = [bool](_windo_run_genisis_installer -ForceContinue:$true -DisplayCommand "self-update")
+                        $repairStarted = [bool](_windo_run_published_installer -ForceContinue:$true -DisplayCommand "self-update")
                         if ($repairStarted) {
                             _windo_draw_ascii_startup_frame -Context "self-update" -Label "windo self-update handoff" -State "BLOCKED-REPAIRED" -Color Cyan
                         } elseif ($global:WINDO_EXIT_CODE -eq 2) {
@@ -14507,6 +14550,24 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
     }
 
     if ($Command.Count -ge 1 -and $Command[0] -eq "version") {
+        $contractOnly = $false
+        if ($Command.Count -ge 2 -and [string]$Command[1] -eq "--contract") { $contractOnly = $true }
+        $contract = _windo_release_contract
+        if ($contractOnly -and $JsonOutput) {
+            _emit_json "version" @{ contract = $contract; exitCode = 0 }
+            return
+        }
+        if ($contractOnly) {
+            Write-Host "[windo] Version contract" -ForegroundColor Cyan
+            Write-Host ("  Semver         : {0}" -f $contract.semver)
+            Write-Host ("  Edition        : {0}" -f $contract.edition)
+            Write-Host ("  Release branch : {0}" -f $contract.releaseBranch)
+            Write-Host ("  Published ref  : {0}" -f $contract.publishedContractBranch)
+            Write-Host ("  Schema         : {0}" -f $contract.schemaVersion)
+            Write-Host ("  Branding       : {0}" -f $contract.installerBranding)
+            Write-Host ("  Note           : {0}" -f $contract.developmentBranchNote) -ForegroundColor DarkGray
+            return
+        }
         $i = _integrity_status
         $mt = $false; $ut = $false
         try { Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null; $mt = $true } catch {}
@@ -14525,11 +14586,13 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
                 integrity = @{ overallLevel = $i.OverallLevel; runnerLevel = $i.RunnerLevel; updaterLevel = $i.UpdaterLevel }
                 mainTaskPresent = $mt
                 updateTaskPresent = $ut
+                contract = $contract
             }
             return
         }
         Write-Host "[windo] Version report" -ForegroundColor Cyan
-        Write-Host "  Version      : $WindoVersion"
+        Write-Host "  Version      : $WindoVersion ($($contract.edition))"
+        Write-Host "  Contract   : branch=$($contract.releaseBranch) schema=$($contract.schemaVersion)"
         Write-Host "  Profile      : $PROFILE"
         Write-Host "  Runner hash  : $(_file_hash $RunnerPath)"
         Write-Host "  Updater hash : $(_file_hash $UpdatePath)"
@@ -15135,9 +15198,9 @@ function __windo_completion_specs {
         motion = @('status','auto','on','quiet','off','reset','pulse','demo','--json')
         surface = @('status','prime','pulse','demo','doctor','repair','open','panel','window','--json')
         integrate = @('status','doctor','prime','repair','shortcuts','startup','shim','open','--json')
-        control = @('status','prime','actions','preview','queue','run','execute-next','next','execute','inspect','cancel','history','pulse','demo','clear','surface-status','surface-prime','surface-panel','power-studio','integrate-status','integrate-doctor','integrate-repair','integrate-open','integrate-shim','integrate-startup','center-status','source-status','verify-audit','surface-doctor','surface-repair','scan-home','vault-status','crypto-status','venv-status','sshx-status','recipes-list','pkg-status','launchpad-tray','diagnostics-snapshot','open-windo-folder','health-snapshot-html','upgrade-history-open','center-open','log-bundle-open','workbench-html','edition-open','motion-pulse','profile-doctor','trust-online','preflight','install-latest','--json')
+        control = @('status','prime','actions','preview','queue','run','execute-next','next','execute','inspect','cancel','history','pulse','demo','clear','surface-status','surface-prime','surface-panel','power-studio','integrate-status','integrate-doctor','integrate-repair','integrate-open','integrate-shim','integrate-startup','center-status','source-status','verify-audit','surface-doctor','surface-repair','scan-home','vault-status','crypto-status','venv-status','sshx-status','recipes-list','pkg-status','launchpad-tray','diagnostics-snapshot','open-windo-folder','health-snapshot-html','net-scan-status','studio-open','upgrade-history-open','center-open','log-bundle-open','workbench-html','edition-open','motion-pulse','profile-doctor','trust-online','preflight','install-latest','--json')
         signal = @('status','timeline','last','export','open','html','--html','--open','--output','--json')
-        center = @('status','open','tray','panel','surface','studio','wizard','power','actions','preview','run','queue','execute-next','next','execute','history','signal','surface-status','surface-prime','surface-panel','power-studio','integrate-status','integrate-doctor','integrate-repair','integrate-open','integrate-shim','integrate-startup','center-status','source-status','verify-audit','surface-doctor','surface-repair','scan-home','vault-status','crypto-status','venv-status','sshx-status','recipes-list','pkg-status','launchpad-tray','diagnostics-snapshot','open-windo-folder','health-snapshot-html','upgrade-history-open','center-open','log-bundle-open','workbench-html','edition-open','motion-pulse','profile-doctor','trust-online','preflight','install-latest','--json')
+        center = @('status','open','tray','panel','surface','studio','wizard','power','actions','preview','run','queue','execute-next','next','execute','history','signal','surface-status','surface-prime','surface-panel','power-studio','integrate-status','integrate-doctor','integrate-repair','integrate-open','integrate-shim','integrate-startup','center-status','source-status','verify-audit','surface-doctor','surface-repair','scan-home','vault-status','crypto-status','venv-status','sshx-status','recipes-list','pkg-status','launchpad-tray','diagnostics-snapshot','open-windo-folder','health-snapshot-html','net-scan-status','studio-open','upgrade-history-open','center-open','log-bundle-open','workbench-html','edition-open','motion-pulse','profile-doctor','trust-online','preflight','install-latest','--json')
         studio = @('--json')
         edition = @('status','open','html','export','pulse','--open','--output','--json')
         trust = @('--online','--offline','--json')
@@ -15173,7 +15236,7 @@ function __windo_completion_specs {
         profile = @('status','doctor','repair','--prompt-init','--all','--json')
         config = @('--json')
         roadmap = @('--json')
-        version = @('--json')
+        version = @('--json','--contract')
         doctor = @('--json')
         integrity = @('--json')
         verify = @('--json')

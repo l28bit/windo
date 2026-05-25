@@ -335,7 +335,7 @@ $motionClassFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name 
 $setExitFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_set_exit"
 $promptSelfUpdateFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_prompt_self_update_installer"
 $taskAccessDeniedFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_is_task_access_denied"
-$runGenesisInstallerFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_run_genisis_installer"
+$runGenesisInstallerFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_run_published_installer"
 $recipeCommandLineFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_get_recipe_command_line"
 $recipePreviewFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_get_recipe_preview"
 $builtinRecipesFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_builtin_recipes"
@@ -609,14 +609,14 @@ function _windo_draw_ascii_startup_frame {
     )
 }
         _windo_set_exit 0
-        $declined = _windo_run_genisis_installer -ForceContinue -DisplayCommand "self-update"
+        $declined = _windo_run_published_installer -ForceContinue -DisplayCommand "self-update"
         Assert-State "declined installer handoff returns false" $false $declined "declined handoff returns false"
         Assert-State "declined installer handoff keeps failure code" 2 $WINDO_EXIT_CODE "declined install launcher sets exit code 2"
 
         if (Test-Path Function:\_windo_start_downloaded_installer) { Remove-Item function:_windo_start_downloaded_installer -Force }
         function _windo_start_downloaded_installer([string]$ScriptPath) { return $true }
         _windo_set_exit 0
-        $started = _windo_run_genisis_installer -ForceContinue -DisplayCommand "self-update"
+        $started = _windo_run_published_installer -ForceContinue -DisplayCommand "self-update"
         Assert-State "successful installer handoff returns true" $true $started "successful install launcher returns true"
         Assert-State "successful installer handoff sets code 0" 0 $WINDO_EXIT_CODE "successful install launcher sets exit code 0"
         if (Test-Path Function:\_windo_verify_installer_sha256_optional) { Remove-Item function:_windo_verify_installer_sha256_optional -Force }
@@ -625,7 +625,7 @@ function _windo_draw_ascii_startup_frame {
             throw "Installer SHA256 mismatch for upgrade recovery test"
         }
         _windo_set_exit 0
-        $runGenesisFailed = _windo_run_genisis_installer -ForceContinue -DisplayCommand "install-latest"
+        $runGenesisFailed = _windo_run_published_installer -ForceContinue -DisplayCommand "install-latest"
         Assert-State "failed installer handoff returns false" $false $runGenesisFailed "checksum mismatch aborts install handoff"
         Assert-State "failed installer handoff sets code 1" 1 $WINDO_EXIT_CODE "checksum mismatch maps to exit code 1"
 
@@ -727,7 +727,7 @@ Remove-Item Function:\_windo_draw_ascii_startup_frame -ErrorAction SilentlyConti
         if ($null -eq $savedCIEnv) { Remove-Item Env:CI -ErrorAction SilentlyContinue } else { $env:CI = $savedCIEnv }
     }
 } else {
-    Assert-Equal $false $true "installer exposes command plan, motion, exit, access-denied, self-update helper, and genesis installer functions"
+    Assert-Equal $false $true "installer exposes command plan, motion, exit, access-denied, self-update helper, and published installer functions"
 }
 
 $bootstrapBoolFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "ConvertFrom-WindoBootstrapBool"
@@ -832,11 +832,11 @@ function _windo_start_downloaded_installer {
 if (Test-Path Env:CI) { Remove-Item Env:CI -ErrorAction SilentlyContinue }
 if (Test-Path Env:WINDO_INSTALL_NONINTERACTIVE) { Remove-Item Env:WINDO_INSTALL_NONINTERACTIVE -ErrorAction SilentlyContinue }
 $env:CI = "1"
-_windo_run_genisis_installer -NonInteractive:$false -DisplayCommand "install-latest" | Out-Null
+_windo_run_published_installer -NonInteractive:$false -DisplayCommand "install-latest" | Out-Null
 Assert-State "run_genesis succeeds in CI mode" 0 $global:WINDO_EXIT_CODE "CI path uses non-interactive launch opt-out"
 
 $env:CI = "0"
-_windo_run_genisis_installer -NonInteractive:$false -DisplayCommand "install-latest" | Out-Null
+_windo_run_published_installer -NonInteractive:$false -DisplayCommand "install-latest" | Out-Null
 Assert-State "run_genesis treats CI=0 as on" 1 $global:WINDO_EXIT_CODE "CI set to 0 still prompts and exits non-zero in test harness"
 if (Test-Path Env:CI) { Remove-Item Env:CI -ErrorAction SilentlyContinue }
 
@@ -844,7 +844,7 @@ function _windo_start_downloaded_installer {
     param([string]$ScriptPath)
     return $false
 }
-_windo_run_genisis_installer -NonInteractive:$false -DisplayCommand "install-latest" | Out-Null
+_windo_run_published_installer -NonInteractive:$false -DisplayCommand "install-latest" | Out-Null
 Assert-State "run_genesis maps launch decline to 2" 2 $global:WINDO_EXIT_CODE "launcher decline is non-zero and deterministic"
 
 if (Test-Path Env:CI) { Remove-Item Env:CI -ErrorAction SilentlyContinue }
@@ -852,7 +852,7 @@ if (Test-Path Env:WINDO_INSTALL_NONINTERACTIVE) { Remove-Item Env:WINDO_INSTALL_
 function _windo_verify_installer_sha256_optional {
     throw "checksum validation intentionally failed"
 }
-_windo_run_genisis_installer -NonInteractive:$true -DisplayCommand "install-latest" | Out-Null
+_windo_run_published_installer -NonInteractive:$true -DisplayCommand "install-latest" | Out-Null
 Assert-State "run_genesis checksum failure exits one" 1 $global:WINDO_EXIT_CODE "checksum verification failure exits 1"
 
 function _windo_start_downloaded_installer {
@@ -863,11 +863,11 @@ function _windo_verify_installer_sha256_optional { }
 if (Test-Path Env:CI) { Remove-Item Env:CI -ErrorAction SilentlyContinue }
 if (Test-Path Env:WINDO_INSTALL_NONINTERACTIVE) { Remove-Item Env:WINDO_INSTALL_NONINTERACTIVE -ErrorAction SilentlyContinue }
 $env:WINDO_INSTALL_NONINTERACTIVE = "1"
-_windo_run_genisis_installer -NonInteractive:$false -DisplayCommand "install-latest" | Out-Null
+_windo_run_published_installer -NonInteractive:$false -DisplayCommand "install-latest" | Out-Null
 Assert-State "run_genesis automation opt-out exits zero" 0 $global:WINDO_EXIT_CODE "automation flag bypasses prompt and exits 0"
 
 if (Test-Path Env:WINDO_INSTALL_NONINTERACTIVE) { Remove-Item Env:WINDO_INSTALL_NONINTERACTIVE -ErrorAction SilentlyContinue }
-_windo_run_genisis_installer -NonInteractive:$true -DisplayCommand "install-latest" | Out-Null
+_windo_run_published_installer -NonInteractive:$true -DisplayCommand "install-latest" | Out-Null
 Assert-State "run_genesis explicit non-interactive exits two" 2 $global:WINDO_EXIT_CODE "non-interactive flag stays deterministic"
 } finally {
     if ($null -eq $runGenesisSavedNonInteractive) { Remove-Item Env:WINDO_INSTALL_NONINTERACTIVE -ErrorAction SilentlyContinue } else { $env:WINDO_INSTALL_NONINTERACTIVE = $runGenesisSavedNonInteractive }
@@ -1129,6 +1129,11 @@ try {
 }
 
 Assert-Equal ($installerSource.Contains('$WindoVersion = "8.4.0"') -eq $true) $true "installer version is 8.4.0"
+Assert-Equal ($installerSource.Contains('function _windo_release_contract') -eq $true) $true "installer exposes release contract helper"
+Assert-Equal ($installerSource.Contains('windo version --contract') -eq $true) $true "version help documents contract flag"
+Assert-Equal ($installerSource.Contains('version = "8.4.0"') -and $installerSource.Contains('Prometheus Contract')) $true "roadmap includes V8.4 release train entry"
+Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "do") { $Command[0] = "run" }') -eq $true) $true "do alias rewires to run"
+Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "recdo")') -eq $true) $true "recdo alias rewires to recipes run"
 Assert-Equal ($bootstrapSource.Contains("WINDO 8.4.0 V8.4 bootstrap") -eq $true) $true "bootstrap banner is current"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
 Assert-Equal (($bootstrapSource -match "contents/windo_install\.ps1\?ref=") -eq $true) $true "bootstrap knows GitHub Contents API installer URL"
