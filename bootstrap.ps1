@@ -2,6 +2,14 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $global:WINDO_EXIT_CODE = 0
+$script:WindoBootstrapExpectedVersion = "8.5.0"
+
+function Get-WindoEditionLabel {
+    param([string]$Semver = $script:WindoBootstrapExpectedVersion)
+    $parts = @($Semver.Split('.'))
+    if ($parts.Count -ge 2) { return ("V{0}.{1}" -f $parts[0], $parts[1]) }
+    return "V$Semver"
+}
 
 function Set-WindoBootstrapExitCode {
     param([int]$Code)
@@ -294,7 +302,7 @@ function Write-WindoBootstrapBanner {
     Write-Host "    \ V  V /  | || |\  | |_| | |_| |" -ForegroundColor Cyan
     Write-Host "     \_/\_/  |___|_| \_|____/ \___/" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  WINDO 8.4.0 V8.4 bootstrap" -ForegroundColor White
+    Write-Host ("  WINDO {0} {1} bootstrap" -f $script:WindoBootstrapExpectedVersion, (Get-WindoEditionLabel)) -ForegroundColor White
     Write-Host "  API-first verified download | UAC handoff | Windows integration plane" -ForegroundColor DarkGray
     Write-Host ""
 }

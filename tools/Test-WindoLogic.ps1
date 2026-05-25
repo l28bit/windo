@@ -1128,13 +1128,20 @@ try {
     Remove-Item -Path $checksumFixtureDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "8.4.0"') -eq $true) $true "installer version is 8.4.0"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.0"') -eq $true) $true "installer version is 8.5.0"
 Assert-Equal ($installerSource.Contains('function _windo_release_contract') -eq $true) $true "installer exposes release contract helper"
+Assert-Equal ($installerSource.Contains('function _windo_contract_posture') -eq $true) $true "installer exposes contract posture helper"
+Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "contract")') -eq $true) $true "installer handles contract command"
 Assert-Equal ($installerSource.Contains('windo version --contract') -eq $true) $true "version help documents contract flag"
 Assert-Equal ($installerSource.Contains('version = "8.4.0"') -and $installerSource.Contains('Prometheus Contract')) $true "roadmap includes V8.4 release train entry"
+Assert-Equal ($installerSource.Contains('version = "8.5.0"') -and $installerSource.Contains('Contract Posture')) $true "roadmap includes V8.5 release train entry"
+Assert-Equal ($installerSource.Contains('history search') -eq $true) $true "history help documents search subcommand"
+Assert-Equal ($installerSource.Contains('function _windo_filter_log_entries') -eq $true) $true "installer exposes history filter helper"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "do") { $Command[0] = "run" }') -eq $true) $true "do alias rewires to run"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "recdo")') -eq $true) $true "recdo alias rewires to recipes run"
-Assert-Equal ($bootstrapSource.Contains("WINDO 8.4.0 V8.4 bootstrap") -eq $true) $true "bootstrap banner is current"
+Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.0"') -eq $true) $true "bootstrap expected version is 8.5.0"
+Assert-Equal ($bootstrapSource.Contains('function Get-WindoEditionLabel') -eq $true) $true "bootstrap derives edition label"
+Assert-Equal ($bootstrapSource.Contains('{1} bootstrap"') -eq $true) $true "bootstrap banner is edition-aware"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
 Assert-Equal (($bootstrapSource -match "contents/windo_install\.ps1\?ref=") -eq $true) $true "bootstrap knows GitHub Contents API installer URL"
 Assert-Equal ($bootstrapSource.Contains('$Repo = "https://raw.githubusercontent.com/l28bit/windo/v6/windo_install.ps1"') -eq $false) $true "bootstrap no longer hardcodes raw installer as primary source"
@@ -1611,10 +1618,10 @@ Assert-Equal ($installerSource.Contains('id = "power-studio"') -eq $true) $true 
 Assert-Equal ($installerSource.Contains('id = "integrate-repair"') -eq $true) $true "control catalog includes integrate-repair action"
 Assert-Equal ($installerSource.Contains('id = "integrate-startup"') -eq $true) $true "control catalog includes integrate-startup action"
 Assert-Equal ($installerSource.Contains("Preview, queue, or run curated actions") -eq $true) $true "Power Studio documents preview queue run boundary"
-Assert-Equal ($installerSource.Contains("V8.4 command center") -eq $true) $true "launchpad html carries V8.4 command center copy"
+Assert-Equal ($installerSource.Contains("function _windo_edition_label") -eq $true) $true "installer derives edition label from semver"
 Assert-Equal ($installerSource.Contains("WINDO Dashboard") -eq $true) $true "dashboard html carries branded dashboard title"
-Assert-Equal ($installerSource.Contains("V8.4 Installer") -eq $true) $true "installer is branded as V8.4"
-Assert-Equal ($bootstrapSource.Contains("V8.4 bootstrap") -eq $true) $true "bootstrap has V8.4 visuals"
+Assert-Equal ($installerSource.Contains("V8.5 Installer") -eq $true) $true "installer header is branded as V8.5"
+Assert-Equal ($bootstrapSource.Contains('function Get-WindoEditionLabel') -eq $true) $true "bootstrap has edition-aware visuals"
 $panelStart = $installerSource.IndexOf("function _windo_surface_panel_script_text", [StringComparison]::Ordinal)
 $panelEnd = $installerSource.IndexOf("function _windo_start_surface_panel", $panelStart, [StringComparison]::Ordinal)
 Assert-Equal (($panelStart -ge 0 -and $panelEnd -gt $panelStart) -eq $true) $true "surface panel script function can be extracted"
