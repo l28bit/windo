@@ -127,6 +127,31 @@ function Get-WindoFunctionTextFromSource([string]$Source, [string]$Name) {
     return $null
 }
 
+function Get-WindoSingleQuotedHereStringValue([string]$Source, [string]$VariableName) {
+    $escapedName = [regex]::Escape($VariableName)
+    $pattern = "(?s)\`$$escapedName\s*=\s*@'\s*(.*?)\r?\n'@"
+    $m = [regex]::Match($Source, $pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
+    if (-not $m.Success) { return $null }
+    return $m.Groups[1].Value
+}
+
+function Get-WindoSingleQuotedHereStringValueBeforeAnchor([string]$Source, [string]$VariableName, [string]$EndAnchor) {
+    $startNeedle = '$' + $VariableName + " = @'"
+    $start = $Source.IndexOf($startNeedle, [StringComparison]::Ordinal)
+    if ($start -lt 0) { return $null }
+    $contentStart = $Source.IndexOf("`n", $start, [StringComparison]::Ordinal)
+    if ($contentStart -lt 0) { return $null }
+    $contentStart += 1
+
+    $anchor = $Source.IndexOf($EndAnchor, $contentStart, [StringComparison]::Ordinal)
+    if ($anchor -lt $contentStart) { return $null }
+    $end = $Source.LastIndexOf("`n'@", $anchor, [StringComparison]::Ordinal)
+    if ($end -lt $contentStart) { return $null }
+    $end += 1
+    return $Source.Substring($contentStart, $end - $contentStart)
+    return $null
+}
+
 Assert-Equal (Get-WindoIntegrityComponentLevel "a" "a") "OK" "exact match"
 Assert-Equal (Get-WindoIntegrityComponentLevel "(missing)" "abc") "UNKNOWN" "missing file"
 Assert-Equal (Get-WindoIntegrityComponentLevel "(hash-error)" "abc") "UNKNOWN" "hash error"
@@ -1128,7 +1153,7 @@ try {
     Remove-Item -Path $checksumFixtureDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.0"') -eq $true) $true "installer version is 8.5.0"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.1"') -eq $true) $true "installer version is 8.5.1"
 Assert-Equal ($installerSource.Contains('function _windo_release_branch') -and $installerSource.Contains("'prometheus'") -and $installerSource.Contains('"Exodus"')) $true "installer normalizes legacy Prometheus alias to Exodus"
 Assert-Equal ($installerSource.Contains('publishedContractBranch = "Exodus"') -eq $true) $true "release contract published branch is Exodus"
 Assert-Equal ($installerSource.Contains('function _windo_release_contract') -eq $true) $true "installer exposes release contract helper"
@@ -1136,12 +1161,12 @@ Assert-Equal ($installerSource.Contains('function _windo_contract_posture') -eq 
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "contract")') -eq $true) $true "installer handles contract command"
 Assert-Equal ($installerSource.Contains('windo version --contract') -eq $true) $true "version help documents contract flag"
 Assert-Equal ($installerSource.Contains('version = "8.4.0"') -and $installerSource.Contains('Prometheus Contract')) $true "roadmap includes V8.4 release train entry"
-Assert-Equal ($installerSource.Contains('version = "8.5.0"') -and $installerSource.Contains('Contract Posture')) $true "roadmap includes V8.5 release train entry"
+Assert-Equal ($installerSource.Contains('version = "8.5.1"') -and $installerSource.Contains('Profile Parse Guard')) $true "roadmap includes V8.5.1 release train entry"
 Assert-Equal ($installerSource.Contains('history search') -eq $true) $true "history help documents search subcommand"
 Assert-Equal ($installerSource.Contains('function _windo_filter_log_entries') -eq $true) $true "installer exposes history filter helper"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "do") { $Command[0] = "run" }') -eq $true) $true "do alias rewires to run"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "recdo")') -eq $true) $true "recdo alias rewires to recipes run"
-Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.0"') -eq $true) $true "bootstrap expected version is 8.5.0"
+Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.1"') -eq $true) $true "bootstrap expected version is 8.5.1"
 Assert-Equal ($bootstrapSource.Contains('function Get-WindoEditionLabel') -eq $true) $true "bootstrap derives edition label"
 Assert-Equal ($bootstrapSource.Contains('{1} bootstrap"') -eq $true) $true "bootstrap banner is edition-aware"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
@@ -1167,7 +1192,47 @@ Assert-Pattern $installerSource 'if \(\$Command.Count -ge 1 -and \$Command\[0\] 
 Assert-Pattern $installerSource '\$tx\s*-\s*(?:ieq|eq)\s*["'']/\?["'']' "windo parser recognizes /? as help marker token"
 Assert-Pattern $installerSource '\$tx\s*-\s*(?:ieq|eq)\s*["'']\?["'']' "windo parser recognizes ? as help marker token"
 Assert-Pattern $installerSource '\$tx\s*-\s*(?:ieq|eq)\s*["'']-\?["'']' "windo parser recognizes -? as help marker token"
-Assert-Equal ($installerSource.Contains('$Command.Count -ge 1 -and (($Command[-1] - ieq "/?") -or ($Command[-1] - ieq "?") -or ($Command[-1] - ieq "-?"))') -eq $true) $true "windo parser trims trailing help marker token"
+Assert-Equal ($installerSource.Contains('$Command.Count -ge 1 -and (($Command[-1] -ieq "/?") -or ($Command[-1] -ieq "?") -or ($Command[-1] -ieq "-?"))') -eq $true) $true "windo parser trims trailing help marker token"
+Assert-Equal ($installerSource.Contains('$Command[-1] - ieq') -eq $false) $true "generated profile never splits the -ieq operator"
+Assert-Equal ($installerSource.Contains('function Test-WindoProfileSyntax') -eq $true) $true "installer exposes generated profile syntax guard"
+Assert-Equal ($installerSource.Contains('Test-WindoProfileSyntax -Content $newProfileText -Path ([string]$PROFILE)') -eq $true) $true "installer validates generated profile before writing"
+$profileSyntaxFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "Test-WindoProfileSyntax"
+if ($profileSyntaxFn) {
+    Invoke-Expression $profileSyntaxFn
+    Assert-Equal (Test-WindoProfileSyntax -Content 'function Invoke-Ok { "ok" }' -Path "<test>") $true "profile syntax guard accepts valid profile text"
+    $guardRejectedInvalidProfile = $false
+    try {
+        Test-WindoProfileSyntax -Content 'function Invoke-Bad { if ($x - eq "y") { "bad" } }' -Path "<test>" | Out-Null
+    } catch {
+        $guardRejectedInvalidProfile = ($_.Exception.Message -like '*Refusing to write invalid PowerShell profile*')
+    }
+    Assert-Equal $guardRejectedInvalidProfile $true "profile syntax guard rejects split operator parse errors"
+} else {
+    Assert-Equal $false $true "installer exposes callable profile syntax guard"
+}
+
+$generatedFunctionBody = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "WindoFunctionBody" -EndAnchor '$WindoFunctionBody = $WindoFunctionBody.Replace'
+$generatedPsReadLineBlock = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "WindoPsReadLineBlock" -EndAnchor '$WindoCompleterBlock = @'
+$generatedCompleterBlock = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "WindoCompleterBlock" -EndAnchor '$WindoCompleterBlock = $WindoCompleterBlock.Replace'
+$generatedModulesLoaderBlock = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "WindoModulesLoaderBlock" -EndAnchor '$WindoModulesLoaderBlock = $WindoModulesLoaderBlock.Replace'
+Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedFunctionBody)) $true "generated profile function block is extractable"
+Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedPsReadLineBlock)) $true "generated PSReadLine block is extractable"
+Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedCompleterBlock)) $true "generated completer block is extractable"
+Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedModulesLoaderBlock)) $true "generated module loader block is extractable"
+if ($generatedFunctionBody -and $generatedPsReadLineBlock -and $generatedCompleterBlock -and $generatedModulesLoaderBlock) {
+    $generatedProfileText = @(
+        "# >>> WINDO-BEGIN >>>"
+        ($generatedFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'").Replace("__VERSION__", "8.5.1"))
+        $generatedPsReadLineBlock
+        ($generatedCompleterBlock.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'"))
+        ($generatedModulesLoaderBlock.Replace("__WINDO_PROFILE_VERSION__", "8.5.1"))
+        "# <<< WINDO-END <<<"
+    ) -join "`r`n"
+    $generatedProfileErrors = $null
+    $generatedProfileTokens = $null
+    [System.Management.Automation.Language.Parser]::ParseInput($generatedProfileText, [ref]$generatedProfileTokens, [ref]$generatedProfileErrors) | Out-Null
+    Assert-Equal ($generatedProfileErrors.Count) 0 "generated installed profile block parses"
+}
 Assert-Pattern $installerSource '\$normalized -in @\(\s*"\?",\s*"/\?",\s*"-\?"\s*\)' "windo help topic normalization treats marker-only tokens as help request"
 Assert-Equal (($installerSource.Contains("Scheduled task registration deferred") -or $installerSource.Contains("Task registration failed; continuing with best-effort non-task mode.")) -eq $true) $true "installer tracks partial install when task setup is deferred"
 Assert-Equal ($installerSource.Contains("taskRegistrationSucceeded = [bool]") -eq $true) $true "installer persists task-registration status in manifest"
@@ -1796,5 +1861,3 @@ if ($failed -gt 0) {
     exit 1
 }
 Write-Host "Test-WindoLogic: OK." -ForegroundColor Cyan
-
-

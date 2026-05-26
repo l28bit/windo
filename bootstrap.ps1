@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $global:WINDO_EXIT_CODE = 0
-$script:WindoBootstrapExpectedVersion = "8.5.0"
+$script:WindoBootstrapExpectedVersion = "8.5.1"
 
 function Get-WindoEditionLabel {
     param([string]$Semver = $script:WindoBootstrapExpectedVersion)
