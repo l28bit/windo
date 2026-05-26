@@ -29,11 +29,11 @@ function Test-WindoBootstrapProcessElevated {
 }
 
 function Get-WindoBootstrapReleaseBranch {
-    $raw = if ($null -ne $env:WINDO_TRACKING_BRANCH -and -not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { [string]$env:WINDO_TRACKING_BRANCH } else { "Prometheus" }
+    $raw = if ($null -ne $env:WINDO_TRACKING_BRANCH -and -not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { [string]$env:WINDO_TRACKING_BRANCH } else { "Exodus" }
     $trimmed = $raw.Trim()
     $lower = $trimmed.ToLowerInvariant()
-    if ($lower -eq "genesis" -or $lower -eq "genisis") { return "Prometheus" }
-    if ($trimmed -notmatch '^[A-Za-z0-9._-]{1,64}$') { return "Prometheus" }
+    if ($lower -in @('genesis', 'genisis', 'prometheus')) { return "Exodus" }
+    if ($trimmed -notmatch '^[A-Za-z0-9._-]{1,64}$') { return "Exodus" }
     return $trimmed
 }
 $script:_windo_bootstrap_release_ref = $null

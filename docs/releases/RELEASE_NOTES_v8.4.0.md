@@ -4,10 +4,10 @@
 
 This release unifies installer identity under **V8.4** while preserving upgrade behavior and audit boundaries:
 
-- Canonical branch: `Prometheus` (published contract)
+- Canonical branch: `Exodus` (GitHub default; V8.4 codename was *Prometheus Contract*, not a separate branch)
 - Development integration branch: `Exodus` (active until next Special Edition)
 - Installer semver: `8.4.0` with `V8.4` branding
-- Installer metadata: `releaseBranch=Prometheus`, `releaseBranchRaw=Prometheus`
+- Installer metadata (as shipped in V8.4 docs): originally documented as `Prometheus`; corrected in V8.5 to `releaseBranch=Exodus`
 
 ## Features in this release
 

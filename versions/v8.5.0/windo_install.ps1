@@ -3826,7 +3826,7 @@ Use: windo prompt --json   (machine-readable bundle)
                 version = "8.4.0"
                 codename = "Prometheus Contract"
                 theme = "Reanchor installer identity, checksum manifest, and command center branding to a single V8.4 release contract."
-                focus = @("Prometheus branch contract", "V8.4 command center", "control/center action expansion", "strict installer verification", "version contract visibility", "Wave 11+ migration")
+                focus = @("Exodus published branch contract", "V8.4 command center", "control/center action expansion", "strict installer verification", "version contract visibility", "Wave 11+ migration")
                 status = "shipped"
                 operatorValue = "Upgrade, bootstrap, and self-update paths share one coherent source branch, semver, and operator-facing V8.4 identity."
             },
@@ -5520,11 +5520,11 @@ function _windo_draw_ascii_startup_frame {
     $script:_windo_release_ref = $null
 
     function _windo_release_branch {
-        $raw = if (-not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { [string]$env:WINDO_TRACKING_BRANCH } else { "Prometheus" }
+        $raw = if (-not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { [string]$env:WINDO_TRACKING_BRANCH } else { "Exodus" }
         $trimmed = $raw.Trim()
         $lower = $trimmed.ToLowerInvariant()
-        if ($lower -eq "genesis" -or $lower -eq "genisis") { return "Prometheus" }
-        if ($trimmed -notmatch '^[A-Za-z0-9._-]{1,64}$') { return "Prometheus" }
+        if ($lower -in @('genesis', 'genisis', 'prometheus')) { return "Exodus" }
+        if ($trimmed -notmatch '^[A-Za-z0-9._-]{1,64}$') { return "Exodus" }
         return $trimmed
     }
 
@@ -5542,8 +5542,8 @@ function _windo_draw_ascii_startup_frame {
             releaseBranch = (_windo_release_branch)
             schemaVersion = "3.0"
             installerBranding = ("WINDO {0} Installer" -f $edition)
-            publishedContractBranch = "Prometheus"
-            developmentBranchNote = "Exodus is the active integration branch until the next Special Edition release."
+            publishedContractBranch = "Exodus"
+            developmentBranchNote = "GitHub default branch is Exodus. Legacy aliases Genesis, Genisis, and Prometheus normalize to Exodus."
         }
     }
 

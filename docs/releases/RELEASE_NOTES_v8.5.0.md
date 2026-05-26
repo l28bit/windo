@@ -3,7 +3,7 @@
 ## Highlights
 
 - Semver: **8.5.0** with **V8.5** edition branding (derived from installer semver).
-- Published branch contract remains **Prometheus** unless overridden by `WINDO_TRACKING_BRANCH` / `WINDO_RELEASE_COMMIT`.
+- Published branch contract is **`Exodus`** (GitHub default) unless overridden by `WINDO_TRACKING_BRANCH` / `WINDO_RELEASE_COMMIT`. Legacy env value `Prometheus` normalizes to `Exodus`.
 
 ## New commands
 

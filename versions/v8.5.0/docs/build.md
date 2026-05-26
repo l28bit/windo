@@ -33,9 +33,9 @@ To reduce monolithic edit risk without changing the install contract:
 
 No build step is required for end users.
 
-## Branch `Prometheus`, checksums, and embedded runner
+## Branch `Exodus`, checksums, and embedded runner
 
-- **Canonical raw URLs** for bootstrap and `windo upgrade` use the repository branch named **`Prometheus`**.
+- **Canonical raw URLs** for bootstrap and `windo upgrade` use the repository branch named **`Exodus`** (GitHub default). Legacy env values `Genesis`, `Genisis`, and `Prometheus` normalize to `Exodus`.
 - After changing **`windo_install.ps1`**, update **[`checksums/installer.sha256`](../checksums/installer.sha256)** with the **published** installer SHA256 (uppercase hex, one line). Use the helper so Windows checkout line endings do not produce a stale hash:
   `./tools/Sync-InstallerChecksum.ps1`
 - **v3.2.7+:** **`bootstrap.ps1`** and **`_windo_verify_installer_sha256_optional`** compare the downloaded installer’s hash to the **first 64 hex** characters found in the fetched checksum file (so BOM, extra whitespace, or `sha256sum`-style lines still verify). The canonical file remains a single 64-character uppercase line.

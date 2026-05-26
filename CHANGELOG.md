@@ -25,6 +25,10 @@ Release notes: [`docs/releases/RELEASE_NOTES_v8.5.0.md`](docs/releases/RELEASE_N
 - **`windo source`** JSON and human output include embedded **`contract`** metadata.
 - Roadmap train marks **8.4.0 Prometheus Contract** as shipped and **8.5.0 Contract Posture** as active.
 
+### Fixed
+
+- Published source branch defaults and README bootstrap URL now target **`Exodus`** (the GitHub default branch). V8.4 used *Prometheus* as a release codename only; there is no `Prometheus` branch on the remote. Legacy `WINDO_TRACKING_BRANCH` values `Genesis`, `Genisis`, and `Prometheus` normalize to `Exodus`.
+
 ## [8.4.0] - 2026-05-24
 
 Release notes: [`docs/releases/RELEASE_NOTES_v8.4.0.md`](docs/releases/RELEASE_NOTES_v8.4.0.md).

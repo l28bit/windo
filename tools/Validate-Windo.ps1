@@ -43,10 +43,10 @@ function Test-WindoHex64([string]$Value) {
 
 function Get-WindoReleaseTargetMeta {
     $envBranch = [string]$env:WINDO_TRACKING_BRANCH
-    $rawBranch = if ([string]::IsNullOrWhiteSpace($envBranch)) { "Prometheus" } else { $envBranch.Trim() }
+    $rawBranch = if ([string]::IsNullOrWhiteSpace($envBranch)) { "Exodus" } else { $envBranch.Trim() }
 
-    if ($rawBranch -match '^(?i:genesis|genisis)$') { $rawBranch = "Prometheus" }
-    if ($rawBranch -notmatch '^[A-Za-z0-9._-]{1,64}$') { $rawBranch = "Prometheus" }
+    if ($rawBranch -match '^(?i:genesis|genisis|prometheus)$') { $rawBranch = "Exodus" }
+    if ($rawBranch -notmatch '^[A-Za-z0-9._-]{1,64}$') { $rawBranch = "Exodus" }
 
     $rawCommit = $null
     try {

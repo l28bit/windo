@@ -201,10 +201,10 @@ WINDO's major-version path should keep the product useful every step of the way.
 ### 8.4.0 Prometheus Contract
 
 - Installer/bootstrap branding: `WINDO 8.4.0 V8.4`.
-- Published source branch defaults to `Prometheus`; `WINDO_TRACKING_BRANCH` and `WINDO_RELEASE_COMMIT` still override.
+- Release **codename** *Prometheus Contract* (installer identity); published Git branch is **`Exodus`**.
 - `windo version --contract` exposes edition, branch, schema, and branding in one view.
 - Command center/control actions expand with folder open, health snapshot, network status, studio open, and upgrade history surfaces.
-- Checksum manifest uses `releaseBranch=Prometheus` with strict-mode optional verification.
+- Checksum manifest uses `releaseBranch=Exodus` with strict-mode optional verification.
 
 ### 8.5.0 Contract Posture
 
@@ -212,6 +212,7 @@ WINDO's major-version path should keep the product useful every step of the way.
 - `windo contract` and `windo contract doctor` combine contract metadata with local checks and optional published source alignment.
 - `windo history search` and `windo history --contains` filter audit entries without a separate export step.
 - `windo source` embeds contract fields in JSON for automation.
+- README/bootstrap defaults and checksum tooling aligned to the real **`Exodus`** branch (legacy `Prometheus` env alias supported).
 
 ### Future companion package
 

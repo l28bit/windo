@@ -217,7 +217,7 @@ if ($normalizePublishedFn) {
     Assert-Equal (_windo_normalize_published_installer_sha256 $ambiguous) $null "normalize rejects ambiguous multi-line candidate sources"
     $orderedManifest = @"
 installerSha256 = $h64
-releaseBranch = Prometheus
+releaseBranch = Exodus
 installerSha256 = deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 "@
     Assert-State "manifest parser returns first matching installerSha256" $h64 ( _windo_parse_manifest_value $orderedManifest "installerSha256" ) "manifest parser returns first matching key value"
@@ -237,7 +237,7 @@ if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $parseBoolFn -and $
     Invoke-Expression $releaseMetadataStateFn
 
     function _windo_release_ref { return $script:resolvedRef }
-    function _windo_release_branch { return "Prometheus" }
+    function _windo_release_branch { return "Exodus" }
     function _windo_get_file_blob_sha1_hex([string]$Path) { return $null }
     function _windo_get_snapshot_installer_sha256([string]$Version) { return $null }
 
@@ -252,7 +252,7 @@ if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $parseBoolFn -and $
         $compatibilityPayload = [pscustomobject]@{
             sha256 = "0" * 64
             releaseCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-            releaseBranch = "Prometheus"
+            releaseBranch = "Exodus"
         }
 
         $env:WINDO_STRICT_INSTALLER_VERIFICATION = "0"
@@ -292,7 +292,7 @@ if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $parseBoolFn -and $
             _windo_verify_installer_sha256_optional -Path $fixtureInstallerFile -PublishedChecksum ([pscustomobject]@{
                 sha256 = ""
                 releaseCommit = $resolvedRef
-                releaseBranch = "Prometheus"
+                releaseBranch = "Exodus"
                 error = "published checksum unavailable"
             })
         } catch {
@@ -307,7 +307,7 @@ if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $parseBoolFn -and $
             _windo_verify_installer_sha256_optional -Path $fixtureInstallerFile -PublishedChecksum ([pscustomobject]@{
                 sha256 = ""
                 releaseCommit = $resolvedRef
-                releaseBranch = "Prometheus"
+                releaseBranch = "Exodus"
                 error = "published checksum unavailable"
             })
         } catch {
@@ -362,7 +362,7 @@ function _windo_draw_ascii_startup_frame { }
 if (Test-Path Function:\_windo_is_process_elevated) { Remove-Item Function:\_windo_is_process_elevated -Force }
 function _windo_is_process_elevated { return $false }
 if (Test-Path Function:\_windo_release_branch) { Remove-Item Function:\_windo_release_branch -Force }
-function _windo_release_branch { return "Prometheus" }
+function _windo_release_branch { return "Exodus" }
 if (Test-Path Function:\_windo_save_published_installer) { Remove-Item Function:\_windo_save_published_installer -Force }
 function _windo_save_published_installer {
     param([string]$Path)
@@ -370,7 +370,7 @@ function _windo_save_published_installer {
     return @{ source = "windo_install.ps1"; version = "8.4.0" }
 }
 if (Test-Path Function:\_windo_get_published_installer_sha256) { Remove-Item Function:\_windo_get_published_installer_sha256 -Force }
-function _windo_get_published_installer_sha256 { return @{ sha256 = ("0" * 64); releaseCommit = "0"; releaseBranch = "Prometheus"; releaseCommitRaw = "0" } }
+function _windo_get_published_installer_sha256 { return @{ sha256 = ("0" * 64); releaseCommit = "0"; releaseBranch = "Exodus"; releaseCommitRaw = "0" } }
 if (Test-Path Function:\_windo_start_downloaded_installer) { Remove-Item Function:\_windo_start_downloaded_installer -Force }
 function _windo_start_downloaded_installer {
     param([string]$ScriptPath)
@@ -582,7 +582,7 @@ if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -a
         }
 
         if (Test-Path Function:\_windo_release_branch) { Remove-Item function:_windo_release_branch -Force }
-        function _windo_release_branch { return "Prometheus" }
+        function _windo_release_branch { return "Exodus" }
         if (Test-Path Function:\_windo_save_published_installer) { Remove-Item function:_windo_save_published_installer -Force }
         function _windo_save_published_installer {
             param([string]$Path)
@@ -768,17 +768,17 @@ if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -
         $env:CI = "1"
         Assert-State "bootstrap spinner disabled in CI" $false (Test-WindoBootstrapSpinnerEnabled) "spinner is disabled under CI"
 
-        $metaPayload = "releaseCommit = 0123456789abcdef0123456789abcdef01234567`r`nreleaseBranch = Prometheus"
+        $metaPayload = "releaseCommit = 0123456789abcdef0123456789abcdef01234567`r`nreleaseBranch = Exodus"
         $meta = Get-WindoBootstrapReleaseMetadata $metaPayload
         Assert-State "bootstrap release metadata parses commit" "0123456789abcdef0123456789abcdef01234567" $meta.releaseCommit "bootstrap release metadata extracts commit"
-        Assert-State "bootstrap release metadata parses branch" "Prometheus" $meta.releaseBranch "bootstrap release metadata extracts branch"
+        Assert-State "bootstrap release metadata parses branch" "Exodus" $meta.releaseBranch "bootstrap release metadata extracts branch"
         $parsed = Get-WindoBootstrapParsedChecksumPayload $metaPayload
         Assert-State "bootstrap parsed payload stores normalized commit" "0123456789abcdef0123456789abcdef01234567" $parsed.releaseCommit "parsed payload captures release commit"
-        Assert-State "bootstrap parsed payload stores branch" "Prometheus" $parsed.releaseBranch "parsed payload captures release branch"
-        $stateMismatch = Get-WindoBootstrapReleaseMetadataState -ReleaseRef "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" -ReleaseCommit "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" -ReleaseCommitRaw "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" -ReleaseBranch "Prometheus"
+        Assert-State "bootstrap parsed payload stores branch" "Exodus" $parsed.releaseBranch "parsed payload captures release branch"
+        $stateMismatch = Get-WindoBootstrapReleaseMetadataState -ReleaseRef "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" -ReleaseCommit "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" -ReleaseCommitRaw "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" -ReleaseBranch "Exodus"
         Assert-State "bootstrap metadata state detects mismatch" $true $stateMismatch.CompatibilityMode "metadata mismatch switches to compatibility mode"
         Assert-State "bootstrap mismatch includes detail" $true (-not [string]::IsNullOrWhiteSpace($stateMismatch.Detail)) "metadata mismatch exposes detail"
-        $stateBranch = Get-WindoBootstrapReleaseMetadataState -ReleaseRef "Prometheus" -ReleaseCommit $null -ReleaseCommitRaw $null -ReleaseBranch $null
+        $stateBranch = Get-WindoBootstrapReleaseMetadataState -ReleaseRef "Exodus" -ReleaseCommit $null -ReleaseCommitRaw $null -ReleaseBranch $null
         Assert-State "bootstrap missing branch is compatibility mode" $true $stateBranch.CompatibilityMode "missing branch metadata is compatibility mode"
     } finally {
         if ($null -eq $savedNoSpinner) { Remove-Item Env:WINDO_NO_SPINNER -ErrorAction SilentlyContinue } else { $env:WINDO_NO_SPINNER = $savedNoSpinner }
@@ -813,14 +813,14 @@ function Read-Host {
 }
 
 function _windo_is_process_elevated { return $false }
-function _windo_release_branch { return "Prometheus" }
+function _windo_release_branch { return "Exodus" }
 function _windo_save_published_installer {
     param([string]$Path)
     Set-Content -LiteralPath $Path -Value ("x" * 6000)
     return @{ source = "windo_install.ps1"; version = "8.4.0" }
 }
 function _windo_get_published_installer_sha256 {
-    return @{ sha256 = ("0" * 64); releaseCommit = "0000000000000000000000000000000000000000"; releaseBranch = "Prometheus"; releaseCommitRaw = "0000000000000000000000000000000000000000" }
+    return @{ sha256 = ("0" * 64); releaseCommit = "0000000000000000000000000000000000000000"; releaseBranch = "Exodus"; releaseCommitRaw = "0000000000000000000000000000000000000000" }
 }
 function _windo_verify_installer_sha256_optional { }
 function _windo_draw_ascii_startup_frame { }
@@ -1129,6 +1129,8 @@ try {
 }
 
 Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.0"') -eq $true) $true "installer version is 8.5.0"
+Assert-Equal ($installerSource.Contains('function _windo_release_branch') -and $installerSource.Contains("'prometheus'") -and $installerSource.Contains('"Exodus"')) $true "installer normalizes legacy Prometheus alias to Exodus"
+Assert-Equal ($installerSource.Contains('publishedContractBranch = "Exodus"') -eq $true) $true "release contract published branch is Exodus"
 Assert-Equal ($installerSource.Contains('function _windo_release_contract') -eq $true) $true "installer exposes release contract helper"
 Assert-Equal ($installerSource.Contains('function _windo_contract_posture') -eq $true) $true "installer exposes contract posture helper"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "contract")') -eq $true) $true "installer handles contract command"
