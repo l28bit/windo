@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $global:WINDO_EXIT_CODE = 0
-$script:WindoBootstrapExpectedVersion = "8.5.2"
+$script:WindoBootstrapExpectedVersion = "8.5.3"
 
 function Get-WindoEditionLabel {
     param([string]$Semver = $script:WindoBootstrapExpectedVersion)
@@ -18,6 +18,22 @@ function Set-WindoBootstrapExitCode {
     try { $global:LASTEXITCODE = $Code } catch { }
 }
 
+function Get-WindoBootstrapEnvValue {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    try {
+        $item = Get-Item -LiteralPath "Env:$Name" -ErrorAction SilentlyContinue
+        if ($null -eq $item) { return $null }
+        return [string]$item.Value
+    } catch {
+        return $null
+    }
+}
+
+function Test-WindoBootstrapHasText {
+    param([AllowNull()][string]$Value)
+    return -not [string]::IsNullOrWhiteSpace($Value)
+}
+
 function Test-WindoBootstrapProcessElevated {
     try {
         $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -29,7 +45,8 @@ function Test-WindoBootstrapProcessElevated {
 }
 
 function Get-WindoBootstrapReleaseBranch {
-    $raw = if ($null -ne $env:WINDO_TRACKING_BRANCH -and -not [string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { [string]$env:WINDO_TRACKING_BRANCH } else { "Exodus" }
+    $trackingBranch = Get-WindoBootstrapEnvValue -Name "WINDO_TRACKING_BRANCH"
+    $raw = if (Test-WindoBootstrapHasText $trackingBranch) { $trackingBranch } else { "Exodus" }
     $trimmed = $raw.Trim()
     $lower = $trimmed.ToLowerInvariant()
     if ($lower -in @('genesis', 'genisis', 'prometheus')) { return "Exodus" }
@@ -39,12 +56,13 @@ function Get-WindoBootstrapReleaseBranch {
 $script:_windo_bootstrap_release_ref = $null
 
 function Get-WindoBootstrapReleaseRef {
-    if (-not [string]::IsNullOrWhiteSpace($env:WINDO_RELEASE_COMMIT)) {
-        $envCommit = [string]$env:WINDO_RELEASE_COMMIT
+    $releaseCommitEnv = Get-WindoBootstrapEnvValue -Name "WINDO_RELEASE_COMMIT"
+    if (Test-WindoBootstrapHasText $releaseCommitEnv) {
+        $envCommit = [string]$releaseCommitEnv
         if ($envCommit -match '^[a-fA-F0-9]{40}$') {
             return $envCommit.ToLowerInvariant()
         }
-        Write-WindoBootstrapStep -Status warn -Label "WINDO_RELEASE_COMMIT invalid" -Detail "Falling back to branch '$($env:WINDO_TRACKING_BRANCH)'." -Color Yellow
+        Write-WindoBootstrapStep -Status warn -Label "WINDO_RELEASE_COMMIT invalid" -Detail "Falling back to branch '$(Get-WindoBootstrapReleaseBranch)'." -Color Yellow
     }
     if ($null -ne $script:_windo_bootstrap_release_ref) { return $script:_windo_bootstrap_release_ref }
 
@@ -67,7 +85,7 @@ function Get-WindoBootstrapReleaseRef {
 
 function ConvertFrom-WindoBootstrapBool {
     param([string]$Name, [bool]$Default = $false)
-    $raw = [string](Get-Item -Path "Env:$Name" -ErrorAction SilentlyContinue).Value
+    $raw = Get-WindoBootstrapEnvValue -Name $Name
     if ([string]::IsNullOrWhiteSpace($raw)) { return $Default }
     switch ($raw.Trim().ToLowerInvariant()) {
         '1' { return $true }
@@ -89,7 +107,9 @@ function Invoke-WindoBootstrapWebRequest {
         [switch]$UseBasicParsing,
         [string]$OutFile
     )
-    if ($null -ne $OutFile) {
+    if (Test-WindoBootstrapHasText $OutFile) {
+        $parent = Split-Path -Parent $OutFile
+        if (Test-WindoBootstrapHasText $parent -and !(Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
         Invoke-WebRequest -Uri $Uri -UseBasicParsing:$UseBasicParsing -TimeoutSec $TimeoutSec -OutFile $OutFile -ErrorAction Stop
     } else {
         Invoke-WebRequest -Uri $Uri -UseBasicParsing:$UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
@@ -102,7 +122,9 @@ function Invoke-WindoBootstrapRestMethod {
         [int]$TimeoutSec = 35,
         [string]$OutFile
     )
-    if ($null -ne $OutFile) {
+    if (Test-WindoBootstrapHasText $OutFile) {
+        $parent = Split-Path -Parent $OutFile
+        if (Test-WindoBootstrapHasText $parent -and !(Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
         Invoke-RestMethod -Uri $Uri -OutFile $OutFile -TimeoutSec $TimeoutSec -ErrorAction Stop
     } else {
         Invoke-RestMethod -Uri $Uri -TimeoutSec $TimeoutSec -ErrorAction Stop
@@ -304,7 +326,9 @@ function Get-WindoBootstrapReleaseMetadataState {
 
 $script:_windo_bootstrap_retry_ms = @(350, 900, 2200)
 
-$Temp = Join-Path $env:TEMP ("windo_install_" + [Guid]::NewGuid().ToString("n") + ".ps1")
+$script:WindoBootstrapTempRoot = Get-WindoBootstrapEnvValue -Name "TEMP"
+if (-not (Test-WindoBootstrapHasText $script:WindoBootstrapTempRoot)) { $script:WindoBootstrapTempRoot = [System.IO.Path]::GetTempPath() }
+$Temp = Join-Path $script:WindoBootstrapTempRoot ("windo_install_" + [Guid]::NewGuid().ToString("n") + ".ps1")
 
 function Write-WindoBootstrapBanner {
     Write-Host ""
@@ -385,46 +409,8 @@ function Invoke-WindoBootstrapDownload {
         [Parameter(Mandatory)][string]$Label
     )
     $baseLabel = "[windo] $Label"
-
-    if (-not (Test-WindoBootstrapSpinnerEnabled)) {
-        Write-Host $baseLabel -ForegroundColor DarkCyan
-        Invoke-WindoBootstrapRestMethod -Uri $Uri -OutFile $OutFile
-        return
-    }
-
-    $job = $null
-    try {
-        $job = Start-Job -ScriptBlock {
-            param($u, $o)
-            $ErrorActionPreference = "Stop"
-            Invoke-WindoBootstrapRestMethod -Uri $u -OutFile $o
-        } -ArgumentList $Uri, $OutFile
-    } catch {
-        $job = $null
-    }
-
-    if ($null -eq $job) {
-        Write-Host $baseLabel -ForegroundColor DarkCyan
-        Invoke-WindoBootstrapRestMethod -Uri $Uri -OutFile $OutFile
-        return
-    }
-
-    $frame = 0
-    while ((Get-Job -Id $job.Id -ErrorAction SilentlyContinue).State -eq "Running") {
-        Write-WindoBootstrapSpinnerLine $baseLabel $frame
-        $frame = ($frame + 1) % 4
-        Start-Sleep -Milliseconds 100
-    }
-
-    Clear-WindoBootstrapSpinnerLine ($baseLabel.Length + 4)
-
-    try {
-        Receive-Job $job -ErrorAction Stop | Out-Null
-    } catch {
-        Remove-Job $job -Force -ErrorAction SilentlyContinue
-        throw
-    }
-    Remove-Job $job -Force -ErrorAction SilentlyContinue
+    Write-Host $baseLabel -ForegroundColor DarkCyan
+    Invoke-WindoBootstrapRestMethod -Uri $Uri -OutFile $OutFile
 }
 
 function Get-WindoBootstrapInstallerRawUrl {
@@ -565,8 +551,9 @@ function Get-WindoBootstrapPublishedChecksum {
     $apiUrl = Get-WindoBootstrapChecksumApiUrl
     $releaseRef = Get-WindoBootstrapReleaseRef
     $releaseBranch = Get-WindoBootstrapReleaseBranch
-    $requestedType = if ($env:WINDO_RELEASE_COMMIT -and [string]$env:WINDO_RELEASE_COMMIT -match '^[a-fA-F0-9]{40}$') { "commit" } else { "branch" }
-    $requestedRef = if ($requestedType -eq "commit") { [string]$env:WINDO_RELEASE_COMMIT } else { $releaseBranch }
+    $releaseCommitEnv = Get-WindoBootstrapEnvValue -Name "WINDO_RELEASE_COMMIT"
+    $requestedType = if ((Test-WindoBootstrapHasText $releaseCommitEnv) -and $releaseCommitEnv -match '^[a-fA-F0-9]{40}$') { "commit" } else { "branch" }
+    $requestedRef = if ($requestedType -eq "commit") { $releaseCommitEnv } else { $releaseBranch }
     $sourceReleaseBranch = if ($releaseRef -match '^[a-fA-F0-9]{40}$') { $releaseBranch } else { $releaseRef }
     $apiError = $null
 

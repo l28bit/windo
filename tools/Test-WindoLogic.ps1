@@ -765,7 +765,13 @@ $bootstrapManifestValueFn = Get-WindoFunctionTextFromSource -Source $bootstrapSo
 $bootstrapReleaseBranchFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapReleaseBranch"
 $bootstrapErrorResponseFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapErrorResponse"
 $bootstrapRetryableWebErrorFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "_windo_bootstrap_is_retryable_web_error"
-if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -and $bootstrapReleaseMetadataStateFn -and $bootstrapParsedPayloadFn -and $bootstrapManifestValueFn -and $bootstrapNormalizedPublishedChecksumFn -and $bootstrapReleaseBranchFn -and $bootstrapErrorResponseFn -and $bootstrapRetryableWebErrorFn) {
+$bootstrapEnvValueFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapEnvValue"
+$bootstrapHasTextFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Test-WindoBootstrapHasText"
+$bootstrapWebRequestFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Invoke-WindoBootstrapWebRequest"
+$bootstrapRestMethodFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Invoke-WindoBootstrapRestMethod"
+if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -and $bootstrapReleaseMetadataStateFn -and $bootstrapParsedPayloadFn -and $bootstrapManifestValueFn -and $bootstrapNormalizedPublishedChecksumFn -and $bootstrapReleaseBranchFn -and $bootstrapErrorResponseFn -and $bootstrapRetryableWebErrorFn -and $bootstrapEnvValueFn -and $bootstrapHasTextFn -and $bootstrapWebRequestFn -and $bootstrapRestMethodFn) {
+    Invoke-Expression $bootstrapHasTextFn
+    Invoke-Expression $bootstrapEnvValueFn
     Invoke-Expression $bootstrapBoolFn
     Invoke-Expression $bootstrapSpinnerFn
     Invoke-Expression $bootstrapReleaseMetadataFn
@@ -776,6 +782,8 @@ if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -
     Invoke-Expression $bootstrapManifestValueFn
     Invoke-Expression $bootstrapErrorResponseFn
     Invoke-Expression $bootstrapRetryableWebErrorFn
+    Invoke-Expression $bootstrapWebRequestFn
+    Invoke-Expression $bootstrapRestMethodFn
 
     $savedNoSpinner = if (Test-Path Env:WINDO_NO_SPINNER) { (Get-Item Env:WINDO_NO_SPINNER).Value } else { $null }
     $savedBootstrapCI = if (Test-Path Env:CI) { (Get-Item Env:CI).Value } else { $null }
@@ -811,17 +819,37 @@ if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -
         Assert-State "bootstrap missing branch is compatibility mode" $true $stateBranch.CompatibilityMode "missing branch metadata is compatibility mode"
 
         Set-StrictMode -Version Latest
+        Assert-State "bootstrap env reader returns null for missing env under strict mode" $true ($null -eq (Get-WindoBootstrapEnvValue -Name WINDO_DOES_NOT_EXIST_FOR_TESTS)) "missing env lookup does not throw"
+        Assert-State "bootstrap bool parser handles missing env under strict mode" $true (ConvertFrom-WindoBootstrapBool -Name WINDO_DOES_NOT_EXIST_FOR_TESTS -Default $true) "missing bool env returns default under strict mode"
         $plainException = [System.Exception]::new("plain retryable timeout")
         $plainError = [System.Management.Automation.ErrorRecord]::new($plainException, "plain", [System.Management.Automation.ErrorCategory]::OperationTimeout, $null)
         Assert-State "bootstrap retryable web error handles missing Response property" $true (_windo_bootstrap_is_retryable_web_error $plainError) "strict mode missing Response property does not throw"
+        $script:bootstrapMockWebParams = $null
+        $script:bootstrapMockRestParams = $null
+        function Invoke-WebRequest {
+            param([string]$Uri, [switch]$UseBasicParsing, [int]$TimeoutSec, [string]$OutFile, [string]$ErrorAction)
+            $script:bootstrapMockWebParams = @{} + $PSBoundParameters
+            return [pscustomobject]@{ Content = '{}' }
+        }
+        function Invoke-RestMethod {
+            param([string]$Uri, [int]$TimeoutSec, [string]$OutFile, [string]$ErrorAction)
+            $script:bootstrapMockRestParams = @{} + $PSBoundParameters
+            return [pscustomobject]@{ ok = $true }
+        }
+        Invoke-WindoBootstrapWebRequest -Uri "https://example.invalid/test" -TimeoutSec 1 -UseBasicParsing | Out-Null
+        Assert-State "bootstrap web request omits empty OutFile" $false $script:bootstrapMockWebParams.ContainsKey('OutFile') "no OutFile parameter is passed when omitted"
+        Invoke-WindoBootstrapRestMethod -Uri "https://example.invalid/test" -TimeoutSec 1 | Out-Null
+        Assert-State "bootstrap rest method omits empty OutFile" $false $script:bootstrapMockRestParams.ContainsKey('OutFile') "no OutFile parameter is passed when omitted"
     } finally {
+        Remove-Item Function:\Invoke-WebRequest -ErrorAction SilentlyContinue
+        Remove-Item Function:\Invoke-RestMethod -ErrorAction SilentlyContinue
         Set-StrictMode -Off
         if ($null -eq $savedNoSpinner) { Remove-Item Env:WINDO_NO_SPINNER -ErrorAction SilentlyContinue } else { $env:WINDO_NO_SPINNER = $savedNoSpinner }
         if ($null -eq $savedBootstrapCI) { Remove-Item Env:CI -ErrorAction SilentlyContinue } else { $env:CI = $savedBootstrapCI }
         if ($null -eq $savedTestBool) { Remove-Item Env:WINDO_BOOTSTRAP_BOOL_TEST -ErrorAction SilentlyContinue } else { $env:WINDO_BOOTSTRAP_BOOL_TEST = $savedTestBool }
     }
 } else {
-    Assert-Equal $false $true "bootstrap exposes bool, spinner, release metadata, and strict-safe web error helpers"
+    Assert-Equal $false $true "bootstrap exposes bool, spinner, release metadata, strict-safe env, and web request helpers"
 }
 Assert-Pattern $bootstrapSource '(?is)\$bootstrapAutoLaunch.*?\$bootstrapForceInstall.*?\$ciAutoMode' "bootstrap launch branch respects CI and opt-out env vars"
 Assert-Pattern $installerSource '(?is)(if \(\$ForceContinue -or \$nonInteractiveAuto -or \$ciAutoMode\)|if \(\$ForceContinue -or \$env:WINDO_INSTALL_NONINTERACTIVE -or \$env:CI\))' "installer launch path honors CI/non-interactive launch"
@@ -1163,7 +1191,7 @@ try {
     Remove-Item -Path $checksumFixtureDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.2"') -eq $true) $true "installer version is 8.5.2"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.3"') -eq $true) $true "installer version is 8.5.3"
 Assert-Equal ($installerSource.Contains('function _windo_release_branch') -and $installerSource.Contains("'prometheus'") -and $installerSource.Contains('"Exodus"')) $true "installer normalizes legacy Prometheus alias to Exodus"
 Assert-Equal ($installerSource.Contains('publishedContractBranch = "Exodus"') -eq $true) $true "release contract published branch is Exodus"
 Assert-Equal ($installerSource.Contains('function _windo_release_contract') -eq $true) $true "installer exposes release contract helper"
@@ -1171,12 +1199,12 @@ Assert-Equal ($installerSource.Contains('function _windo_contract_posture') -eq 
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "contract")') -eq $true) $true "installer handles contract command"
 Assert-Equal ($installerSource.Contains('windo version --contract') -eq $true) $true "version help documents contract flag"
 Assert-Equal ($installerSource.Contains('version = "8.4.0"') -and $installerSource.Contains('Prometheus Contract')) $true "roadmap includes V8.4 release train entry"
-Assert-Equal ($installerSource.Contains('version = "8.5.2"') -and $installerSource.Contains('Profile Reliability Contract')) $true "roadmap includes V8.5.2 release train entry"
+Assert-Equal ($installerSource.Contains('version = "8.5.3"') -and $installerSource.Contains('Bootstrap Reliability Contract')) $true "roadmap includes V8.5.3 release train entry"
 Assert-Equal ($installerSource.Contains('history search') -eq $true) $true "history help documents search subcommand"
 Assert-Equal ($installerSource.Contains('function _windo_filter_log_entries') -eq $true) $true "installer exposes history filter helper"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "do") { $Command[0] = "run" }') -eq $true) $true "do alias rewires to run"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "recdo")') -eq $true) $true "recdo alias rewires to recipes run"
-Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.2"') -eq $true) $true "bootstrap expected version is 8.5.2"
+Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.3"') -eq $true) $true "bootstrap expected version is 8.5.3"
 Assert-Equal ($bootstrapSource.Contains('function Get-WindoEditionLabel') -eq $true) $true "bootstrap derives edition label"
 Assert-Equal ($bootstrapSource.Contains('{1} bootstrap"') -eq $true) $true "bootstrap banner is edition-aware"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
@@ -1258,14 +1286,14 @@ if ($generatedFunctionBody -and $generatedPsReadLineBlock -and $generatedComplet
         "# >>> WINDO-BEGIN >>>"
         "# WINDO-MANAGED-BLOCK: BEGIN"
         "# WINDO-PROFILE-BLOCK-VERSION: 2"
-        "# WINDO-PROFILE-VERSION: 8.5.2"
+        "# WINDO-PROFILE-VERSION: 8.5.3"
         "# WINDO-CUSTOM-PROFILE-D: C:\Users\Test\Documents\windo\profile.d"
         "# WINDO-CUSTOM-SECURE-PROFILE-D: C:\Users\Test\.pwsh_secure\profile.d"
         "# WINDO-NOTE: Do not edit this managed block. Put custom PowerShell in profile.d."
-        ($generatedFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'").Replace("__VERSION__", "8.5.2"))
+        ($generatedFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'").Replace("__VERSION__", "8.5.3"))
         $generatedPsReadLineBlock
         ($generatedCompleterBlock.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'"))
-        ($generatedModulesLoaderBlock.Replace("__WINDO_PROFILE_VERSION__", "8.5.2"))
+        ($generatedModulesLoaderBlock.Replace("__WINDO_PROFILE_VERSION__", "8.5.3"))
         $generatedProfileDLoaderBlock
         "# WINDO-MANAGED-BLOCK: END"
         "# <<< WINDO-END <<<"
@@ -1756,6 +1784,7 @@ if ($studioStart -ge 0 -and $studioEnd -gt $studioStart) {
     [System.Management.Automation.Language.Parser]::ParseInput($studioScript, [ref]$studioTokens, [ref]$studioErrors) | Out-Null
     Assert-Equal ($studioErrors.Count) 0 "generated Power Studio script parses"
 }
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.3.md")) -eq $true) $true "v8.5.3 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.2.md")) -eq $true) $true "v8.5.2 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.1.md")) -eq $true) $true "v8.5.1 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.4.1.md")) -eq $true) $true "v5.4.1 release notes exist"
