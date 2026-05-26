@@ -1191,7 +1191,7 @@ try {
     Remove-Item -Path $checksumFixtureDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.3"') -eq $true) $true "installer version is 8.5.3"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.4"') -eq $true) $true "installer version is 8.5.4"
 Assert-Equal ($installerSource.Contains('function _windo_release_branch') -and $installerSource.Contains("'prometheus'") -and $installerSource.Contains('"Exodus"')) $true "installer normalizes legacy Prometheus alias to Exodus"
 Assert-Equal ($installerSource.Contains('publishedContractBranch = "Exodus"') -eq $true) $true "release contract published branch is Exodus"
 Assert-Equal ($installerSource.Contains('function _windo_release_contract') -eq $true) $true "installer exposes release contract helper"
@@ -1199,12 +1199,12 @@ Assert-Equal ($installerSource.Contains('function _windo_contract_posture') -eq 
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "contract")') -eq $true) $true "installer handles contract command"
 Assert-Equal ($installerSource.Contains('windo version --contract') -eq $true) $true "version help documents contract flag"
 Assert-Equal ($installerSource.Contains('version = "8.4.0"') -and $installerSource.Contains('Prometheus Contract')) $true "roadmap includes V8.4 release train entry"
-Assert-Equal ($installerSource.Contains('version = "8.5.3"') -and $installerSource.Contains('Bootstrap Reliability Contract')) $true "roadmap includes V8.5.3 release train entry"
+Assert-Equal ($installerSource.Contains('version = "8.5.4"') -and $installerSource.Contains('Generated Profile Prelude')) $true "roadmap includes V8.5.4 release train entry"
 Assert-Equal ($installerSource.Contains('history search') -eq $true) $true "history help documents search subcommand"
 Assert-Equal ($installerSource.Contains('function _windo_filter_log_entries') -eq $true) $true "installer exposes history filter helper"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "do") { $Command[0] = "run" }') -eq $true) $true "do alias rewires to run"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "recdo")') -eq $true) $true "recdo alias rewires to recipes run"
-Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.3"') -eq $true) $true "bootstrap expected version is 8.5.3"
+Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.4"') -eq $true) $true "bootstrap expected version is 8.5.4"
 Assert-Equal ($bootstrapSource.Contains('function Get-WindoEditionLabel') -eq $true) $true "bootstrap derives edition label"
 Assert-Equal ($bootstrapSource.Contains('{1} bootstrap"') -eq $true) $true "bootstrap banner is edition-aware"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
@@ -1282,18 +1282,28 @@ Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedCompleterBlock)) $true
 Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedModulesLoaderBlock)) $true "generated module loader block is extractable"
 Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedProfileDLoaderBlock)) $true "generated profile.d loader block is extractable"
 if ($generatedFunctionBody -and $generatedPsReadLineBlock -and $generatedCompleterBlock -and $generatedModulesLoaderBlock -and $generatedProfileDLoaderBlock) {
+    $setExitDefinition = $generatedFunctionBody.IndexOf('function _windo_set_exit', [StringComparison]::Ordinal)
+    $setExitCalls = [regex]::Matches($generatedFunctionBody, '(?m)^\s*_windo_set_exit\s+')
+    $firstSetExitCall = if ($setExitCalls.Count -gt 0) { $setExitCalls[0].Index } else { -1 }
+    Assert-Equal (($setExitDefinition -ge 0) -and ($firstSetExitCall -gt $setExitDefinition)) $true "generated windo defines _windo_set_exit before first direct call"
+
+    $timeoutDefinition = $generatedFunctionBody.IndexOf('function _windo_parse_timeout_override_ms', [StringComparison]::Ordinal)
+    $timeoutCalls = [regex]::Matches($generatedFunctionBody, '(?m)^\s*\$parsedTimeout\s*=\s*_windo_parse_timeout_override_ms|(?m)^\s*\$sudoTimeout\s*=\s*_windo_parse_timeout_override_ms')
+    $firstTimeoutCall = if ($timeoutCalls.Count -gt 0) { $timeoutCalls[0].Index } else { -1 }
+    Assert-Equal (($timeoutDefinition -ge 0) -and ($firstTimeoutCall -gt $timeoutDefinition)) $true "generated windo defines timeout parser before first direct call"
+
     $generatedProfileText = @(
         "# >>> WINDO-BEGIN >>>"
         "# WINDO-MANAGED-BLOCK: BEGIN"
         "# WINDO-PROFILE-BLOCK-VERSION: 2"
-        "# WINDO-PROFILE-VERSION: 8.5.3"
+        "# WINDO-PROFILE-VERSION: 8.5.4"
         "# WINDO-CUSTOM-PROFILE-D: C:\Users\Test\Documents\windo\profile.d"
         "# WINDO-CUSTOM-SECURE-PROFILE-D: C:\Users\Test\.pwsh_secure\profile.d"
         "# WINDO-NOTE: Do not edit this managed block. Put custom PowerShell in profile.d."
-        ($generatedFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'").Replace("__VERSION__", "8.5.3"))
+        ($generatedFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'").Replace("__VERSION__", "8.5.4"))
         $generatedPsReadLineBlock
         ($generatedCompleterBlock.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'"))
-        ($generatedModulesLoaderBlock.Replace("__WINDO_PROFILE_VERSION__", "8.5.3"))
+        ($generatedModulesLoaderBlock.Replace("__WINDO_PROFILE_VERSION__", "8.5.4"))
         $generatedProfileDLoaderBlock
         "# WINDO-MANAGED-BLOCK: END"
         "# <<< WINDO-END <<<"
@@ -1302,6 +1312,31 @@ if ($generatedFunctionBody -and $generatedPsReadLineBlock -and $generatedComplet
     $generatedProfileTokens = $null
     [System.Management.Automation.Language.Parser]::ParseInput($generatedProfileText, [ref]$generatedProfileTokens, [ref]$generatedProfileErrors) | Out-Null
     Assert-Equal ($generatedProfileErrors.Count) 0 "generated installed profile block parses"
+
+    $profileSmokePath = Join-Path ([IO.Path]::GetTempPath()) ("windo-generated-profile-smoke-" + [Guid]::NewGuid().ToString("N") + ".ps1")
+    try {
+        Set-Content -LiteralPath $profileSmokePath -Value $generatedProfileText -Encoding UTF8
+        $pwshCommand = @"
+`$ErrorActionPreference = 'Stop'
+. '$profileSmokePath'
+windo help | Out-Null
+if (`$global:WINDO_EXIT_CODE -ne 0) { throw "windo help exit code `$global:WINDO_EXIT_CODE" }
+windo --preserve-env | Out-Null
+if (`$global:WINDO_EXIT_CODE -ne 2) { throw "windo --preserve-env exit code `$global:WINDO_EXIT_CODE" }
+windo --timeout 250ms help | Out-Null
+if (`$global:WINDO_EXIT_CODE -ne 0) { throw "windo timeout help exit code `$global:WINDO_EXIT_CODE" }
+"@
+        $pwshExe = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+        if ([string]::IsNullOrWhiteSpace($pwshExe)) { $pwshExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source }
+        if ([string]::IsNullOrWhiteSpace($pwshExe)) {
+            Assert-Equal $false $true "generated installed profile smoke has a PowerShell host"
+        } else {
+            & $pwshExe -NoProfile -ExecutionPolicy Bypass -Command $pwshCommand
+            Assert-Equal $LASTEXITCODE 0 "generated installed profile supports early helper calls at runtime"
+        }
+    } finally {
+        Remove-Item -LiteralPath $profileSmokePath -Force -ErrorAction SilentlyContinue
+    }
 }
 Assert-Pattern $installerSource '\$normalized -in @\(\s*"\?",\s*"/\?",\s*"-\?"\s*\)' "windo help topic normalization treats marker-only tokens as help request"
 Assert-Equal (($installerSource.Contains("Scheduled task registration deferred") -or $installerSource.Contains("Task registration failed; continuing with best-effort non-task mode.")) -eq $true) $true "installer tracks partial install when task setup is deferred"
@@ -1784,6 +1819,7 @@ if ($studioStart -ge 0 -and $studioEnd -gt $studioStart) {
     [System.Management.Automation.Language.Parser]::ParseInput($studioScript, [ref]$studioTokens, [ref]$studioErrors) | Out-Null
     Assert-Equal ($studioErrors.Count) 0 "generated Power Studio script parses"
 }
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.4.md")) -eq $true) $true "v8.5.4 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.3.md")) -eq $true) $true "v8.5.3 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.2.md")) -eq $true) $true "v8.5.2 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.1.md")) -eq $true) $true "v8.5.1 release notes exist"
