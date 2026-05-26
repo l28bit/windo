@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $global:WINDO_EXIT_CODE = 0
-$script:WindoBootstrapExpectedVersion = "8.5.4"
+$script:WindoBootstrapExpectedVersion = "8.5.5"
 
 function Get-WindoEditionLabel {
     param([string]$Semver = $script:WindoBootstrapExpectedVersion)
@@ -138,12 +138,12 @@ function Start-WindoBootstrapProcess {
         [object]$ArgumentList = $null,
         [switch]$Wait,
         [switch]$PassThru,
-        [string]$ErrorAction = "Stop"
+        [string]$ProcessErrorAction = "Stop"
     )
     $common = @{
         FilePath = $FilePath
         Wait = $Wait
-        ErrorAction = $ErrorAction
+        ErrorAction = $ProcessErrorAction
         PassThru = $PassThru.IsPresent
     }
     if ([string]::IsNullOrWhiteSpace($Verb)) {
