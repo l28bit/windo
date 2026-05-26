@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $global:WINDO_EXIT_CODE = 0
-$script:WindoBootstrapExpectedVersion = "8.5.1"
+$script:WindoBootstrapExpectedVersion = "8.5.2"
 
 function Get-WindoEditionLabel {
     param([string]$Semver = $script:WindoBootstrapExpectedVersion)
@@ -144,12 +144,24 @@ function Get-WindoBootstrapFileHash {
     (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToUpperInvariant()
 }
 
+function Get-WindoBootstrapErrorResponse {
+    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+    if ($null -eq $ErrorRecord -or $null -eq $ErrorRecord.Exception) { return $null }
+    try {
+        $props = $ErrorRecord.Exception.PSObject.Properties
+        if ($props.Name -contains 'Response') {
+            return $ErrorRecord.Exception.Response
+        }
+    } catch { }
+    return $null
+}
+
 function _windo_bootstrap_is_retryable_web_error {
     param([System.Management.Automation.ErrorRecord]$ErrorRecord)
     if ($null -eq $ErrorRecord) { return $false }
     $m = $ErrorRecord.Exception.Message
     if ($m -match 'timeout|timed out|name resolution|Could not establish trust relationship|name not known|No such host|connection was aborted|The remote name could not be resolved') { return $true }
-    $resp = $ErrorRecord.Exception.Response
+    $resp = Get-WindoBootstrapErrorResponse -ErrorRecord $ErrorRecord
     if ($null -ne $resp) {
         try {
             $code = [int]$resp.StatusCode

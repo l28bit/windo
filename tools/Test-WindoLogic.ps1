@@ -763,7 +763,9 @@ $bootstrapParsedPayloadFn = Get-WindoFunctionTextFromSource -Source $bootstrapSo
 $bootstrapNormalizedPublishedChecksumFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapNormalizedPublishedChecksum"
 $bootstrapManifestValueFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapManifestValue"
 $bootstrapReleaseBranchFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapReleaseBranch"
-if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -and $bootstrapReleaseMetadataStateFn -and $bootstrapParsedPayloadFn -and $bootstrapManifestValueFn -and $bootstrapNormalizedPublishedChecksumFn -and $bootstrapReleaseBranchFn) {
+$bootstrapErrorResponseFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "Get-WindoBootstrapErrorResponse"
+$bootstrapRetryableWebErrorFn = Get-WindoFunctionTextFromSource -Source $bootstrapSource -Name "_windo_bootstrap_is_retryable_web_error"
+if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -and $bootstrapReleaseMetadataStateFn -and $bootstrapParsedPayloadFn -and $bootstrapManifestValueFn -and $bootstrapNormalizedPublishedChecksumFn -and $bootstrapReleaseBranchFn -and $bootstrapErrorResponseFn -and $bootstrapRetryableWebErrorFn) {
     Invoke-Expression $bootstrapBoolFn
     Invoke-Expression $bootstrapSpinnerFn
     Invoke-Expression $bootstrapReleaseMetadataFn
@@ -772,6 +774,8 @@ if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -
     Invoke-Expression $bootstrapNormalizedPublishedChecksumFn
     Invoke-Expression $bootstrapReleaseBranchFn
     Invoke-Expression $bootstrapManifestValueFn
+    Invoke-Expression $bootstrapErrorResponseFn
+    Invoke-Expression $bootstrapRetryableWebErrorFn
 
     $savedNoSpinner = if (Test-Path Env:WINDO_NO_SPINNER) { (Get-Item Env:WINDO_NO_SPINNER).Value } else { $null }
     $savedBootstrapCI = if (Test-Path Env:CI) { (Get-Item Env:CI).Value } else { $null }
@@ -805,13 +809,19 @@ if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -
         Assert-State "bootstrap mismatch includes detail" $true (-not [string]::IsNullOrWhiteSpace($stateMismatch.Detail)) "metadata mismatch exposes detail"
         $stateBranch = Get-WindoBootstrapReleaseMetadataState -ReleaseRef "Exodus" -ReleaseCommit $null -ReleaseCommitRaw $null -ReleaseBranch $null
         Assert-State "bootstrap missing branch is compatibility mode" $true $stateBranch.CompatibilityMode "missing branch metadata is compatibility mode"
+
+        Set-StrictMode -Version Latest
+        $plainException = [System.Exception]::new("plain retryable timeout")
+        $plainError = [System.Management.Automation.ErrorRecord]::new($plainException, "plain", [System.Management.Automation.ErrorCategory]::OperationTimeout, $null)
+        Assert-State "bootstrap retryable web error handles missing Response property" $true (_windo_bootstrap_is_retryable_web_error $plainError) "strict mode missing Response property does not throw"
     } finally {
+        Set-StrictMode -Off
         if ($null -eq $savedNoSpinner) { Remove-Item Env:WINDO_NO_SPINNER -ErrorAction SilentlyContinue } else { $env:WINDO_NO_SPINNER = $savedNoSpinner }
         if ($null -eq $savedBootstrapCI) { Remove-Item Env:CI -ErrorAction SilentlyContinue } else { $env:CI = $savedBootstrapCI }
         if ($null -eq $savedTestBool) { Remove-Item Env:WINDO_BOOTSTRAP_BOOL_TEST -ErrorAction SilentlyContinue } else { $env:WINDO_BOOTSTRAP_BOOL_TEST = $savedTestBool }
     }
 } else {
-    Assert-Equal $false $true "bootstrap exposes bool, spinner, and release metadata helpers"
+    Assert-Equal $false $true "bootstrap exposes bool, spinner, release metadata, and strict-safe web error helpers"
 }
 Assert-Pattern $bootstrapSource '(?is)\$bootstrapAutoLaunch.*?\$bootstrapForceInstall.*?\$ciAutoMode' "bootstrap launch branch respects CI and opt-out env vars"
 Assert-Pattern $installerSource '(?is)(if \(\$ForceContinue -or \$nonInteractiveAuto -or \$ciAutoMode\)|if \(\$ForceContinue -or \$env:WINDO_INSTALL_NONINTERACTIVE -or \$env:CI\))' "installer launch path honors CI/non-interactive launch"
@@ -1153,7 +1163,7 @@ try {
     Remove-Item -Path $checksumFixtureDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.1"') -eq $true) $true "installer version is 8.5.1"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.2"') -eq $true) $true "installer version is 8.5.2"
 Assert-Equal ($installerSource.Contains('function _windo_release_branch') -and $installerSource.Contains("'prometheus'") -and $installerSource.Contains('"Exodus"')) $true "installer normalizes legacy Prometheus alias to Exodus"
 Assert-Equal ($installerSource.Contains('publishedContractBranch = "Exodus"') -eq $true) $true "release contract published branch is Exodus"
 Assert-Equal ($installerSource.Contains('function _windo_release_contract') -eq $true) $true "installer exposes release contract helper"
@@ -1161,12 +1171,12 @@ Assert-Equal ($installerSource.Contains('function _windo_contract_posture') -eq 
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "contract")') -eq $true) $true "installer handles contract command"
 Assert-Equal ($installerSource.Contains('windo version --contract') -eq $true) $true "version help documents contract flag"
 Assert-Equal ($installerSource.Contains('version = "8.4.0"') -and $installerSource.Contains('Prometheus Contract')) $true "roadmap includes V8.4 release train entry"
-Assert-Equal ($installerSource.Contains('version = "8.5.1"') -and $installerSource.Contains('Profile Parse Guard')) $true "roadmap includes V8.5.1 release train entry"
+Assert-Equal ($installerSource.Contains('version = "8.5.2"') -and $installerSource.Contains('Profile Reliability Contract')) $true "roadmap includes V8.5.2 release train entry"
 Assert-Equal ($installerSource.Contains('history search') -eq $true) $true "history help documents search subcommand"
 Assert-Equal ($installerSource.Contains('function _windo_filter_log_entries') -eq $true) $true "installer exposes history filter helper"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "do") { $Command[0] = "run" }') -eq $true) $true "do alias rewires to run"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "recdo")') -eq $true) $true "recdo alias rewires to recipes run"
-Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.1"') -eq $true) $true "bootstrap expected version is 8.5.1"
+Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.2"') -eq $true) $true "bootstrap expected version is 8.5.2"
 Assert-Equal ($bootstrapSource.Contains('function Get-WindoEditionLabel') -eq $true) $true "bootstrap derives edition label"
 Assert-Equal ($bootstrapSource.Contains('{1} bootstrap"') -eq $true) $true "bootstrap banner is edition-aware"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
@@ -1196,6 +1206,28 @@ Assert-Equal ($installerSource.Contains('$Command.Count -ge 1 -and (($Command[-1
 Assert-Equal ($installerSource.Contains('$Command[-1] - ieq') -eq $false) $true "generated profile never splits the -ieq operator"
 Assert-Equal ($installerSource.Contains('function Test-WindoProfileSyntax') -eq $true) $true "installer exposes generated profile syntax guard"
 Assert-Equal ($installerSource.Contains('Test-WindoProfileSyntax -Content $newProfileText -Path ([string]$PROFILE)') -eq $true) $true "installer validates generated profile before writing"
+Assert-Equal ($installerSource.Contains('function Backup-WindoProfile') -eq $true) $true "installer backs up profile before managed block rewrite"
+Assert-Equal ($installerSource.Contains('function Ensure-WindoProfileD') -eq $true) $true "installer creates profile.d customization directories"
+Assert-Equal ($installerSource.Contains('Refusing to refresh WINDO profile block because the existing profile could not be read or repaired') -eq $true) $true "installer fails closed when existing profile cannot be read"
+Assert-Equal ($installerSource.Contains('WINDO-MANAGED-BLOCK: BEGIN') -eq $true) $true "managed profile block includes strong begin metadata"
+Assert-Equal ($installerSource.Contains('WINDO-MANAGED-BLOCK: END') -eq $true) $true "managed profile block includes strong end metadata"
+Assert-Equal ($installerSource.Contains('WINDO profile.d loader for user-owned shell customization') -eq $true) $true "generated profile loads user-owned profile.d scripts"
+$generatedRetryableWebErrorFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_is_retryable_web_error"
+$generatedErrorResponseFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_get_error_response"
+if ($generatedRetryableWebErrorFn -and $generatedErrorResponseFn) {
+    Invoke-Expression $generatedErrorResponseFn
+    Invoke-Expression $generatedRetryableWebErrorFn
+    Set-StrictMode -Version Latest
+    try {
+        $plainGeneratedException = [System.Exception]::new("plain timeout")
+        $plainGeneratedError = [System.Management.Automation.ErrorRecord]::new($plainGeneratedException, "plain", [System.Management.Automation.ErrorCategory]::OperationTimeout, $null)
+        Assert-Equal (_windo_is_retryable_web_error $plainGeneratedError) $true "generated profile retryable web helper handles missing Response property"
+    } finally {
+        Set-StrictMode -Off
+    }
+} else {
+    Assert-Equal $false $true "generated profile exposes strict-safe web error helper"
+}
 $profileSyntaxFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "Test-WindoProfileSyntax"
 if ($profileSyntaxFn) {
     Invoke-Expression $profileSyntaxFn
@@ -1215,17 +1247,27 @@ $generatedFunctionBody = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Sourc
 $generatedPsReadLineBlock = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "WindoPsReadLineBlock" -EndAnchor '$WindoCompleterBlock = @'
 $generatedCompleterBlock = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "WindoCompleterBlock" -EndAnchor '$WindoCompleterBlock = $WindoCompleterBlock.Replace'
 $generatedModulesLoaderBlock = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "WindoModulesLoaderBlock" -EndAnchor '$WindoModulesLoaderBlock = $WindoModulesLoaderBlock.Replace'
+$generatedProfileDLoaderBlock = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "WindoProfileDLoaderBlock" -EndAnchor 'Ensure-WindoProfileD'
 Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedFunctionBody)) $true "generated profile function block is extractable"
 Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedPsReadLineBlock)) $true "generated PSReadLine block is extractable"
 Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedCompleterBlock)) $true "generated completer block is extractable"
 Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedModulesLoaderBlock)) $true "generated module loader block is extractable"
-if ($generatedFunctionBody -and $generatedPsReadLineBlock -and $generatedCompleterBlock -and $generatedModulesLoaderBlock) {
+Assert-Equal (-not [string]::IsNullOrWhiteSpace($generatedProfileDLoaderBlock)) $true "generated profile.d loader block is extractable"
+if ($generatedFunctionBody -and $generatedPsReadLineBlock -and $generatedCompleterBlock -and $generatedModulesLoaderBlock -and $generatedProfileDLoaderBlock) {
     $generatedProfileText = @(
         "# >>> WINDO-BEGIN >>>"
-        ($generatedFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'").Replace("__VERSION__", "8.5.1"))
+        "# WINDO-MANAGED-BLOCK: BEGIN"
+        "# WINDO-PROFILE-BLOCK-VERSION: 2"
+        "# WINDO-PROFILE-VERSION: 8.5.2"
+        "# WINDO-CUSTOM-PROFILE-D: C:\Users\Test\Documents\windo\profile.d"
+        "# WINDO-CUSTOM-SECURE-PROFILE-D: C:\Users\Test\.pwsh_secure\profile.d"
+        "# WINDO-NOTE: Do not edit this managed block. Put custom PowerShell in profile.d."
+        ($generatedFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'").Replace("__VERSION__", "8.5.2"))
         $generatedPsReadLineBlock
         ($generatedCompleterBlock.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'"))
-        ($generatedModulesLoaderBlock.Replace("__WINDO_PROFILE_VERSION__", "8.5.1"))
+        ($generatedModulesLoaderBlock.Replace("__WINDO_PROFILE_VERSION__", "8.5.2"))
+        $generatedProfileDLoaderBlock
+        "# WINDO-MANAGED-BLOCK: END"
         "# <<< WINDO-END <<<"
     ) -join "`r`n"
     $generatedProfileErrors = $null
@@ -1714,6 +1756,8 @@ if ($studioStart -ge 0 -and $studioEnd -gt $studioStart) {
     [System.Management.Automation.Language.Parser]::ParseInput($studioScript, [ref]$studioTokens, [ref]$studioErrors) | Out-Null
     Assert-Equal ($studioErrors.Count) 0 "generated Power Studio script parses"
 }
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.2.md")) -eq $true) $true "v8.5.2 release notes exist"
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.1.md")) -eq $true) $true "v8.5.1 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.4.1.md")) -eq $true) $true "v5.4.1 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.4.0.md")) -eq $true) $true "v5.4.0 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v5.3.0.md")) -eq $true) $true "v5.3.0 release notes exist"
