@@ -382,6 +382,7 @@ $getLastHashFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name 
 $dpapiProtectFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_dpapi_protect"
 $dpapiUnprotectFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_dpapi_unprotect"
 $sha256HexFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_sha256_hex"
+$pathUnderRootFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_path_is_under_root"
 if (Test-Path Function:\_windo_draw_ascii_startup_frame) { Remove-Item Function:\_windo_draw_ascii_startup_frame -Force }
 function _windo_draw_ascii_startup_frame { }
 if (Test-Path Function:\_windo_is_process_elevated) { Remove-Item Function:\_windo_is_process_elevated -Force }
@@ -403,6 +404,20 @@ function _windo_start_downloaded_installer {
 }
 if (Test-Path Function:\_windo_verify_installer_sha256_optional) { Remove-Item Function:\_windo_verify_installer_sha256_optional -Force }
 function _windo_verify_installer_sha256_optional { }
+if ($pathUnderRootFn) {
+    Invoke-Expression $pathUnderRootFn
+    $pathRoot = Join-Path ([IO.Path]::GetTempPath()) ("windo-path-root-" + [guid]::NewGuid().ToString("N"))
+    $inside = Join-Path $pathRoot "windo_res.safe.json"
+    $prefixCollision = Join-Path ($pathRoot + "-collision") "windo_res.bad.json"
+    try {
+        New-Item -ItemType Directory -Path $pathRoot -Force | Out-Null
+        Assert-Equal (_windo_path_is_under_root -Path $inside -Root $pathRoot) $true "runner cleanup invariant accepts paths under secure root"
+        Assert-Equal (_windo_path_is_under_root -Path $prefixCollision -Root $pathRoot) $false "runner cleanup invariant rejects prefix-collision paths"
+    } finally {
+        Remove-Item -LiteralPath $pathRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath ($pathRoot + "-collision") -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 if ($commandPlanFn -and $joinPlanFn -and $quotePlanPartFn -and $motionClassFn -and $setExitFn -and $promptSelfUpdateFn -and $taskAccessDeniedFn -and $runGenesisInstallerFn -and $verifyLogStateFn -and $appendLogFn -and $getLastHashFn -and $dpapiProtectFn -and $dpapiUnprotectFn -and $sha256HexFn -and $writeTextFileAtomicFn -and $writeLastMetaFn -and $controlFindRequestFn -and $controlWriteRequestFn -and $controlSetRequestStatusFn -and $controlStartActionFn -and $controlQueueActionFn -and $controlRootFn -and $controlQueueRootFn -and $normalizePromptFn -and $recipeCommandLineFn -and $recipePreviewFn -and $builtinRecipesFn -and $readPrefsFn -and $readPrefsMapFn) {
     Invoke-Expression $commandPlanFn
     Invoke-Expression $joinPlanFn
@@ -1214,7 +1229,7 @@ try {
     Remove-Item -Path $checksumFixtureDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.5"') -eq $true) $true "installer version is 8.5.5"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.6"') -eq $true) $true "installer version is 8.5.6"
 Assert-Equal ($installerSource.Contains('function _windo_release_branch') -and $installerSource.Contains("'prometheus'") -and $installerSource.Contains('"Exodus"')) $true "installer normalizes legacy Prometheus alias to Exodus"
 Assert-Equal ($installerSource.Contains('publishedContractBranch = "Exodus"') -eq $true) $true "release contract published branch is Exodus"
 Assert-Equal ($installerSource.Contains('function _windo_release_contract') -eq $true) $true "installer exposes release contract helper"
@@ -1223,11 +1238,17 @@ Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[
 Assert-Equal ($installerSource.Contains('windo version --contract') -eq $true) $true "version help documents contract flag"
 Assert-Equal ($installerSource.Contains('version = "8.4.0"') -and $installerSource.Contains('Prometheus Contract')) $true "roadmap includes V8.4 release train entry"
 Assert-Equal ($installerSource.Contains('version = "8.5.5"') -and $installerSource.Contains('Bootstrap Handoff Guard')) $true "roadmap includes V8.5.5 release train entry"
+Assert-Equal ($installerSource.Contains('version = "8.5.6"') -and $installerSource.Contains('Dr. Run')) $true "roadmap includes V8.5.6 release train entry"
 Assert-Equal ($installerSource.Contains('history search') -eq $true) $true "history help documents search subcommand"
 Assert-Equal ($installerSource.Contains('function _windo_filter_log_entries') -eq $true) $true "installer exposes history filter helper"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "do") { $Command[0] = "run" }') -eq $true) $true "do alias rewires to run"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "recdo")') -eq $true) $true "recdo alias rewires to recipes run"
-Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.5"') -eq $true) $true "bootstrap expected version is 8.5.5"
+Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "dr")') -eq $true) $true "dr alias rewires to runner doctor"
+Assert-Equal ($installerSource.Contains('function _windo_runner_lifecycle_state') -eq $true) $true "installer defines runner lifecycle state helper"
+Assert-Equal ($installerSource.Contains('function _windo_runner_cleanup_execute') -eq $true) $true "installer defines safe runner cleanup helper"
+Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "runner")') -eq $true) $true "installer handles runner command"
+Assert-Equal ($installerSource.Contains('runnerLifecycle =') -eq $true) $true "installer manifest and JSON include runner lifecycle state"
+Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.6"') -eq $true) $true "bootstrap expected version is 8.5.6"
 Assert-Equal ($bootstrapSource.Contains('function Get-WindoEditionLabel') -eq $true) $true "bootstrap derives edition label"
 Assert-Equal ($bootstrapSource.Contains('{1} bootstrap"') -eq $true) $true "bootstrap banner is edition-aware"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
@@ -1319,14 +1340,14 @@ if ($generatedFunctionBody -and $generatedPsReadLineBlock -and $generatedComplet
         "# >>> WINDO-BEGIN >>>"
         "# WINDO-MANAGED-BLOCK: BEGIN"
         "# WINDO-PROFILE-BLOCK-VERSION: 2"
-        "# WINDO-PROFILE-VERSION: 8.5.5"
+        "# WINDO-PROFILE-VERSION: 8.5.6"
         "# WINDO-CUSTOM-PROFILE-D: C:\Users\Test\Documents\windo\profile.d"
         "# WINDO-CUSTOM-SECURE-PROFILE-D: C:\Users\Test\.pwsh_secure\profile.d"
         "# WINDO-NOTE: Do not edit this managed block. Put custom PowerShell in profile.d."
-        ($generatedFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'").Replace("__VERSION__", "8.5.5"))
+        ($generatedFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'").Replace("__VERSION__", "8.5.6"))
         $generatedPsReadLineBlock
         ($generatedCompleterBlock.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'"))
-        ($generatedModulesLoaderBlock.Replace("__WINDO_PROFILE_VERSION__", "8.5.5"))
+        ($generatedModulesLoaderBlock.Replace("__WINDO_PROFILE_VERSION__", "8.5.6"))
         $generatedProfileDLoaderBlock
         "# WINDO-MANAGED-BLOCK: END"
         "# <<< WINDO-END <<<"
@@ -1842,6 +1863,7 @@ if ($studioStart -ge 0 -and $studioEnd -gt $studioStart) {
     [System.Management.Automation.Language.Parser]::ParseInput($studioScript, [ref]$studioTokens, [ref]$studioErrors) | Out-Null
     Assert-Equal ($studioErrors.Count) 0 "generated Power Studio script parses"
 }
+Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.6.md")) -eq $true) $true "v8.5.6 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.5.md")) -eq $true) $true "v8.5.5 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.4.md")) -eq $true) $true "v8.5.4 release notes exist"
 Assert-Equal ((Test-Path (Join-Path $Root "docs\releases\RELEASE_NOTES_v8.5.3.md")) -eq $true) $true "v8.5.3 release notes exist"

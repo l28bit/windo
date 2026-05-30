@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="WINDO contained brand mark">
+<title>WINDO contained brand mark</title>
+<path d="M128 26 L210 57 L210 134 C210 184 171 216 128 232 C85 216 46 184 46 134 L46 57 Z"
+fill="#07111F" stroke="#FFC400" stroke-width="12" stroke-linejoin="round"/>
+<path d="M128 36 L128 222" stroke="#FFC400" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+<path d="M80 92 L108 128 L80 164" fill="none" stroke="#FFFFFF" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="92" y1="163" x2="116" y2="163" stroke="#A7B0BC" stroke-width="8" stroke-linecap="round"/>
+<rect x="144" y="76" width="28" height="34" rx="2" fill="#FFC400"/>
+<rect x="180" y="72" width="28" height="38" rx="2" fill="#FFC400"/>
+<rect x="144" y="122" width="28" height="42" rx="2" fill="#FFC400"/>
+<rect x="180" y="122" width="28" height="50" rx="2" fill="#FFC400"/>
+</svg>
