@@ -1229,7 +1229,7 @@ try {
     Remove-Item -Path $checksumFixtureDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.7"') -eq $true) $true "installer version is 8.5.7"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.8"') -eq $true) $true "installer version is 8.5.8"
 Assert-Equal ($installerSource.Contains('function _windo_release_branch') -and $installerSource.Contains("'prometheus'") -and $installerSource.Contains('"Exodus"')) $true "installer normalizes legacy Prometheus alias to Exodus"
 Assert-Equal ($installerSource.Contains('publishedContractBranch = "Exodus"') -eq $true) $true "release contract published branch is Exodus"
 Assert-Equal ($installerSource.Contains('function _windo_release_contract') -eq $true) $true "installer exposes release contract helper"
@@ -1239,7 +1239,7 @@ Assert-Equal ($installerSource.Contains('windo version --contract') -eq $true) $
 Assert-Equal ($installerSource.Contains('version = "8.4.0"') -and $installerSource.Contains('Prometheus Contract')) $true "roadmap includes V8.4 release train entry"
 Assert-Equal ($installerSource.Contains('version = "8.5.5"') -and $installerSource.Contains('Bootstrap Handoff Guard')) $true "roadmap includes V8.5.5 release train entry"
 Assert-Equal ($installerSource.Contains('version = "8.5.6"') -and $installerSource.Contains('Dr. Run')) $true "roadmap includes V8.5.6 release train entry"
-Assert-Equal ($installerSource.Contains('version = "8.5.7"') -and $installerSource.Contains('Midflight Fuel')) $true "roadmap includes V8.5.7 release train entry"
+Assert-Equal ($installerSource.Contains('version = "8.5.8"') -and $installerSource.Contains('Dependable Refuel')) $true "roadmap includes V8.5.8 release train entry"
 Assert-Equal ($installerSource.Contains('history search') -eq $true) $true "history help documents search subcommand"
 Assert-Equal ($installerSource.Contains('function _windo_filter_log_entries') -eq $true) $true "installer exposes history filter helper"
 Assert-Equal ($installerSource.Contains('elseif ($firstToken -eq "do") { $Command[0] = "run" }') -eq $true) $true "do alias rewires to run"
@@ -1251,10 +1251,10 @@ Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[
 Assert-Equal ($installerSource.Contains('runnerLifecycle =') -eq $true) $true "installer manifest and JSON include runner lifecycle state"
 Assert-Equal ($installerSource.Contains('function _windo_midflightfuel_plan') -eq $true) $true "installer defines midflightfuel repair planner"
 Assert-Equal ($installerSource.Contains('function _windo_midflightfuel_apply_action') -eq $true) $true "installer defines midflightfuel repair executor"
-Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "midflightfuel")') -eq $true) $true "installer handles midflightfuel command"
+Assert-Equal (($installerSource.Contains('if ($Command.Count -ge 1 -and ($Command[0] -eq "midflightfuel"') -or ($installerSource -match 'midflightfuel.*heal')) -eq $true) $true "installer handles midflightfuel command"
 Assert-Equal ($installerSource.Contains('repairCommand = $(if ([string]::IsNullOrWhiteSpace($RepairAction))') -eq $true) $true "preflight rows carry repair command metadata"
-Assert-Equal ($installerSource.Contains('Repair option: windo midflightfuel') -eq $true) $true "preflight prints midflightfuel repair option"
-Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.7"') -eq $true) $true "bootstrap expected version is 8.5.7"
+Assert-Equal ($installerSource.Contains('Repair option: windo heal') -eq $true) $true "preflight prints heal repair option"
+Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.8"') -eq $true) $true "bootstrap expected version is 8.5.8"
 Assert-Equal ($bootstrapSource.Contains('function Get-WindoEditionLabel') -eq $true) $true "bootstrap derives edition label"
 Assert-Equal ($bootstrapSource.Contains('{1} bootstrap"') -eq $true) $true "bootstrap banner is edition-aware"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
@@ -1345,15 +1345,15 @@ if ($generatedFunctionBody -and $generatedPsReadLineBlock -and $generatedComplet
     $generatedProfileText = @(
         "# >>> WINDO-BEGIN >>>"
         "# WINDO-MANAGED-BLOCK: BEGIN"
-        "# WINDO-PROFILE-BLOCK-VERSION: 2"
-        "# WINDO-PROFILE-VERSION: 8.5.7"
+        "# WINDO-PROFILE-BLOCK-VERSION: 3"
+        "# WINDO-PROFILE-VERSION: 8.5.8"
         "# WINDO-CUSTOM-PROFILE-D: C:\Users\Test\Documents\windo\profile.d"
         "# WINDO-CUSTOM-SECURE-PROFILE-D: C:\Users\Test\.pwsh_secure\profile.d"
         "# WINDO-NOTE: Do not edit this managed block. Put custom PowerShell in profile.d."
-        ($generatedFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'").Replace("__VERSION__", "8.5.7"))
+        ($generatedFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'").Replace("__VERSION__", "8.5.8"))
         $generatedPsReadLineBlock
         ($generatedCompleterBlock.Replace("__WINDO_BUILTIN_ARRAY__", "'help','doctor','install-latest'"))
-        ($generatedModulesLoaderBlock.Replace("__WINDO_PROFILE_VERSION__", "8.5.7"))
+        ($generatedModulesLoaderBlock.Replace("__WINDO_PROFILE_VERSION__", "8.5.8"))
         $generatedProfileDLoaderBlock
         "# WINDO-MANAGED-BLOCK: END"
         "# <<< WINDO-END <<<"
@@ -1362,6 +1362,27 @@ if ($generatedFunctionBody -and $generatedPsReadLineBlock -and $generatedComplet
     $generatedProfileTokens = $null
     [System.Management.Automation.Language.Parser]::ParseInput($generatedProfileText, [ref]$generatedProfileTokens, [ref]$generatedProfileErrors) | Out-Null
     Assert-Equal ($generatedProfileErrors.Count) 0 "generated installed profile block parses"
+
+    # v3+ thin loader simulation (profile should contain only small loader + headers; runtime holds bulk)
+    $thinLoaderSim = @'
+# >>> WINDO-BEGIN >>>
+# WINDO-MANAGED-BLOCK: BEGIN
+# WINDO-PROFILE-BLOCK-VERSION: 3
+# WINDO-PROFILE-VERSION: 8.5.8
+# WINDO-NOTE: Do not edit this managed block. Put custom PowerShell in profile.d. Implementation is in windo_runtime.ps1 under .pwsh_secure.
+# WINDO thin loader (profile block v3). Real logic lives in windo_runtime.ps1 (managed, updated on install-latest).
+$__windoSecureDir = Join-Path $HOME ".pwsh_secure"
+$__windoRuntime = Join-Path $__windoSecureDir "windo_runtime.ps1"
+if (Test-Path -LiteralPath $__windoRuntime) {
+    try { . $__windoRuntime } catch { Write-Warning ("[windo] runtime load failed: " + $_.Exception.Message) }
+} else { Write-Warning "[windo] runtime not found" }
+# WINDO-MANAGED-BLOCK: END
+# <<< WINDO-END <<<
+'@
+    $thinErrors = $null
+    $thinTokens = $null
+    [System.Management.Automation.Language.Parser]::ParseInput($thinLoaderSim, [ref]$thinTokens, [ref]$thinErrors) | Out-Null
+    Assert-Equal ($thinErrors.Count) 0 "thin profile loader (v3) parses cleanly"
 
     $profileSmokePath = Join-Path ([IO.Path]::GetTempPath()) ("windo-generated-profile-smoke-" + [Guid]::NewGuid().ToString("N") + ".ps1")
     try {
@@ -1817,7 +1838,7 @@ Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[
 Assert-Equal ($installerSource.Contains("windo dashboard --html") -eq $true) $true "installer help documents dashboard html output"
 Assert-Equal ($installerSource.Contains("windo_dashboard_") -eq $true) $true "installer writes dashboard html artifact"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "preflight")') -eq $true) $true "installer handles preflight command"
-Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "midflightfuel")') -eq $true) $true "installer handles midflightfuel command"
+Assert-Equal (($installerSource.Contains('if ($Command.Count -ge 1 -and ($Command[0] -eq "midflightfuel"') -or ($installerSource -match 'midflightfuel.*heal')) -eq $true) $true "installer handles midflightfuel command"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "launchpad")') -eq $true) $true "installer handles launchpad command"
 Assert-Equal ($installerSource.Contains("windo launchpad --tray") -eq $true) $true "installer help documents tray launchpad"
 Assert-Equal ($installerSource.Contains("return @(`$rows.ToArray())") -eq $true) $true "preflight returns flat check rows"
