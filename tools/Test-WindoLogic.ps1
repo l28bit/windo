@@ -366,6 +366,10 @@ if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $getFileSha256Fn -a
 
 $commandPlanFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_new_command_plan"
 $parseLogLinesFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_parse_log_lines"
+$normalizeTaskFieldFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_normalize_task_field"
+$taskUserMatchesFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_task_user_matches"
+$taskSettingBoolFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_get_task_setting_bool"
+$taskHealthFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "Test-WindoScheduledTaskHealth"
 $joinPlanFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_join_plan_command"
 $quotePlanPartFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_quote_plan_part"
 $motionClassFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_motion_classification"
@@ -389,6 +393,35 @@ if ($parseLogLinesFn) {
     Remove-Item Function:\_parse_log_lines -ErrorAction SilentlyContinue
 } else {
     Assert-Equal $false $true "installer exposes log parser helper"
+}
+
+if ($normalizeTaskFieldFn -and $taskUserMatchesFn -and $taskSettingBoolFn -and $taskHealthFn) {
+    Invoke-Expression $normalizeTaskFieldFn
+    Invoke-Expression $taskUserMatchesFn
+    Invoke-Expression $taskSettingBoolFn
+    Invoke-Expression $taskHealthFn
+    function Get-WindoScheduledTask {
+        param([string]$TaskName)
+        [pscustomobject]@{
+            Settings = [pscustomobject]@{
+                Enabled = $true
+                StartWhenAvailable = $true
+                DisallowStartIfOnBatteries = $false
+                StopIfGoingOnBatteries = $false
+            }
+            Actions = @([pscustomobject]@{ Execute = "powershell.exe"; Arguments = "-NoProfile -File test.ps1" })
+            Principal = [pscustomobject]@{ UserId = "Circle"; RunLevel = "Highest" }
+        }
+    }
+    $taskHealth = Test-WindoScheduledTaskHealth -TaskName "WindoElevatedRunner" -ExpectedExecute "powershell.exe" -ExpectedArgument "-NoProfile -File test.ps1" -ExpectedUserId "DESKTOP-RA97EQU\Circle"
+    Assert-Equal $taskHealth.healthy $true "task health accepts short principal and inverse battery setting properties"
+    Remove-Item Function:\Get-WindoScheduledTask -ErrorAction SilentlyContinue
+    Remove-Item Function:\Test-WindoScheduledTaskHealth -ErrorAction SilentlyContinue
+    Remove-Item Function:\_windo_get_task_setting_bool -ErrorAction SilentlyContinue
+    Remove-Item Function:\_windo_task_user_matches -ErrorAction SilentlyContinue
+    Remove-Item Function:\_windo_normalize_task_field -ErrorAction SilentlyContinue
+} else {
+    Assert-Equal $false $true "installer exposes scheduled task health helpers"
 }
 $writeLastMetaFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_write_last_meta"
 $controlStartActionFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_start_action"

@@ -495,6 +495,32 @@ function _windo_normalize_task_field {
     return $trimmed.ToLowerInvariant()
 }
 
+function _windo_task_user_matches {
+    param([string]$Actual, [string]$Expected)
+
+    $actualNorm = _windo_normalize_task_field $Actual
+    $expectedNorm = _windo_normalize_task_field $Expected
+    if ($actualNorm -ieq $expectedNorm) { return $true }
+
+    $actualLeaf = if ($actualNorm -match '\\') { ($actualNorm -split '\\')[-1] } else { $actualNorm }
+    $expectedLeaf = if ($expectedNorm -match '\\') { ($expectedNorm -split '\\')[-1] } else { $expectedNorm }
+    return (-not [string]::IsNullOrWhiteSpace($actualLeaf)) -and ($actualLeaf -ieq $expectedLeaf)
+}
+
+function _windo_get_task_setting_bool {
+    param(
+        [Parameter(Mandatory=$true)][object]$Settings,
+        [Parameter(Mandatory=$true)][string]$AllowName,
+        [Parameter(Mandatory=$true)][string]$DisallowName,
+        [bool]$Default = $false
+    )
+
+    $propNames = @($Settings.PSObject.Properties.Name)
+    if ($propNames -contains $AllowName) { return [bool]$Settings.$AllowName }
+    if ($propNames -contains $DisallowName) { return -not [bool]$Settings.$DisallowName }
+    return $Default
+}
+
 function Test-WindoScheduledTaskHealth {
     param(
         [Parameter(Mandatory=$true)][string]$TaskName,
@@ -542,9 +568,7 @@ function Test-WindoScheduledTaskHealth {
         }
 
         if ($null -ne $task.Principal) {
-            $actualUser = _windo_normalize_task_field $task.Principal.UserId
-            $expectedUser = _windo_normalize_task_field $ExpectedUserId
-            $result.principalMatch = ($actualUser -ieq $expectedUser)
+            $result.principalMatch = _windo_task_user_matches -Actual $task.Principal.UserId -Expected $ExpectedUserId
             if (-not $result.principalMatch) { $issues.Add("task principal mismatch") }
             if ((-not [string]::IsNullOrWhiteSpace([string]$task.Principal.RunLevel)) -and [string]$task.Principal.RunLevel -ne "Highest") {
                 $result.principalMatch = $false
@@ -557,8 +581,8 @@ function Test-WindoScheduledTaskHealth {
         if ($null -ne $task.Settings) {
             $settings = $task.Settings
             $startWhenAvailable = [bool]$settings.StartWhenAvailable
-            $allowOnBatteries = [bool]$settings.AllowStartIfOnBatteries
-            $dontStopOnBatteries = [bool]$settings.DontStopIfGoingOnBatteries
+            $allowOnBatteries = _windo_get_task_setting_bool -Settings $settings -AllowName "AllowStartIfOnBatteries" -DisallowName "DisallowStartIfOnBatteries"
+            $dontStopOnBatteries = _windo_get_task_setting_bool -Settings $settings -AllowName "DontStopIfGoingOnBatteries" -DisallowName "StopIfGoingOnBatteries"
             $result.settingsMatch = $startWhenAvailable -and $allowOnBatteries -and $dontStopOnBatteries
             if (-not $startWhenAvailable) { $issues.Add("StartWhenAvailable is false") }
             if (-not $allowOnBatteries) { $issues.Add("AllowStartIfOnBatteries is false") }
@@ -1051,18 +1075,24 @@ try {
         Set-ScheduledTask -TaskName $TaskName -Action $Action | Out-Null
         $updated = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
         $updatedAction = @($updated.Actions | Select-Object -First 1)
+        $actualUser = if ($null -ne $updated.Principal) { [string]$updated.Principal.UserId } else { "" }
+        $actualUserLeaf = if ($actualUser -match '\\') { ($actualUser -split '\\')[-1] } else { $actualUser }
+        $expectedUserLeaf = if ([string]$UserId -match '\\') { ([string]$UserId -split '\\')[-1] } else { [string]$UserId }
+        $settingsProps = if ($null -ne $updated.Settings) { @($updated.Settings.PSObject.Properties.Name) } else { @() }
+        $allowOnBatteries = if ($settingsProps -contains "AllowStartIfOnBatteries") { [bool]$updated.Settings.AllowStartIfOnBatteries } elseif ($settingsProps -contains "DisallowStartIfOnBatteries") { -not [bool]$updated.Settings.DisallowStartIfOnBatteries } else { $false }
+        $dontStopOnBatteries = if ($settingsProps -contains "DontStopIfGoingOnBatteries") { [bool]$updated.Settings.DontStopIfGoingOnBatteries } elseif ($settingsProps -contains "StopIfGoingOnBatteries") { -not [bool]$updated.Settings.StopIfGoingOnBatteries } else { $false }
         if (
             $null -eq $updatedAction -or
             $updatedAction.Count -eq 0 -or
             ([string]$updatedAction[0].Execute -ine $Exe) -or
             ([string]$updatedAction[0].Arguments -ine $Arg) -or
             ($null -eq $updated.Principal) -or
-            ([string]$updated.Principal.UserId -ine $UserId) -or
+            ($actualUserLeaf -ine $expectedUserLeaf) -or
             ([string]$updated.Principal.RunLevel -ne "Highest") -or
             ($null -eq $updated.Settings) -or
             (-not $updated.Settings.StartWhenAvailable) -or
-            (-not $updated.Settings.AllowStartIfOnBatteries) -or
-            (-not $updated.Settings.DontStopIfGoingOnBatteries)
+            (-not $allowOnBatteries) -or
+            (-not $dontStopOnBatteries)
         ) {
             Write-Trace ("VERIFY failed for " + $TaskName + " after update/repair")
             Write-Trace ("EXPECTED: " + $Exe + " " + $Arg)
