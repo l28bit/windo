@@ -5297,8 +5297,8 @@ Use: windo prompt --json   (machine-readable bundle)
 
     function _parse_log_lines {
         param(
-            [Parameter(Mandatory = $true)]
-            [string[]]$Lines,
+            [AllowEmptyCollection()]
+            [string[]]$Lines = @(),
             [int]$StartLine = 1,
             [string]$Context = "log",
             [bool]$EmitWarnings = $true

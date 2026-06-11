@@ -365,6 +365,7 @@ if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $getFileSha256Fn -a
 }
 
 $commandPlanFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_new_command_plan"
+$parseLogLinesFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_parse_log_lines"
 $joinPlanFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_join_plan_command"
 $quotePlanPartFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_quote_plan_part"
 $motionClassFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_motion_classification"
@@ -379,6 +380,16 @@ $readPrefsFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_
 $readPrefsMapFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_read_windo_prefs_map"
 $verifyLogStateFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_verify_log_state"
 $writeTextFileAtomicFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "Write-TextFileAtomic"
+
+if ($parseLogLinesFn) {
+    Invoke-Expression $parseLogLinesFn
+    $emptyParsedLog = _parse_log_lines -Lines @() -Context "empty-log" -EmitWarnings $false
+    Assert-Equal $emptyParsedLog.Entries.Count 0 "parse log accepts empty line arrays"
+    Assert-Equal $emptyParsedLog.ParseErrors 0 "parse log reports no errors for empty line arrays"
+    Remove-Item Function:\_parse_log_lines -ErrorAction SilentlyContinue
+} else {
+    Assert-Equal $false $true "installer exposes log parser helper"
+}
 $writeLastMetaFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_write_last_meta"
 $controlStartActionFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_start_action"
 $controlQueueActionFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_control_queue_action"
