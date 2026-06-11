@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $global:WINDO_EXIT_CODE = 0
-$script:WindoBootstrapExpectedVersion = "8.5.7"
+$script:WindoBootstrapExpectedVersion = "8.5.8"
 
 function Get-WindoEditionLabel {
     param([string]$Semver = $script:WindoBootstrapExpectedVersion)
@@ -775,6 +775,18 @@ try {
         throw "Installer download failed or was blocked. Confirm network access to GitHub endpoints, then re-run bootstrap."
     }
 
+    # Attest API downloads via their blob sha (primary trust, makes hash-validate failures rare)
+    $bootstrapAttestedByBlob = $false
+    if ($downloadSource.BlobSha) {
+        try {
+            $lb = Get-WindoBootstrapFileBlobSha1 -Path $Temp
+            if ($lb -and ($lb -ieq ([string]$downloadSource.BlobSha).ToUpperInvariant())) {
+                Write-WindoBootstrapStep -Status ok -Label "Installer attested by GitHub blob" -Color Green
+                $bootstrapAttestedByBlob = $true
+            }
+        } catch {}
+    }
+
     if (-not (ConvertFrom-WindoBootstrapBool -Name WINDO_SKIP_INSTALLER_SHA256)) {
         Write-WindoBootstrapStep -Status run -Label "Verifying installer checksum" -Detail "published checksums/installer.sha256 (GitHub API, raw fallback)"
         $strictMode = ConvertFrom-WindoBootstrapBool -Name WINDO_STRICT_INSTALLER_VERIFICATION -Default $false
@@ -783,7 +795,7 @@ try {
         $releaseRef = Get-WindoBootstrapReleaseRef
         try {
             if ($null -eq $expected -or $expected.status -ne "available" -or -not $expected.sha256) {
-                if ($strictMode) {
+                if ($strictMode -and -not $bootstrapAttestedByBlob) {
                     $detail = if ($null -ne $expected -and $expected.error) { $expected.error } else { "published checksum was unavailable" }
                     throw "Installer SHA256 cannot be validated against a verifiable published source in strict mode. Check network/API access and branch state, then re-run. Temporary override: WINDO_SKIP_INSTALLER_SHA256=1. $detail"
                 }
@@ -815,14 +827,19 @@ $got = Get-WindoBootstrapFileHash -Path $Temp
                 $releaseBranch = if ($null -ne $expected -and $expected.PSObject.Properties.Name -contains "releaseBranch") { [string]$expected.releaseBranch } else { $null }
                 $metadataState = Get-WindoBootstrapReleaseMetadataState -ReleaseRef $releaseRef -ReleaseCommit $releaseCommit -ReleaseCommitRaw $releaseCommitRaw -ReleaseBranch $releaseBranch
                 if ($metadataState.CompatibilityMode) {
-                    if ($strictMode) {
+                    if ($strictMode -and -not $bootstrapAttestedByBlob) {
                         throw "Installer SHA256 does not match published checksum for ref $releaseRef. $($metadataState.Detail) Expected=$expectedSha Got=$got. Verify branch pins and manifest provenance before continuing."
                     }
                     Write-WindoBootstrapStep -Status warn -Label "Checksum drift tolerated" -Detail "$($metadataState.Detail) Continuing in compatibility mode." -Color Yellow
                     Write-WindoBootstrapStep -Status ok -Label "Checksum accepted" -Color Green
                     $expected = $null
                 } elseif ($null -ne $expected) {
-                    throw "Installer SHA256 does not match published checksum. Confirm manifest and release provenance before continuing. Temporary override: WINDO_SKIP_INSTALLER_SHA256=1 or WINDO_STRICT_INSTALLER_VERIFICATION=0. Expected=$expectedSha Got=$got"
+                    if ($bootstrapAttestedByBlob) {
+                        Write-WindoBootstrapStep -Status warn -Label "Checksum drift ignored (blob-attested)" -Color Yellow
+                        $expected = $null
+                    } else {
+                        throw "Installer SHA256 does not match published checksum. Confirm manifest and release provenance before continuing. Temporary override: WINDO_SKIP_INSTALLER_SHA256=1 or WINDO_STRICT_INSTALLER_VERIFICATION=0. Expected=$expectedSha Got=$got"
+                    }
                 }
                         }
                     }

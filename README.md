@@ -15,7 +15,7 @@ Experienced operators treat commands as intent. Elevation should not be accident
 
 The default GitHub branch for raw URLs is **`Exodus`** (the repository default on GitHub) unless overridden by `WINDO_TRACKING_BRANCH`.
 
-**Version story:** the live installer reports **`8.5.7`** with **`V8.5`** branding. Bootstrap, upgrade, checksum verification, and extras index downloads all target the **`Exodus`** branch. The V8.4 release **codename** was *Prometheus Contract* (installer identity work), not a separate Git branch. Use `windo contract` or `windo version --contract` to inspect the effective contract on any machine.
+**Version story:** the live installer reports **`8.5.8`** with **`V8.5`** branding. Bootstrap, upgrade, checksum verification, and extras index downloads all target the **`Exodus`** branch. The V8.5.7 release **codename** was *Midflight Fuel* (curated preflight healers); V8.4 was *Prometheus Contract*. Use `windo contract` or `windo version --contract` to inspect the effective contract on any machine.
 
 Release source contract:
 - `WINDO_RELEASE_COMMIT` (optional valid 40-hex commit) has highest priority.
@@ -23,6 +23,12 @@ Release source contract:
 - invalid overrides and legacy aliases (`Genesis`, `Genisis`, `Prometheus`) fall back to **`Exodus`** automatically.
 
 ---
+
+## What's new in WINDO V8.5.8
+- **Thin profile loader contract** — the managed block injected into `$PROFILE` is now a tiny stable loader (~10 lines) that dots `windo_runtime.ps1` from `.pwsh_secure`. The full implementation no longer lives in your personal profile. Old bloated blocks are automatically stripped on upgrade. This eliminates profile parse failures and bloat caused by WINDO.
+- **Runtime decoupling** — `windo_runtime.ps1` (and snapshot) now carries the command surface, keybindings, completer, module/profile.d loaders. Profile updates are minimal and safe.
+- **Hash validation healers** — API-sourced installer downloads are now primarily attested via GitHub content blob SHA (no separate checksum fetch required for trust). Checksum drift is advisory when source-attested. Raw fallbacks still use checksums. "Failed to validate hash" should no longer occur on standard (API) download paths.
+- **Built-in healers finalized** — `windo midflightfuel` and preflight now use lighter "profile" repair lane (writes thin loader safely with backup+guard). Added `windo heal` surface and a standalone `%USERPROFILE%\.pwsh_secure\windo_heal.ps1` that can repair profiles and run curated fixes even if the profile block is missing/broken. Midflightfuel is now more operational for common recovery without full reinstall.
 
 ## What's new in WINDO V8.5
 

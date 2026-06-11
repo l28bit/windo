@@ -7,11 +7,13 @@ Installs:
 - windo_runner.ps1
 - windo_self_update.ps1
 - windo_uninstall.ps1
+- windo_heal.ps1
 - windo_manifest.json
 - Scheduled tasks:
     - WindoElevatedRunner
     - WindoSelfUpdate
-- WINDO profile block in $PROFILE (windo function + PSReadLine keybindings + delegated tab completion)
+- WINDO profile block in $PROFILE (tiny stable loader only)
+- windo_runtime.ps1 (full implementation; loaded by the thin profile block)
 - Snapshot copies under $HOME\Documents\windo\
 
 Maintainer: new windo subcommands must be added to $WindoBuiltinVerbs (single source for profile completer + last-command exclusions).
@@ -20,14 +22,14 @@ Maintainer: new windo subcommands must be added to $WindoBuiltinVerbs (single so
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$WindoVersion = "8.5.7"
+$WindoVersion = "8.5.8"
 $global:WINDO_EXIT_CODE = 0
 
 # Single source of truth for embedded profile: completer skip-list (plus '!!') and windo last-command first-token exclusions.
 $WindoBuiltinVerbs = @(
-    'help', '?', 'last', 'stats', 'history', 'report', 'dashboard', 'preflight', 'midflightfuel', 'health', 'check', 'launchpad', 'export', 'self-update', 'version',
+    'help', '?', 'last', 'stats', 'history', 'report', 'dashboard', 'preflight', 'midflightfuel', 'heal', 'health', 'check', 'launchpad', 'export', 'self-update', 'version',
     'doctor', 'integrity', 'verify', 'trust', 'source', 'contract', 'explain', 'log', 'cleanup', 'config', 'backups', 'context', 'trace', 'replay',
-    'theme', 'output', 'motion', 'surface', 'integrate', 'control', 'signal', 'center', 'studio', 'edition', 'upgrade', 'install-latest', 'uninstall', 'remove', 'verbosity', 'profile', 'keybindings', 'completion', 'roadmap', 'syntax', 'mesh',
+    'theme', 'output', 'motion', 'surface', 'integrate', 'control', 'signal', 'center', 'studio', 'edition', 'upgrade', 'install-latest', 'uninstall', 'remove', 'verbosity', 'profile', 'keybindings', 'completion', 'roadmap', 'syntax', 'mesh', 'heal',
     'modules', 'recipes', 'prompt', 'extras', 'dev', 'session', 'status', 'ai', 'repair', 'runner', 'scan', 'vault', 'sshx', 'crypto', 'venv', 'pyenv', 'python', 'pkg', 'package', 'installer', 'net-scan', 'rdp', 'vnc', 'container', 'wsl', 'run',
     'do', 'upd', 'recdo', 'dr'
 )
@@ -39,6 +41,7 @@ $SecureDir    = Join-Path $HOME ".pwsh_secure"
 $RunnerPath   = Join-Path $SecureDir "windo_runner.ps1"
 $UpdateScript = Join-Path $SecureDir "windo_self_update.ps1"
 $UninstallPath = Join-Path $SecureDir "windo_uninstall.ps1"
+$HealPath     = Join-Path $SecureDir "windo_heal.ps1"
 $RunnerLast   = Join-Path $SecureDir "windo_runner_last.txt"
 $UpdateLast   = Join-Path $SecureDir "windo_self_update_last.txt"
 $LogFile      = Join-Path $SecureDir "windo_history.enc"
@@ -47,7 +50,7 @@ $SnapshotDir  = Join-Path (Join-Path $HOME "Documents") "windo"
 
 $BeginMarker  = "# >>> WINDO-BEGIN >>>"
 $EndMarker    = "# <<< WINDO-END <<<"
-$ProfileBlockVersion = "2"
+$ProfileBlockVersion = "3"
 $ProfileDPublicDir = Join-Path $SnapshotDir "profile.d"
 $ProfileDSecureDir = Join-Path $SecureDir "profile.d"
 
@@ -1272,6 +1275,43 @@ exit 0
 '@
 Write-Utf8NoBomFile -Path $UninstallPath -Content $UninstallContent
 
+# Populate bundled healer (prefers sibling/source next to running installer or snapshot; falls back to compact profile healer).
+$healInstalled = $false
+$healCandidates = @()
+try {
+    $instDir = Split-Path -Parent $PSCommandPath
+    if ($instDir) { $healCandidates += (Join-Path $instDir "windo_heal.ps1") }
+} catch {}
+$healCandidates += (Join-Path $SnapshotDir "windo_heal.ps1")
+$healCandidates = $healCandidates | Where-Object { $_ } | Select-Object -Unique
+foreach ($cand in $healCandidates) {
+    if (Test-Path -LiteralPath $cand) {
+        Copy-Item -LiteralPath $cand -Destination $HealPath -Force
+        $healInstalled = $true
+        break
+    }
+}
+if (-not $healInstalled) {
+    # Compact built-in healer sufficient for profile/runtime recovery (full version lives in committed windo_heal.ps1).
+    $healCompact = @'
+# WINDO compact healer (bundled fallback). For full features use the committed windo_heal.ps1.
+param([switch]$Profile, [switch]$All, [switch]$Force)
+$ErrorActionPreference="Stop"; Set-StrictMode -Version Latest
+$HOME=$env:USERPROFILE; $SecureDir=Join-Path $HOME ".pwsh_secure"; $rt=Join-Path $SecureDir "windo_runtime.ps1"
+$BeginMarker="# >>> WINDO-BEGIN >>>"; $EndMarker="# <<< WINDO-END <<<"
+function W { param($p,$c) $d=Split-Path $p -Parent; if($d -and -not (Test-Path $d)){New-Item -ItemType Directory -Path $d -Force|Out-Null}; $t=Join-Path $d (".tmp"+[Guid]::NewGuid()+".tmp"); [IO.File]::WriteAllText($t,$c,[Text.UTF8Encoding]::new($false)); Move-Item $t $p -Force }
+function RepairText { param($t) $bp="(?ms)"+[regex]::Escape($BeginMarker)+".*?"+[regex]::Escape($EndMarker)+"\r?\n?"; if($t -notmatch $bp){return $t}; $u=[regex]::Replace($t,$bp,""); return ($u -replace "(\r?\n){3,}","`r`n`r`n") }
+function GetPaths { $s=@(); try{ if($PROFILE){$s+=[string]$PROFILE.CurrentUserCurrentHost;$s+=[string]$PROFILE.CurrentUserAllHosts} }catch{}; $s += @((Join-Path $HOME 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'),(Join-Path $HOME 'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1')); $hs=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($p in $s){if($p){[void]$hs.Add($p)}}; return @($hs) }
+function BackupP { param($p) if(-not(Test-Path $p)){return $null}; $b=Join-Path $SecureDir "profile_backups"; if(-not(Test-Path $b)){New-Item -ItemType Directory -Path $b -Force|Out-Null}; $bp=Join-Path $b ("profile."+ (Get-Date -Format yyyyMMdd-HHmmss) +".heal.bak"); Copy-Item $p $bp -Force; return $bp }
+function WriteThin { param($p) $loader="# >>> WINDO-BEGIN >>>`n# WINDO-MANAGED-BLOCK: BEGIN`n# WINDO-PROFILE-BLOCK-VERSION: 3`n# WINDO-PROFILE-VERSION: 8.5.8`n# WINDO-NOTE: thin loader - implementation in windo_runtime.ps1`n`$__r=Join-Path (Join-Path `$HOME '.pwsh_secure') 'windo_runtime.ps1'; if(Test-Path `$__r){ . `$__r } else { Write-Warning 'WINDO runtime missing; run windo install-latest from normal shell.' }`n# <<< WINDO-END <<<`n"; $loader=$loader.Trim()+"`r`n"; if(Test-Path $p){ $c=Get-Content -Raw $p -EA SilentlyContinue; $c=if($c){RepairText $c}else{''}; $nt=$c.TrimEnd()+"`r`n`r`n"+$loader }else{ $nt=$loader }; [void]([Management.Automation.Language.Parser]::ParseInput($nt,[ref]$null,[ref]$null)); $bk=BackupP $p; W -p $p -c $nt; Write-Host "[heal] thin loader -> $p $(if($bk){'(backup '+$bk+')'})" -ForegroundColor Green }
+Write-Host "WINDO compact heal (profile focus)" -ForegroundColor Cyan
+if($Profile -or $All -or -not $Profile){ foreach($pp in GetPaths){ try{ $raw=Get-Content -Raw $pp -EA SilentlyContinue; if($raw){ $cl=RepairText $raw; if($cl -ne $raw){ W -p $pp -c $cl } }; WriteThin $pp }catch{ Write-Warning $_ } } }
+if(-not(Test-Path $rt)){ $snap=Join-Path (Join-Path $HOME 'Documents\windo') 'windo_runtime.ps1'; if(Test-Path $snap){ Copy-Item $snap $rt -Force; Write-Host "[heal] restored runtime from snapshot" -ForegroundColor Green } }
+Write-Host "Done. New shell + . `$PROFILE + windo preflight" -ForegroundColor Yellow
+'@
+    Write-Utf8NoBomFile -Path $HealPath -Content $healCompact
+}
+
 $MainActionArgs   = Get-NoWindowActionArgs -ScriptPath $RunnerPath
 $UpdateActionArgs = Get-NoWindowActionArgs -ScriptPath $UpdateScript
 
@@ -1354,6 +1394,10 @@ $Manifest = [ordered]@{
         uninstall = [ordered]@{
             path = $UninstallPath
             sha256 = Get-FileHashString -Path $UninstallPath
+        }
+        heal = [ordered]@{
+            path = $HealPath
+            sha256 = Get-FileHashString -Path $HealPath
         }
     }
     generated = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
@@ -4145,8 +4189,16 @@ Use: windo prompt --json   (machine-readable bundle)
                 codename = "Midflight Fuel"
                 theme = "Make every non-OK preflight finding lead to an explicit curated repair lane."
                 focus = @("windo midflightfuel", "preflight repair plan", "curated repair actions", "legacy upgrade rescue", "repairable yellow/red checks")
-                status = "in-progress"
+                status = "shipped"
                 operatorValue = "Operators can run preflight, see exactly what needs repair, and deliberately apply the supported repair lanes without guessing."
+            },
+            [pscustomobject]@{
+                version = "8.5.8"
+                codename = "Dependable Refuel + Thin Loader"
+                theme = "Profile hygiene (thin loader), hash validation that doesn't fail users, and operational built-in healers."
+                focus = @("thin profile loader v3", "windo_runtime.ps1 decoupling", "blob-attested downloads (no more hash validate fails)", "windo heal + profile healer lane", "midflightfuel finalized")
+                status = "current"
+                operatorValue = "WINDO no longer bloats or risks breaking $PROFILE; downloads are dependable by default; recovery has first-class built-in healers that work even with damaged profiles."
             }
         )
     }
@@ -5861,7 +5913,11 @@ function _windo_draw_ascii_startup_frame {
             try {
                 $pt = Get-Content -Raw -LiteralPath $profPath -ErrorAction Stop
                 $profHasBlock = ($pt -match [regex]::Escape($ProfileBlockBegin))
-                if ($pt -match '\$WindoVersion\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"') { $profVer = $Matches[1] }
+                if ($pt -match '# WINDO-PROFILE-VERSION:\s*([0-9]+\.[0-9]+\.[0-9]+)') {
+                    $profVer = $Matches[1]
+                } elseif ($pt -match '\$WindoVersion\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"') {
+                    $profVer = $Matches[1]
+                }
             } catch { }
         }
         if (-not $profHasBlock) {
@@ -6340,12 +6396,28 @@ function _windo_draw_ascii_startup_frame {
         )
         if (_windo_parse_bool_value $env:WINDO_SKIP_INSTALLER_SHA256 -Default $false) { return }
         if (!(Test-Path $Path)) { return }
-        $published = if ($null -ne $PublishedChecksum) { $PublishedChecksum } else { _windo_get_published_installer_sha256 }
         $installerPayload = if ($null -ne $PublishedInstaller) { $PublishedInstaller } else { $null }
         $strictMode = _windo_parse_bool_value $env:WINDO_STRICT_INSTALLER_VERIFICATION -Default $false
-        $expect = $published.sha256
+        $attestedBySource = $false
+
+        # Primary trust: if we have a GitHub content API blobSha from the *download that produced this file*, attest it locally.
+        # This makes API downloads dependable even if the separate checksum manifest is unavailable or drifts.
+        $blobFromSource = if ($null -ne $installerPayload -and $installerPayload.blobSha) { [string]$installerPayload.blobSha } else { $null }
+        if (-not [string]::IsNullOrWhiteSpace($blobFromSource)) {
+            try {
+                $localBlob = _windo_get_file_blob_sha1_hex $Path
+                if ($localBlob -and $localBlob -ieq $blobFromSource.ToUpperInvariant()) {
+                    Write-Host "[windo] Installer attested via GitHub content API blob hash (no checksum dependency). Continuing." -ForegroundColor Green
+                    # still run checksum for advisory/drift warnings below, but do not fail on it
+                    $attestedBySource = $true
+                }
+            } catch { }
+        }
+
+        $published = if ($null -ne $PublishedChecksum) { $PublishedChecksum } else { _windo_get_published_installer_sha256 }
+        $expect = if ($null -ne $published) { $published.sha256 } else { $null }
         if ($null -eq $expect -or [string]::IsNullOrWhiteSpace([string]$expect)) {
-            if ($strictMode) {
+            if ($strictMode -and -not $attestedBySource) {
                 throw "Installer SHA256 cannot be validated in strict mode because the published checksum source is unavailable or unparseable. Set WINDO_SKIP_INSTALLER_SHA256=1 to continue. Branch=$(_windo_release_branch)."
             }
             return
@@ -6379,13 +6451,13 @@ function _windo_draw_ascii_startup_frame {
                 $compatibilityReason = $metadataState.Detail
             }
             if ($compatibilityMode) {
-                if ($strictMode) {
+                if ($strictMode -and -not $attestedBySource) {
                     throw "Installer SHA256 does not match published checksum and release metadata drift is not accepted in strict mode. Set `$env:WINDO_SKIP_INSTALLER_SHA256=1 or WINDO_STRICT_INSTALLER_VERIFICATION=0 to continue. Expected=$expect Got=$got. Drift detail: $compatibilityReason"
                 }
                 Write-Host "[windo] Published checksum metadata drift detected: $compatibilityReason. Continuing in compatibility mode." -ForegroundColor Yellow
                 return
             }
-            if ($strictMode) {
+            if ($strictMode -and -not $attestedBySource) {
                 throw "Installer SHA256 does not match published checksum for branch $(_windo_release_branch). Validate network trust and download source before continuing. Use WINDO_SKIP_INSTALLER_SHA256=1 only for temporary recovery."
             }
             Write-Host "[windo] SHA256 mismatch vs checksums/installer.sha256 while verifying branch $(_windo_release_branch). Continuing in compatibility mode for recovery only. Verify branch content with a trusted source and set WINDO_STRICT_INSTALLER_VERIFICATION=1 for enforcement." -ForegroundColor Yellow
@@ -6592,7 +6664,7 @@ function _windo_draw_ascii_startup_frame {
         [void]$rows.Add((_windo_new_check_row "audit-chain" "Audit chain" ([bool]$vf.verifyOk) $(if ($vf.verifyOk) { "chain OK, physical lines=$($vf.physicalLines)" } else { "$($vf.error), line=$($vf.failureLine), recovery=$($vf.recoveryHint)" }) "windo midflightfuel --only audit-chain" $(if ($vf.verifyOk) { "info" } else { "warn" }) "audit-chain"))
 
         $profStatus = _windo_read_profile_windo_status ([string]$PROFILE)
-        [void]$rows.Add((_windo_new_check_row "profile-block" "Current profile has WINDO block" ([bool]$profStatus.hasWindoBlock) $(if ($profStatus.hasWindoBlock) { "profile block found: $PROFILE" } else { "no WINDO block found in current profile" }) "windo midflightfuel --only reinstall" $(if ($profStatus.hasWindoBlock) { "info" } else { "warn" }) "reinstall"))
+        [void]$rows.Add((_windo_new_check_row "profile-block" "Current profile has WINDO block" ([bool]$profStatus.hasWindoBlock) $(if ($profStatus.hasWindoBlock) { "profile block found: $PROFILE" } else { "no WINDO block found in current profile" }) "windo heal --profile" $(if ($profStatus.hasWindoBlock) { "info" } else { "warn" }) "profile"))
 
         $trust = _windo_trust_posture $false
         [void]$rows.Add((_windo_new_check_row "trust-posture" "Trust posture" ($trust.trustLevel -ne "REPAIR") ("level=$($trust.trustLevel), score=$($trust.score)") "windo midflightfuel --only trust" $(if ($trust.trustLevel -eq "TRUSTED") { "info" } elseif ($trust.trustLevel -eq "ATTENTION") { "warn" } else { "critical" }) "trust"))
@@ -6735,6 +6807,31 @@ function _windo_draw_ascii_startup_frame {
                 $result.ok = $false
                 $result.exitCode = 2
                 $result.message = "PowerShell runtime installation is intentionally manual. Run: winget install Microsoft.PowerShell"
+                break
+            }
+            "profile" {
+                $result.command = "powershell -NoProfile -EP Bypass -File `"$((Join-Path $SecureDir 'windo_heal.ps1'))`" --profile"
+                if ($DryRun) { $result.ok = $true; $result.message = "Would rewrite thin WINDO loader block into current-user profiles (with backup + syntax guard)."; break }
+                try {
+                    $heal = Join-Path $SecureDir "windo_heal.ps1"
+                    if (Test-Path -LiteralPath $heal) {
+                        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $heal -Profile | Out-Null
+                        $result.applied = $true
+                        $result.ok = $true
+                        $result.message = "Profile loader repaired (thin). Reload with . `$PROFILE and run windo preflight."
+                    } else {
+                        # inline minimal repair using available helpers if any
+                        # fall back to advice
+                        $result.applied = $false
+                        $result.ok = $false
+                        $result.message = "Heal script missing; run windo install-latest or the bootstrap rescue."
+                    }
+                } catch {
+                    $result.applied = $true
+                    $result.ok = $false
+                    $result.exitCode = 2
+                    $result.message = $_.Exception.Message
+                }
                 break
             }
             default {
@@ -14306,7 +14403,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
                 }
             }
             if ($fail.Count -gt 0) {
-                Write-Host "  Repair option: windo midflightfuel" -ForegroundColor Yellow
+                Write-Host "  Repair option: windo heal (midflightfuel)" -ForegroundColor Yellow
                 Write-Host "  Preview only : windo midflightfuel --dry-run" -ForegroundColor DarkGray
             }
             Write-Host "  Exit code: $exit  (0=ready, 3=warnings, 4=critical)" -ForegroundColor DarkGray
@@ -14315,7 +14412,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
         return
     }
 
-    if ($Command.Count -ge 1 -and $Command[0] -eq "midflightfuel") {
+    if ($Command.Count -ge 1 -and ($Command[0] -eq "midflightfuel" -or $Command[0] -eq "heal")) {
         $dryRunFuel = $false
         $forceFuel = $false
         $onlyFuel = [System.Collections.ArrayList]@()
@@ -16402,6 +16499,27 @@ try {
 '@
 
 Ensure-WindoProfileD
+
+# Write decoupled runtime (contains the heavy windo fn + keybindings + completer + loaders).
+# User's $PROFILE now gets only a tiny, stable loader block. This prevents bloat and parse-breakage of personal profiles.
+$runtimePath = Join-Path $SecureDir "windo_runtime.ps1"
+$runtimeContent = @(
+    "# WINDO RUNTIME (thin-loader profile block v$ProfileBlockVersion + runtime)"
+    "# WINDO-PROFILE-VERSION: $WindoVersion"
+    "# WINDO-RUNTIME-VERSION: $WindoVersion"
+    "# Generated: $(Get-Date -Format o)"
+    "# This file is fully managed by the installer. Edit profile.d/ for customizations that survive updates."
+    ""
+    $WindoFunctionBody
+    $WindoPsReadLineBlock
+    $WindoCompleterBlock
+    $WindoModulesLoaderBlock
+    $WindoProfileDLoaderBlock
+) -join "`r`n"
+$runtimeContent += "`r`n"
+Write-TextFileAtomic -Path $runtimePath -Content $runtimeContent -Encoding ([System.Text.UTF8Encoding]::new($false))
+Write-WindoInstallStep -Status ok -Label "WINDO runtime written (decoupled from profile)" -Detail $runtimePath -Color Green
+
 $profileText = ''
 if (Test-Path -LiteralPath $PROFILE) {
     try {
@@ -16411,6 +16529,25 @@ if (Test-Path -LiteralPath $PROFILE) {
         throw "Refusing to refresh WINDO profile block because the existing profile could not be read or repaired: $($_.Exception.Message)"
     }
 }
+
+# Thin loader block (v3+): never paste the full implementation into $PROFILE again.
+$thinLoader = @'
+# WINDO thin loader (profile block v__BLOCKVER__). Real logic lives in windo_runtime.ps1 (managed, updated on install-latest).
+# Keep your customizations in Documents\windo\profile.d or .pwsh_secure\profile.d -- they are loaded after this and survive upgrades.
+$__windoSecureDir = Join-Path $HOME ".pwsh_secure"
+$__windoRuntime = Join-Path $__windoSecureDir "windo_runtime.ps1"
+if (Test-Path -LiteralPath $__windoRuntime) {
+    try {
+        . $__windoRuntime
+    } catch {
+        Write-Warning ("[windo] runtime load failed from profile: " + $_.Exception.Message + "`n  Repair: windo install-latest (normal shell) or restart after manual fix.")
+    }
+} else {
+    Write-Warning "[windo] runtime not found at $__windoRuntime -- the windo command may be unavailable until repaired. Run 'windo install-latest' from a normal (non-elevated) PowerShell window."
+}
+'@
+$thinLoader = $thinLoader.Replace('__BLOCKVER__', $ProfileBlockVersion)
+
 $block = @(
     $BeginMarker
     "# WINDO-MANAGED-BLOCK: BEGIN"
@@ -16418,12 +16555,8 @@ $block = @(
     "# WINDO-PROFILE-VERSION: $WindoVersion"
     "# WINDO-CUSTOM-PROFILE-D: $ProfileDPublicDir"
     "# WINDO-CUSTOM-SECURE-PROFILE-D: $ProfileDSecureDir"
-    "# WINDO-NOTE: Do not edit this managed block. Put custom PowerShell in profile.d."
-    $WindoFunctionBody
-    $WindoPsReadLineBlock
-    $WindoCompleterBlock
-    $WindoModulesLoaderBlock
-    $WindoProfileDLoaderBlock
+    "# WINDO-NOTE: Do not edit this managed block. Put custom PowerShell in profile.d. Implementation is in windo_runtime.ps1 under .pwsh_secure."
+    $thinLoader
     "# WINDO-MANAGED-BLOCK: END"
     $EndMarker
 ) -join "`r`n"
@@ -16433,9 +16566,9 @@ Test-WindoProfileSyntax -Content $newProfileText -Path ([string]$PROFILE) | Out-
 $profileBackup = Backup-WindoProfile -Path ([string]$PROFILE)
 Write-Utf8NoBomFile -Path $PROFILE -Content $newProfileText
 if ($profileBackup) {
-    Write-WindoInstallStep -Status ok -Label "PowerShell profile refreshed" -Detail "backup: $profileBackup" -Color Green
+    Write-WindoInstallStep -Status ok -Label "PowerShell profile refreshed (thin loader)" -Detail "backup: $profileBackup" -Color Green
 } else {
-    Write-WindoInstallStep -Status ok -Label "PowerShell profile refreshed" -Color Green
+    Write-WindoInstallStep -Status ok -Label "PowerShell profile refreshed (thin loader)" -Color Green
 }
 
 Write-WindoInstallStep -Status run -Label "Writing local snapshot" -Detail $SnapshotDir
@@ -16444,6 +16577,12 @@ Copy-Item $RunnerPath (Join-Path $SnapshotDir "windo_runner.ps1") -Force
 Copy-Item $UpdateScript (Join-Path $SnapshotDir "windo_self_update.ps1") -Force
 Copy-Item $UninstallPath (Join-Path $SnapshotDir "windo_uninstall.ps1") -Force
 Copy-Item $ManifestFile (Join-Path $SnapshotDir "windo_manifest.json") -Force
+if (Test-Path -LiteralPath $runtimePath) {
+    Copy-Item $runtimePath (Join-Path $SnapshotDir "windo_runtime.ps1") -Force
+}
+if (Test-Path -LiteralPath $HealPath) {
+    Copy-Item $HealPath (Join-Path $SnapshotDir "windo_heal.ps1") -Force
+}
 
 $SnapshotInstaller = Join-Path $SnapshotDir "windo_install.ps1"
 $installerSource = $PSCommandPath
