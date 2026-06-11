@@ -254,6 +254,7 @@ installerSha256 = deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbe
 $getWindoFileHashFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "Get-WindoFileHash"
 $generatedRuntimeBody = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "WindoFunctionBody" -EndAnchor '$WindoFunctionBody = $WindoFunctionBody.Replace'
 $verifyInstallerChecksumFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_verify_installer_sha256_optional"
+$getFileSha256Fn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_get_file_sha256_hex"
 $parseBoolFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_parse_bool_value"
 $releaseMetadataStateFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_release_metadata_state"
 if ($generatedRuntimeBody) {
@@ -261,9 +262,10 @@ if ($generatedRuntimeBody) {
 } else {
     Assert-Equal $false $true "installer exposes generated runtime body"
 }
-if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $parseBoolFn -and $releaseMetadataStateFn) {
+if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $getFileSha256Fn -and $parseBoolFn -and $releaseMetadataStateFn) {
     Invoke-Expression $parseBoolFn
     Invoke-Expression $getWindoFileHashFn
+    Invoke-Expression $getFileSha256Fn
     Invoke-Expression $verifyInstallerChecksumFn
     Invoke-Expression $releaseMetadataStateFn
 
@@ -271,6 +273,7 @@ if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $parseBoolFn -and $
     function _windo_release_branch { return "Exodus" }
     function _windo_get_file_blob_sha1_hex([string]$Path) { return $null }
     function _windo_get_snapshot_installer_sha256([string]$Version) { return $null }
+    function _windo_verify_checksum_manifest_signature([string]$ManifestText) { return [pscustomobject]@{ ok = $true; source = "unit"; error = $null } }
 
     $fixtureInstallerFile = Join-Path ([IO.Path]::GetTempPath()) ("windo-verify-checksum-" + [Guid]::NewGuid().ToString("N") + ".ps1")
     Set-Content -Path $fixtureInstallerFile -Value "installer payload"
@@ -354,6 +357,8 @@ if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $parseBoolFn -and $
         Remove-Item -ErrorAction SilentlyContinue Function:\_windo_release_branch
         Remove-Item -ErrorAction SilentlyContinue Function:\_windo_get_snapshot_installer_sha256
         Remove-Item -ErrorAction SilentlyContinue Function:\_windo_get_file_blob_sha1_hex
+        Remove-Item -ErrorAction SilentlyContinue Function:\_windo_get_file_sha256_hex
+        Remove-Item -ErrorAction SilentlyContinue Function:\_windo_verify_checksum_manifest_signature
     }
 } else {
     Assert-Equal $false $true "installer exposes checksum verification helper"

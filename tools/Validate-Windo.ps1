@@ -202,6 +202,18 @@ try {
                 Write-Host "windo_uninstall.ps1 missing; skipping uninstaller checksum validation."
             }
         }
+
+        $signatureCheck = Join-Path $root "tools\Test-WindoChecksumSignature.ps1"
+        if (Test-Path -LiteralPath $signatureCheck) {
+            try {
+                & $signatureCheck | Out-Null
+                Write-Host "OK   checksums/installer.sha256.sig" -ForegroundColor Green
+            } catch {
+                Write-Host "FAIL checksums/installer.sha256.sig" -ForegroundColor Red
+                Write-Host "Published checksum manifest signature is invalid or missing. $_"
+                $ok = $false
+            }
+        }
     }
 } catch {
     Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red

@@ -583,6 +583,14 @@ function Test-WindoScheduledTaskHealth {
 
 Write-WindoInstallStep -Status run -Label "Loading ScheduledTasks module" -Detail "required for the elevated runner and self-update tasks"
 Import-Module ScheduledTasks -ErrorAction Stop
+$script:WindoScheduledTasksAvailable = [bool](
+    (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) -and
+    (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) -and
+    (Get-Command New-ScheduledTaskAction -ErrorAction SilentlyContinue)
+)
+if (-not $script:WindoScheduledTasksAvailable) {
+    throw "ScheduledTasks module imported, but required scheduled task cmdlets are unavailable."
+}
 Write-WindoInstallStep -Status ok -Label "ScheduledTasks module ready" -Color Green
 Write-WindoInstallStep -Status run -Label "Hardening secure directory" -Detail $SecureDir
 Ensure-DirLockedToCurrentUser -Path $SecureDir
@@ -6242,6 +6250,104 @@ function _windo_draw_ascii_startup_frame {
         return "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256?ref=$ref"
     }
 
+    function _windo_installer_checksum_signature_raw_url {
+        $ref = _windo_release_ref
+        return "https://raw.githubusercontent.com/l28bit/windo/$ref/checksums/installer.sha256.sig"
+    }
+
+    function _windo_installer_checksum_signature_api_url {
+        $ref = _windo_release_ref
+        return "https://api.github.com/repos/l28bit/windo/contents/checksums/installer.sha256.sig?ref=$ref"
+    }
+
+    function _windo_release_public_key_xml {
+        [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("__WINDO_RELEASE_PUBLIC_KEY_XML_B64__"))
+    }
+
+    function _windo_parse_name_value_map([string]$Text) {
+        $map = @{}
+        if ([string]::IsNullOrWhiteSpace($Text)) { return $map }
+        foreach ($line in ($Text -split "`r?`n")) {
+            $trim = $line.Trim()
+            if ([string]::IsNullOrWhiteSpace($trim) -or $trim.StartsWith("#")) { continue }
+            $equal = $trim.IndexOf("=")
+            if ($equal -lt 0) { continue }
+            $map[$trim.Substring(0, $equal).Trim()] = $trim.Substring($equal + 1).Trim()
+        }
+        return $map
+    }
+
+    function _windo_get_remote_text {
+        param(
+            [Parameter(Mandatory)][string]$ApiUrl,
+            [Parameter(Mandatory)][string]$RawUrl
+        )
+        $apiError = $null
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $resp = Invoke-WebRequest -Uri $ApiUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+                $obj = $resp.Content | ConvertFrom-Json -ErrorAction Stop
+                if ($obj.content) {
+                    return [pscustomobject]@{
+                        status = "available"
+                        source = "github-api"
+                        text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(([string]$obj.content -replace '\s', '')))
+                        url = $ApiUrl
+                        error = $null
+                    }
+                }
+                throw "GitHub Contents API response did not include content."
+            } catch {
+                $apiError = $_.Exception.Message
+                if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) { break }
+                Start-Sleep -Milliseconds $script:_windo_retry_delays_ms[[Math]::Min($attempt - 1, 2)]
+            }
+        }
+
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $resp = Invoke-WebRequest -Uri $RawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+                return [pscustomobject]@{ status = "available"; source = "raw-fallback"; text = [string]$resp.Content; url = $RawUrl; error = $apiError }
+            } catch {
+                if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) {
+                    $msg = $_.Exception.Message
+                    if ($apiError) { $msg = "github-api: $apiError; raw: $msg" }
+                    return [pscustomobject]@{ status = "unavailable"; source = "none"; text = $null; url = $RawUrl; error = $msg }
+                }
+                Start-Sleep -Milliseconds $script:_windo_retry_delays_ms[[Math]::Min($attempt - 1, 2)]
+            }
+        }
+        return [pscustomobject]@{ status = "unavailable"; source = "none"; text = $null; url = $RawUrl; error = $apiError }
+    }
+
+    function _windo_verify_checksum_manifest_signature([string]$ManifestText) {
+        if ([string]::IsNullOrWhiteSpace($ManifestText)) { return [pscustomobject]@{ ok = $false; error = "empty checksum manifest" } }
+        $sigPayload = _windo_get_remote_text -ApiUrl (_windo_installer_checksum_signature_api_url) -RawUrl (_windo_installer_checksum_signature_raw_url)
+        if ($sigPayload.status -ne "available") { return [pscustomobject]@{ ok = $false; error = "signature unavailable: $($sigPayload.error)" } }
+        try {
+            $sigMap = _windo_parse_name_value_map $sigPayload.text
+            if (-not $sigMap.ContainsKey("signatureBase64")) { return [pscustomobject]@{ ok = $false; error = "signature file missing signatureBase64" } }
+            $sigBytes = [Convert]::FromBase64String([string]$sigMap.signatureBase64)
+            $manifestBytes = [System.Text.Encoding]::UTF8.GetBytes($ManifestText)
+            $rsa = [System.Security.Cryptography.RSA]::Create()
+            try {
+                $rsa.FromXmlString((_windo_release_public_key_xml).Trim())
+                $ok = $false
+                try {
+                    $ok = $rsa.VerifyData($manifestBytes, $sigBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pss)
+                } catch { }
+                if (-not $ok) {
+                    $ok = $rsa.VerifyData($manifestBytes, $sigBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+                }
+                return [pscustomobject]@{ ok = [bool]$ok; source = $sigPayload.source; error = $(if ($ok) { $null } else { "invalid checksum manifest signature" }) }
+            } finally {
+                $rsa.Dispose()
+            }
+        } catch {
+            return [pscustomobject]@{ ok = $false; source = $sigPayload.source; error = $_.Exception.Message }
+        }
+    }
+
     function _windo_read_checksum_from_github_contents([string]$Url) {
         $apiError = $null
         for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -6251,6 +6357,7 @@ function _windo_draw_ascii_startup_frame {
                 if ($null -eq $obj -or [string]::IsNullOrWhiteSpace([string]$obj.content)) { return $null }
                 $base64 = ([string]$obj.content -replace '\s', '')
                 $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($base64))
+                $sig = _windo_verify_checksum_manifest_signature $text
                 $sha = _windo_normalize_published_installer_sha256 $text
                 $resolvedBlobSha = if ($obj.sha) { [string]$obj.sha } else { $null }
                 $metadata = _windo_parse_release_metadata $text
@@ -6263,6 +6370,9 @@ function _windo_draw_ascii_startup_frame {
                     releaseCommitRaw = $metadata.releaseCommitRaw
                     releaseBranch = $resolvedReleaseBranch
                     releaseBranchRaw = $metadata.releaseBranchRaw
+                    signatureOk = [bool]$sig.ok
+                    signatureError = $sig.error
+                    signatureSource = $sig.source
                 }
             } catch {
                 $apiError = $_.Exception.Message
@@ -6283,6 +6393,9 @@ function _windo_draw_ascii_startup_frame {
             $releaseBranch = if ($null -ne $resolved -and $resolved.releaseBranch) { [string]$resolved.releaseBranch } else { $null }
             $releaseCommitRaw = if ($null -ne $resolved -and $resolved.PSObject.Properties.Name -contains "releaseCommitRaw") { [string]$resolved.releaseCommitRaw } else { $null }
             $releaseBranchRaw = if ($null -ne $resolved -and $resolved.PSObject.Properties.Name -contains "releaseBranchRaw") { [string]$resolved.releaseBranchRaw } else { $null }
+            $signatureOk = if ($null -ne $resolved -and $resolved.PSObject.Properties.Name -contains "signatureOk") { [bool]$resolved.signatureOk } else { $false }
+            $signatureError = if ($null -ne $resolved -and $resolved.PSObject.Properties.Name -contains "signatureError") { [string]$resolved.signatureError } else { $null }
+            $signatureSource = if ($null -ne $resolved -and $resolved.PSObject.Properties.Name -contains "signatureSource") { [string]$resolved.signatureSource } else { $null }
             if (_is_sha256_hex $sha) {
                 return [pscustomobject]@{
                     status = "available"
@@ -6294,6 +6407,9 @@ function _windo_draw_ascii_startup_frame {
                     releaseBranch = $releaseBranch
                     releaseCommitRaw = $releaseCommitRaw
                     releaseBranchRaw = $releaseBranchRaw
+                    signatureOk = $signatureOk
+                    signatureError = $signatureError
+                    signatureSource = $signatureSource
                     error = $null
                 }
             }
@@ -6307,6 +6423,9 @@ function _windo_draw_ascii_startup_frame {
                 releaseBranch = $releaseBranch
                 releaseCommitRaw = $releaseCommitRaw
                 releaseBranchRaw = $releaseBranchRaw
+                signatureOk = $signatureOk
+                signatureError = $signatureError
+                signatureSource = $signatureSource
                 error = "published checksum was reachable but did not contain a valid SHA256"
             }
         } catch {
@@ -6317,7 +6436,9 @@ function _windo_draw_ascii_startup_frame {
         for ($attempt = 1; $attempt -le 3; $attempt++) {
             try {
                 $resp = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
-                $sha = _windo_normalize_published_installer_sha256 ([string]$resp.Content)
+                $rawContent = [string]$resp.Content
+                $sig = _windo_verify_checksum_manifest_signature $rawContent
+                $sha = _windo_normalize_published_installer_sha256 $rawContent
                 if (_is_sha256_hex $sha) {
                     return [pscustomobject]@{
                         status = "available"
@@ -6329,6 +6450,9 @@ function _windo_draw_ascii_startup_frame {
                         releaseBranch = _windo_release_branch
                         releaseCommitRaw = "unknown"
                         releaseBranchRaw = _windo_release_branch
+                        signatureOk = [bool]$sig.ok
+                        signatureError = $sig.error
+                        signatureSource = $sig.source
                         error = $null
                     }
                 }
@@ -6342,6 +6466,9 @@ function _windo_draw_ascii_startup_frame {
                     releaseBranch = _windo_release_branch
                     releaseCommitRaw = "unknown"
                     releaseBranchRaw = _windo_release_branch
+                    signatureOk = [bool]$sig.ok
+                    signatureError = $sig.error
+                    signatureSource = $sig.source
                     error = "published checksum was reachable but did not contain a valid SHA256"
                 }
             } catch {
@@ -6374,8 +6501,16 @@ function _windo_draw_ascii_startup_frame {
             releaseBranch = _windo_release_branch
             releaseCommitRaw = "unknown"
             releaseBranchRaw = _windo_release_branch
+            signatureOk = $false
+            signatureError = "published checksum unavailable"
+            signatureSource = "none"
             error = $apiError
         }
+    }
+
+    function _windo_get_file_sha256_hex([string]$Path) {
+        if (!(Test-Path -LiteralPath $Path)) { return $null }
+        (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
     }
 
     function _windo_get_file_blob_sha1_hex([string]$Path) {
@@ -6427,7 +6562,16 @@ function _windo_draw_ascii_startup_frame {
             }
             return
         }
-        $got = (Get-WindoFileHash -Path $Path).ToUpperInvariant()
+        if ($published -and ($published.PSObject.Properties.Name -contains "signatureOk") -and -not [bool]$published.signatureOk -and -not $attestedBySource) {
+            if ($strictMode) {
+                throw "Published checksum manifest signature could not be verified in strict mode. $($published.signatureError)"
+            }
+            Write-Host "[windo] Published checksum manifest signature was not verified: $($published.signatureError)" -ForegroundColor Yellow
+        } elseif ($published -and ($published.PSObject.Properties.Name -contains "signatureOk") -and [bool]$published.signatureOk) {
+            Write-Host "[windo] Published checksum manifest signature verified." -ForegroundColor Green
+        }
+
+        $got = _windo_get_file_sha256_hex -Path $Path
         if ($got -cne $expect) {
             $blobSha = if ($null -ne $installerPayload -and $installerPayload.blobSha) { [string]$installerPayload.blobSha } else { $null }
             if (-not [string]::IsNullOrWhiteSpace($blobSha)) {
@@ -16062,6 +16206,8 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
 '@
 $WindoFunctionBody = $WindoFunctionBody.Replace("__WINDO_BUILTIN_ARRAY__", $WindoBuiltinVerbsArrayLiteral)
 $WindoFunctionBody = $WindoFunctionBody.Replace("__VERSION__", $WindoVersion)
+$WindoReleasePublicKeyB64 = "PFJTQUtleVZhbHVlPjxNb2R1bHVzPndWbWNhcTZlQXdvUlpRWGtwaXV4dUI1WTFieVY0SXp1ZW1hbEFKUTdlVjZxUnovRS9CR1VYa0orak5Zbk1KUU5VMW1jREFBZlgvZ09CZ1pVUWhhQ0syd2Z0b3FhQ3ErOHl1TXF6ZGpVQUt3U2lsdGN6Q1lJOFRhSnFyS1dBaVRqanBKdUptaFpMM3h1NVlubDlTTTI0TVRYTHBUVzhtY2VhL3dwN1F2UXdqV1V2TnB1Qm5lWS9hc05RS21FenJJb3ZmS3Y0TzcrbG9LWGNlSDE3RThrSVVTNWlEZmlvUnZ4K1Zqci9va2txRDNnRk95eFdHOG5CdHlRNU1qcXBZTCt5a1ZjQW93bnI3czB6bWphN25URWFnUitnaXU5bThFYlpmMkhlZDhkMTVkQ0pjcUJtNlFVakdRc1ozSWIvcDF0TkFEa0o1RVZTay9BcUxEajV0RmVBR1BwaUFDdkIvMGRUbXo5cVJNS3gyMkpSaWk5eDBTUjVhZ2Mrb2pMSXZkZkRJSUpIa0J0TjRMRDRCSzJwek53MkN6TGxwSVRGTHBIMSs4RnA3TFRpVktqRC9HQ2UwNjVqd3JIdHg5TTQ4ak40b1JYbHB5QlJ5WXVSbUc1aGdvQjZZbXZSQ20zU1Jpd0NrVy84UTVLWk1KbThSYVNXalU1R0FxTHBpMkRXU3VwPC9Nb2R1bHVzPjxFeHBvbmVudD5BUUFCPC9FeHBvbmVudD48L1JTQUtleVZhbHVlPg=="
+$WindoFunctionBody = $WindoFunctionBody.Replace("__WINDO_RELEASE_PUBLIC_KEY_XML_B64__", $WindoReleasePublicKeyB64)
 
 $WindoPsReadLineBlock = @'
 try {
