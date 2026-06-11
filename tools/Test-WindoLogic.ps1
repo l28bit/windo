@@ -252,14 +252,14 @@ installerSha256 = deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbe
 }
 
 $getWindoFileHashFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "Get-WindoFileHash"
-$windoRuntimeFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "windo"
+$generatedRuntimeBody = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "WindoFunctionBody" -EndAnchor '$WindoFunctionBody = $WindoFunctionBody.Replace'
 $verifyInstallerChecksumFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_verify_installer_sha256_optional"
 $parseBoolFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_parse_bool_value"
 $releaseMetadataStateFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_release_metadata_state"
-if ($windoRuntimeFn) {
-    Assert-Pattern $windoRuntimeFn 'function\s+Get-WindoFileHash\b' "generated windo runtime carries checksum hash helper"
+if ($generatedRuntimeBody) {
+    Assert-Pattern $generatedRuntimeBody '(?s)function\s+Get-WindoFileHash\b.*function\s+windo\b' "generated runtime exposes checksum hash helper before windo command"
 } else {
-    Assert-Equal $false $true "installer exposes generated windo runtime function"
+    Assert-Equal $false $true "installer exposes generated runtime body"
 }
 if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $parseBoolFn -and $releaseMetadataStateFn) {
     Invoke-Expression $parseBoolFn
@@ -1213,22 +1213,29 @@ try {
     & $syncScript -InstallerPath $fixtureInstaller -UninstallerPath $fixtureUninstaller -ChecksumPath $fixtureChecksumPath | Out-Null
     $fixtureManifest = Parse-NameValueManifest (Get-Content -Path $fixtureChecksumPath -Raw)
     $expectedInstallerSha256 = (Get-FileHash -Path $fixtureInstaller -Algorithm SHA256).Hash
+    $expectedInstallerSha384 = (Get-FileHash -Path $fixtureInstaller -Algorithm SHA384).Hash
+    $expectedInstallerSha512 = (Get-FileHash -Path $fixtureInstaller -Algorithm SHA512).Hash
     $expectedUninstallerSha256 = (Get-FileHash -Path $fixtureUninstaller -Algorithm SHA256).Hash
-    $fixtureGeneratedAt = [datetime]::MinValue
+    $expectedUninstallerSha384 = (Get-FileHash -Path $fixtureUninstaller -Algorithm SHA384).Hash
+    $expectedUninstallerSha512 = (Get-FileHash -Path $fixtureUninstaller -Algorithm SHA512).Hash
     Assert-Equal $fixtureManifest.schemaVersion "2" "sync script writes schema version"
     Assert-Equal $fixtureManifest.releaseBranch $fixtureBranch "sync script records WINDO_TRACKING_BRANCH"
-    Assert-Equal $fixtureManifest.releaseCommit $fixtureCommit "sync script records WINDO_RELEASE_COMMIT"
+    Assert-Equal ($fixtureManifest.ContainsKey("generatedAt")) $false "sync script avoids timestamp churn"
+    Assert-Equal ($fixtureManifest.ContainsKey("releaseCommit")) $false "sync script avoids commit metadata churn"
     Assert-Equal $fixtureManifest.installerSha256 $expectedInstallerSha256 "sync script writes installer hash"
+    Assert-Equal $fixtureManifest.installerSha384 $expectedInstallerSha384 "sync script writes installer SHA384 hash"
+    Assert-Equal $fixtureManifest.installerSha512 $expectedInstallerSha512 "sync script writes installer SHA512 hash"
     Assert-Equal $fixtureManifest.uninstallerSha256 $expectedUninstallerSha256 "sync script writes uninstaller hash"
-    if (-not [datetime]::TryParse($fixtureManifest.generatedAt, [ref]$fixtureGeneratedAt)) {
-        Assert-Equal $false $true "sync script emits valid generatedAt timestamp"
-    }
+    Assert-Equal $fixtureManifest.uninstallerSha384 $expectedUninstallerSha384 "sync script writes uninstaller SHA384 hash"
+    Assert-Equal $fixtureManifest.uninstallerSha512 $expectedUninstallerSha512 "sync script writes uninstaller SHA512 hash"
 
     $missingUninstallerPath = Join-Path $checksumFixtureDir "missing_uninstall.ps1"
     $fixtureChecksumMissing = Join-Path $checksumFixtureDir "installer-missing.sha256"
     & $syncScript -InstallerPath $fixtureInstaller -UninstallerPath $missingUninstallerPath -ChecksumPath $fixtureChecksumMissing | Out-Null
     $missingManifest = Parse-NameValueManifest (Get-Content -Path $fixtureChecksumMissing -Raw)
     Assert-Equal $missingManifest.uninstallerSha256 "" "sync script emits empty value for missing uninstaller"
+    Assert-Equal $missingManifest.uninstallerSha384 "" "sync script emits empty SHA384 value for missing uninstaller"
+    Assert-Equal $missingManifest.uninstallerSha512 "" "sync script emits empty SHA512 value for missing uninstaller"
 } finally {
     if ($null -eq $originalBranch) { Remove-Item Env:\WINDO_TRACKING_BRANCH -ErrorAction SilentlyContinue } else { $env:WINDO_TRACKING_BRANCH = $originalBranch }
     if ($null -eq $originalCommit) { Remove-Item Env:\WINDO_RELEASE_COMMIT -ErrorAction SilentlyContinue } else { $env:WINDO_RELEASE_COMMIT = $originalCommit }

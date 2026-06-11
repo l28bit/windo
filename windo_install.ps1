@@ -1482,6 +1482,11 @@ function windo-uninstall {
 
 Set-Alias -Name windoremove -Value windo-uninstall -Scope Global -ErrorAction SilentlyContinue
 
+function Get-WindoFileHash {
+    param([Parameter(Mandatory=$true)][string]$Path)
+    (Get-FileHash -Path $Path -Algorithm SHA256).Hash
+}
+
 function windo {
     param(
         [Parameter(ValueFromRemainingArguments = $true)]
@@ -1493,11 +1498,6 @@ function windo {
     function _windo_set_exit([int]$Code) {
         $global:WINDO_EXIT_CODE = $Code
         try { $global:LASTEXITCODE = $Code } catch { }
-    }
-
-    function Get-WindoFileHash {
-        param([Parameter(Mandatory=$true)][string]$Path)
-        (Get-FileHash -Path $Path -Algorithm SHA256).Hash
     }
 
     function _windo_parse_timeout_override_ms {

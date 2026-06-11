@@ -84,16 +84,21 @@ function Get-WindoChecksumManifestLine([string]$Key, [string]$Value) {
     return "${Key}=$Value"
 }
 
-function New-WindoSHA256 {
-    return [System.Security.Cryptography.SHA256]::Create()
+function New-WindoHashAlgorithm {
+    param([Parameter(Mandatory=$true)][ValidateSet("SHA256","SHA384","SHA512")][string]$Algorithm)
+    switch ($Algorithm) {
+        "SHA256" { return [System.Security.Cryptography.SHA256]::Create() }
+        "SHA384" { return [System.Security.Cryptography.SHA384]::Create() }
+        "SHA512" { return [System.Security.Cryptography.SHA512]::Create() }
+    }
 }
 
-function Get-WindoPublishedTextFileSha256([string]$Path) {
+function Get-WindoPublishedTextFileHash([string]$Path, [string]$Algorithm = "SHA256") {
     if (!(Test-Path -LiteralPath $Path)) { return $null }
     $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $sha = New-WindoSHA256
+    $sha = New-WindoHashAlgorithm -Algorithm $Algorithm
     try {
-        # Runtime verification uses Get-FileHash on raw bytes, so publish the same raw SHA256 domain.
+        # Runtime verification uses raw file bytes, so publish the same byte domain for every algorithm.
         $hashBytes = $sha.ComputeHash($bytes)
         -join ($hashBytes | ForEach-Object { $_.ToString("X2") })
     } finally {
@@ -101,26 +106,26 @@ function Get-WindoPublishedTextFileSha256([string]$Path) {
     }
 }
 
-$installerHash = Get-WindoPublishedTextFileSha256 -Path $InstallerPath
+$installerHash = Get-WindoPublishedTextFileHash -Path $InstallerPath -Algorithm SHA256
 if ($null -eq $installerHash) { throw "Missing installer path: $InstallerPath" }
-$uninstallerHash = Get-WindoPublishedTextFileSha256 -Path $UninstallerPath
+$installerHash384 = Get-WindoPublishedTextFileHash -Path $InstallerPath -Algorithm SHA384
+$installerHash512 = Get-WindoPublishedTextFileHash -Path $InstallerPath -Algorithm SHA512
+$uninstallerHash = Get-WindoPublishedTextFileHash -Path $UninstallerPath -Algorithm SHA256
+$uninstallerHash384 = Get-WindoPublishedTextFileHash -Path $UninstallerPath -Algorithm SHA384
+$uninstallerHash512 = Get-WindoPublishedTextFileHash -Path $UninstallerPath -Algorithm SHA512
 
 $metadata = Resolve-WindoReleaseMetadata -Commit $env:WINDO_RELEASE_COMMIT -Branch $env:WINDO_TRACKING_BRANCH
 $branch = $metadata.Branch
-$releaseCommit = $metadata.Commit
-$generatedAt = (Get-Date -Format "o")
-$releaseCommitRaw = if (-not [string]::IsNullOrWhiteSpace($metadata.CommitRaw)) { [string]$metadata.CommitRaw } else { "" }
-$releaseBranchRaw = if (-not [string]::IsNullOrWhiteSpace($metadata.BranchRaw)) { [string]$metadata.BranchRaw } else { "" }
 
 $payload = @(
     (Get-WindoChecksumManifestLine "schemaVersion" "2")
-    (Get-WindoChecksumManifestLine "generatedAt" $generatedAt)
     (Get-WindoChecksumManifestLine "releaseBranch" $branch)
-    (Get-WindoChecksumManifestLine "releaseCommit" $releaseCommit)
-    (Get-WindoChecksumManifestLine "releaseBranchRaw" $releaseBranchRaw)
-    (Get-WindoChecksumManifestLine "releaseCommitRaw" $releaseCommitRaw)
     (Get-WindoChecksumManifestLine "installerSha256" $installerHash)
+    (Get-WindoChecksumManifestLine "installerSha384" $installerHash384)
+    (Get-WindoChecksumManifestLine "installerSha512" $installerHash512)
     (Get-WindoChecksumManifestLine "uninstallerSha256" ($uninstallerHash -as [string]))
+    (Get-WindoChecksumManifestLine "uninstallerSha384" ($uninstallerHash384 -as [string]))
+    (Get-WindoChecksumManifestLine "uninstallerSha512" ($uninstallerHash512 -as [string]))
 )
 
 [System.IO.File]::WriteAllText($ChecksumPath, ($payload -join "`n"), [System.Text.UTF8Encoding]::new($false))

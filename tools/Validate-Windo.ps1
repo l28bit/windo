@@ -92,17 +92,13 @@ function Test-WindoChecksumManifestMetadata {
         }
     }
 
-    if ([string]::IsNullOrWhiteSpace($releaseBranchRaw)) {
-        Write-Host "WARN $Label" -ForegroundColor Yellow
-        Write-Host "Manifest releaseBranchRaw is missing; install metadata is using normalized branch only."
-    } elseif (-not [string]::IsNullOrWhiteSpace($releaseBranch) -and $releaseBranchRaw -ne $releaseBranch) {
+    if (-not [string]::IsNullOrWhiteSpace($releaseBranchRaw) -and -not [string]::IsNullOrWhiteSpace($releaseBranch) -and $releaseBranchRaw -ne $releaseBranch) {
         Write-Host "WARN $Label" -ForegroundColor Yellow
         Write-Host "Manifest releaseBranchRaw does not match releaseBranch value. branch=$releaseBranch raw=$releaseBranchRaw"
     }
 
     if ([string]::IsNullOrWhiteSpace($releaseCommitRaw)) {
-        Write-Host "WARN $Label" -ForegroundColor Yellow
-        Write-Host "Manifest releaseCommitRaw is missing; install metadata is using normalized commit only."
+        return
     } elseif ($releaseCommitRaw -match '^[a-fA-F0-9]{40,64}$') {
         if (-not [string]::IsNullOrWhiteSpace($releaseCommit) -and ($releaseCommitRaw.ToLowerInvariant() -ne $releaseCommit.ToLowerInvariant())) {
             Write-Host "WARN $Label" -ForegroundColor Yellow
@@ -151,9 +147,9 @@ try {
         $checksumManifest = Get-WindoChecksumManifest -Content $checksumContent
         $manifestHasSchema = $checksumManifest.ContainsKey("schemaVersion")
         if ($manifestHasSchema) {
-            if (-not ($checksumManifest.ContainsKey("releaseBranch") -and $checksumManifest.ContainsKey("releaseCommit") -and $checksumManifest.ContainsKey("generatedAt"))) {
+            if (-not ($checksumManifest.ContainsKey("releaseBranch") -and $checksumManifest.ContainsKey("installerSha256"))) {
                 Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
-                Write-Host "Published checksum manifest missing required metadata keys."
+                Write-Host "Published checksum manifest missing required stable keys."
                 $ok = $false
             }
         }
@@ -206,19 +202,6 @@ try {
                 Write-Host "windo_uninstall.ps1 missing; skipping uninstaller checksum validation."
             }
         }
-
-        if ($manifestHasSchema) {
-            [datetime]$generatedAt = [datetime]::MinValue
-            if (-not [datetime]::TryParse($checksumManifest.generatedAt, [ref]$generatedAt)) {
-                Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
-                Write-Host "Published checksum manifest generatedAt is invalid."
-                $ok = $false
-            }
-            if ($generatedAt -gt (Get-Date).ToUniversalTime().AddMinutes(5)) {
-                Write-Host "WARN checksums/installer.sha256" -ForegroundColor Yellow
-                Write-Host "Published checksum manifest generatedAt is in the future."
-            }
-        }
     }
 } catch {
     Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
@@ -238,9 +221,9 @@ try {
             $snapshotExpectedContent = [string](Get-Content -LiteralPath $snapshotChecksum -Raw)
             $snapshotManifest = Get-WindoChecksumManifest -Content $snapshotExpectedContent
             $snapshotHasSchema = $snapshotManifest.ContainsKey("schemaVersion")
-            if ($snapshotHasSchema -and -not ($snapshotManifest.ContainsKey("releaseBranch") -and $snapshotManifest.ContainsKey("releaseCommit") -and $snapshotManifest.ContainsKey("generatedAt"))) {
+            if ($snapshotHasSchema -and -not ($snapshotManifest.ContainsKey("releaseBranch") -and $snapshotManifest.ContainsKey("installerSha256"))) {
                 Write-Host "FAIL versions/v$version/checksums/installer.sha256" -ForegroundColor Red
-                Write-Host "Snapshot checksum manifest missing required metadata keys."
+                Write-Host "Snapshot checksum manifest missing required stable keys."
                 $ok = $false
             }
             Test-WindoChecksumManifestMetadata -Manifest $snapshotManifest -Label "versions/v$version/checksums/installer.sha256" -ExpectedBranch $releaseTarget.Branch -ExpectedCommit $releaseTarget.Commit
@@ -282,15 +265,6 @@ try {
                 } else {
                     Write-Host "WARN versions/v$version/checksums/installer.sha256" -ForegroundColor Yellow
                     Write-Host "versions/v$version/windo_uninstall.ps1 missing; skipping snapshot uninstaller checksum validation."
-                }
-            }
-
-            if ($snapshotHasSchema) {
-            [datetime]$snapshotGeneratedAt = [datetime]::MinValue
-                if (-not [datetime]::TryParse($snapshotManifest.generatedAt, [ref]$snapshotGeneratedAt)) {
-                    Write-Host "FAIL versions/v$version/checksums/installer.sha256" -ForegroundColor Red
-                    Write-Host "Snapshot checksum manifest generatedAt is invalid."
-                    $ok = $false
                 }
             }
         } else {
