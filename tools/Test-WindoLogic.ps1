@@ -252,9 +252,15 @@ installerSha256 = deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbe
 }
 
 $getWindoFileHashFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "Get-WindoFileHash"
+$windoRuntimeFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "windo"
 $verifyInstallerChecksumFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_verify_installer_sha256_optional"
 $parseBoolFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_parse_bool_value"
 $releaseMetadataStateFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_release_metadata_state"
+if ($windoRuntimeFn) {
+    Assert-Pattern $windoRuntimeFn 'function\s+Get-WindoFileHash\b' "generated windo runtime carries checksum hash helper"
+} else {
+    Assert-Equal $false $true "installer exposes generated windo runtime function"
+}
 if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $parseBoolFn -and $releaseMetadataStateFn) {
     Invoke-Expression $parseBoolFn
     Invoke-Expression $getWindoFileHashFn

@@ -1495,6 +1495,11 @@ function windo {
         try { $global:LASTEXITCODE = $Code } catch { }
     }
 
+    function Get-WindoFileHash {
+        param([Parameter(Mandatory=$true)][string]$Path)
+        (Get-FileHash -Path $Path -Algorithm SHA256).Hash
+    }
+
     function _windo_parse_timeout_override_ms {
         param([string]$Raw)
         if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
