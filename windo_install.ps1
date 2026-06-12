@@ -1525,6 +1525,92 @@ function Get-WindoFileHash {
     (Get-FileHash -Path $Path -Algorithm SHA256).Hash
 }
 
+function Write-TextFileAtomic {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(ValueFromPipeline=$true)][AllowNull()][string]$Content,
+        [System.Text.Encoding]$Encoding = ([System.Text.UTF8Encoding]::new($false))
+    )
+    begin { $chunks = [System.Collections.Generic.List[string]]::new() }
+    process { if ($null -ne $Content) { [void]$chunks.Add([string]$Content) } }
+    end {
+        $dir = Split-Path -Parent $Path
+        if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $tmpDir = if ($dir) { $dir } else { (Get-Location).Path }
+        $tmp = Join-Path $tmpDir (".tmp-" + [Guid]::NewGuid().ToString("n") + ".tmp")
+        try {
+            [System.IO.File]::WriteAllText($tmp, (($chunks -join [Environment]::NewLine)), $Encoding)
+            Move-Item -LiteralPath $tmp -Destination $Path -Force
+        } catch {
+            if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+            throw
+        }
+    }
+}
+
+function _windo_unprotect_text([string]$EncryptedText) {
+    if ([string]::IsNullOrWhiteSpace($EncryptedText)) { return $null }
+    try {
+        $enc = [Convert]::FromBase64String($EncryptedText)
+        $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
+            $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+        )
+        [System.Text.Encoding]::UTF8.GetString($bytes)
+    } catch {
+        return $null
+    }
+}
+
+function _windo_build_artifact_payload {
+    param([object]$Payload)
+    if ($null -eq $Payload) { return $null }
+    try {
+        $json = $Payload | ConvertTo-Json -Depth 20 -Compress
+        return [ordered]@{
+            Version = 1
+            Type    = "dpapi-json"
+            Data    = _dpapi_protect $json
+        }
+    } catch {
+        return $null
+    }
+}
+
+function _windo_resolve_artifact_payload {
+    param([object]$Payload)
+    if ($null -eq $Payload) { return $null }
+
+    if ($Payload -is [string]) {
+        if ([string]::IsNullOrWhiteSpace([string]$Payload)) { return $null }
+        if ([string]$Payload -match '^[\r\n\s\t]*\{') {
+            if ([string]$Payload.Length -gt 262144) { return $null }
+            try { return $Payload | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
+        }
+        return $null
+    }
+
+    $payloadType = $null
+    $payloadData = $null
+    if ($Payload -is [System.Collections.IDictionary]) {
+        if ($Payload.Contains("Type")) { $payloadType = $Payload["Type"] }
+        if ($Payload.Contains("Data")) { $payloadData = $Payload["Data"] }
+    } else {
+        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Type") { $payloadType = $Payload.Type }
+        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Data") { $payloadData = $Payload.Data }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace([string]$payloadType) -and ([string]$payloadType -ieq "dpapi-json") -and -not [string]::IsNullOrWhiteSpace([string]$payloadData)) {
+        $json = _windo_unprotect_text [string]$payloadData
+        if ($null -ne $json) {
+            try { return $json | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
+        }
+        return $null
+    }
+
+    return $Payload
+}
+
 function windo {
     param(
         [Parameter(ValueFromRemainingArguments = $true)]

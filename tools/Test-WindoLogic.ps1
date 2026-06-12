@@ -259,6 +259,9 @@ $parseBoolFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_
 $releaseMetadataStateFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_release_metadata_state"
 if ($generatedRuntimeBody) {
     Assert-Pattern $generatedRuntimeBody '(?s)function\s+Get-WindoFileHash\b.*function\s+windo\b' "generated runtime exposes checksum hash helper before windo command"
+    Assert-Pattern $generatedRuntimeBody '(?s)function\s+Write-TextFileAtomic\b.*function\s+windo\b' "generated runtime exposes atomic file writer before windo command"
+    Assert-Pattern $generatedRuntimeBody '(?s)function\s+_windo_build_artifact_payload\b.*function\s+windo\b' "generated runtime exposes artifact payload builder before windo command"
+    Assert-Pattern $generatedRuntimeBody '(?s)function\s+_windo_resolve_artifact_payload\b.*function\s+windo\b' "generated runtime exposes artifact payload resolver before windo command"
 } else {
     Assert-Equal $false $true "installer exposes generated runtime body"
 }
