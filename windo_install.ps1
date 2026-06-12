@@ -1,4 +1,4 @@
-﻿<# =====================================================================
+<# =====================================================================
 WINDO V8.5 Installer
 Run once in an elevated PowerShell session.
 
@@ -627,6 +627,42 @@ $SecureDir  = Join-Path $HOME ".pwsh_secure"
 $RunnerLast = Join-Path $SecureDir "windo_runner_last.txt"
 $MutexName  = "Global\WindoRunnerMutex"
 
+function Write-TextFileAtomic {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(ValueFromPipeline=$true)][AllowNull()][string]$Content,
+        [System.Text.Encoding]$Encoding = ([System.Text.UTF8Encoding]::new($false))
+    )
+    begin { $chunks = [System.Collections.Generic.List[string]]::new() }
+    process { if ($null -ne $Content) { [void]$chunks.Add([string]$Content) } }
+    end {
+        $dir = Split-Path -Parent $Path
+        if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $tmpDir = if ($dir) { $dir } else { (Get-Location).Path }
+        $tmp = Join-Path $tmpDir (".tmp-" + [Guid]::NewGuid().ToString("n") + ".tmp")
+        try {
+            [System.IO.File]::WriteAllText($tmp, (($chunks -join [Environment]::NewLine)), $Encoding)
+            Move-Item -LiteralPath $tmp -Destination $Path -Force
+        } catch {
+            if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+            throw
+        }
+    }
+}
+
+function _dpapi_protect([string]$s) {
+    $protectedDataType = [type]::GetType("System.Security.Cryptography.ProtectedData")
+    if ($null -eq $protectedDataType) {
+        return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([string]$s))
+    }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($s)
+    $enc = $protectedDataType::Protect(
+        $bytes, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+    )
+    [Convert]::ToBase64String($enc)
+}
+
 if (-not ("WindoRunner.ChildExec" -as [type])) {
     $cs = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(
         'dXNpbmcgU3lzdGVtOwp1c2luZyBTeXN0ZW0uRGlhZ25vc3RpY3M7CnVzaW5nIFN5c3RlbS5JTzsKdXNpbmcgU3lzdGVtLlRleHQ7CnVzaW5nIFN5c3RlbS5UaHJlYWRpbmcuVGFza3M7CgpuYW1lc3BhY2UgV2luZG9SdW5uZXIKewogICAgcHVibGljIHN0YXRpYyBjbGFzcyBDaGlsZEV4ZWMKICAgIHsKICAgICAgICBwdWJsaWMgc3RhdGljIHN0cmluZyBSZWFkU3RyZWFtVG9NYXgoU3RyZWFtUmVhZGVyIHIsIGludCBtYXhDaGFycywgUHJvY2VzcyBwKQogICAgICAgIHsKICAgICAgICAgICAgdmFyIHNiID0gbmV3IFN0cmluZ0J1aWxkZXIoKTsKICAgICAgICAgICAgdmFyIGJ1ZiA9IG5ldyBjaGFyWzgxOTJdOwogICAgICAgICAgICBpbnQgdG90YWwgPSAwOwogICAgICAgICAgICB3aGlsZSAodG90YWwgPCBtYXhDaGFycykKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgaW50IG4gPSByLlJlYWQoYnVmLCAwLCBNYXRoLk1pbihidWYuTGVuZ3RoLCBtYXhDaGFycyAtIHRvdGFsKSk7CiAgICAgICAgICAgICAgICBpZiAobiA8PSAwKSBicmVhazsKICAgICAgICAgICAgICAgIHNiLkFwcGVuZChidWYsIDAsIG4pOwogICAgICAgICAgICAgICAgdG90YWwgKz0gbjsKICAgICAgICAgICAgfQogICAgICAgICAgICBpZiAodG90YWwgPj0gbWF4Q2hhcnMpCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIHRyeSB7IGlmICghcC5IYXNFeGl0ZWQpIHAuS2lsbCgpOyB9IGNhdGNoIHsgfQogICAgICAgICAgICAgICAgdHJ5IHsgcC5XYWl0Rm9yRXhpdCgxNTAwMCk7IH0gY2F0Y2ggeyB9CiAgICAgICAgICAgIH0KICAgICAgICAgICAgcmV0dXJuIHNiLlRvU3RyaW5nKCk7CiAgICAgICAgfQoKICAgICAgICBwdWJsaWMgc3RhdGljIHZvaWQgUnVuQ21kKAogICAgICAgICAgICBzdHJpbmcgYXJndW1lbnRzLAogICAgICAgICAgICBpbnQgdGltZW91dE1zLAogICAgICAgICAgICBpbnQgbWF4Q2hhcnNQZXJTdHJlYW0sCiAgICAgICAgICAgIG91dCBzdHJpbmcgc3Rkb3V0LAogICAgICAgICAgICBvdXQgc3RyaW5nIHN0ZGVyciwKICAgICAgICAgICAgb3V0IGJvb2wgdGltZWRPdXQsCiAgICAgICAgICAgIG91dCBib29sIHRydW5jYXRlZCwKICAgICAgICAgICAgb3V0IGludCBleGl0Q29kZSkKICAgICAgICB7CiAgICAgICAgICAgIHRpbWVkT3V0ID0gZmFsc2U7CiAgICAgICAgICAgIHRydW5jYXRlZCA9IGZhbHNlOwogICAgICAgICAgICBleGl0Q29kZSA9IDE7CiAgICAgICAgICAgIHN0ZG91dCA9ICIiOwogICAgICAgICAgICBzdGRlcnIgPSAiIjsKICAgICAgICAgICAgdmFyIHBzaSA9IG5ldyBQcm9jZXNzU3RhcnRJbmZvKCk7CiAgICAgICAgICAgIHBzaS5GaWxlTmFtZSA9ICJjbWQuZXhlIjsKICAgICAgICAgICAgcHNpLkFyZ3VtZW50cyA9ICIvYyAiICsgYXJndW1lbnRzOwogICAgICAgICAgICBwc2kuUmVkaXJlY3RTdGFuZGFyZE91dHB1dCA9IHRydWU7CiAgICAgICAgICAgIHBzaS5SZWRpcmVjdFN0YW5kYXJkRXJyb3IgPSB0cnVlOwogICAgICAgICAgICBwc2kuVXNlU2hlbGxFeGVjdXRlID0gZmFsc2U7CiAgICAgICAgICAgIHBzaS5DcmVhdGVOb1dpbmRvdyA9IHRydWU7CiAgICAgICAgICAgIHVzaW5nICh2YXIgcCA9IFByb2Nlc3MuU3RhcnQocHNpKSkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgdmFyIHRPdXQgPSBUYXNrLlJ1bigoKSA9PiBSZWFkU3RyZWFtVG9NYXgocC5TdGFuZGFyZE91dHB1dCwgbWF4Q2hhcnNQZXJTdHJlYW0sIHApKTsKICAgICAgICAgICAgICAgIHZhciB0RXJyID0gVGFzay5SdW4oKCkgPT4gUmVhZFN0cmVhbVRvTWF4KHAuU3RhbmRhcmRFcnJvciwgbWF4Q2hhcnNQZXJTdHJlYW0sIHApKTsKICAgICAgICAgICAgICAgIGJvb2wgZmluaXNoZWQgPSBwLldhaXRGb3JFeGl0KHRpbWVvdXRNcyk7CiAgICAgICAgICAgICAgICBpZiAoIWZpbmlzaGVkKQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIHRpbWVkT3V0ID0gdHJ1ZTsKICAgICAgICAgICAgICAgICAgICB0cnkgeyBpZiAoIXAuSGFzRXhpdGVkKSBwLktpbGwoKTsgfSBjYXRjaCB7IH0KICAgICAgICAgICAgICAgICAgICB0cnkgeyBwLldhaXRGb3JFeGl0KDE1MDAwKTsgfSBjYXRjaCB7IH0KICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIHN0ZG91dCA9IHRPdXQuUmVzdWx0OwogICAgICAgICAgICAgICAgc3RkZXJyID0gdEVyci5SZXN1bHQ7CiAgICAgICAgICAgICAgICBpZiAoc3Rkb3V0Lkxlbmd0aCA+PSBtYXhDaGFyc1BlclN0cmVhbSB8fCBzdGRlcnIuTGVuZ3RoID49IG1heENoYXJzUGVyU3RyZWFtKQogICAgICAgICAgICAgICAgICAgIHRydW5jYXRlZCA9IHRydWU7CiAgICAgICAgICAgICAgICB0cnkKICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICBleGl0Q29kZSA9IHAuSGFzRXhpdGVkID8gcC5FeGl0Q29kZSA6IC0xOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgY2F0Y2gKICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICBleGl0Q29kZSA9IC0xOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgaWYgKHRpbWVkT3V0KQogICAgICAgICAgICAgICAgICAgIGV4aXRDb2RlID0gLTE7CiAgICAgICAgICAgIH0KICAgICAgICB9CiAgICB9Cn0K'
@@ -764,10 +800,18 @@ function _windo_unprotect_text([string]$EncryptedText) {
     if ([string]::IsNullOrWhiteSpace($EncryptedText)) { return $null }
     try {
         $enc = [Convert]::FromBase64String($EncryptedText)
-        $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
-            $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
-        )
-        [System.Text.Encoding]::UTF8.GetString($bytes)
+        $protectedDataType = [type]::GetType("System.Security.Cryptography.ProtectedData")
+        if ($null -eq $protectedDataType) {
+            return [System.Text.Encoding]::UTF8.GetString($enc)
+        }
+        try {
+            $bytes = $protectedDataType::Unprotect(
+                $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+            )
+            [System.Text.Encoding]::UTF8.GetString($bytes)
+        } catch {
+            [System.Text.Encoding]::UTF8.GetString($enc)
+        }
     } catch {
         return $null
     }
@@ -796,7 +840,7 @@ function _windo_resolve_artifact_payload {
         if ([string]::IsNullOrWhiteSpace([string]$Payload)) { return $null }
         if ([string]$Payload -match '^[\r\n\s\t]*\{') {
             if ([string]$Payload.Length -gt 262144) { return $null }
-            try { return $Payload | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
+            try { return (_windo_resolve_artifact_payload ($Payload | ConvertFrom-Json -ErrorAction Stop)) } catch { return $null }
         }
         return $null
     }
@@ -807,14 +851,14 @@ function _windo_resolve_artifact_payload {
         if ($Payload.Contains("Type")) { $payloadType = $Payload["Type"] }
         if ($Payload.Contains("Data")) { $payloadData = $Payload["Data"] }
     } else {
-        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Type") { $payloadType = $Payload.Type }
-        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Data") { $payloadData = $Payload.Data }
+        if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Type")) { $payloadType = $Payload.Type }
+        if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Data")) { $payloadData = $Payload.Data }
     }
 
-    if (-not [string]::IsNullOrWhiteSpace([string]$payloadType) -and ([string]$payloadType -ieq "dpapi-json") -and -not [string]::IsNullOrWhiteSpace([string]$payloadData)) {
-        $json = _windo_unprotect_text [string]$payloadData
+    if (([string]::IsNullOrWhiteSpace([string]$payloadType) -eq $false) -and ([string]$payloadType -ieq "dpapi-json") -and ([string]::IsNullOrWhiteSpace([string]$payloadData) -eq $false)) {
+        $json = _windo_unprotect_text ([string]$payloadData)
         if ($null -ne $json) {
-            try { return $json | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
+            try { return ($json | ConvertFrom-Json -ErrorAction Stop) } catch { return $null }
         }
         return $null
     }
@@ -835,12 +879,12 @@ function _windo_resolve_preserve_environment([object]$Payload) {
         if ($Payload.Contains("Type")) { $payloadType = $Payload["Type"] }
         if ($Payload.Contains("Data")) { $payloadData = $Payload["Data"] }
     } else {
-        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Type") { $payloadType = $Payload.Type }
-        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Data") { $payloadData = $Payload.Data }
+        if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Type")) { $payloadType = $Payload.Type }
+        if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Data")) { $payloadData = $Payload.Data }
     }
     if (-not [string]::IsNullOrWhiteSpace([string]$payloadType) -and -not [string]::IsNullOrWhiteSpace([string]$payloadData)) {
         if ([string]$payloadType -ieq "dpapi-json") {
-            $json = _windo_unprotect_text [string]$payloadData
+            $json = _windo_unprotect_text ([string]$payloadData)
             if ($null -ne $json) {
                 try { return $json | ConvertFrom-Json } catch { return $null }
             }
@@ -1553,10 +1597,18 @@ function _windo_unprotect_text([string]$EncryptedText) {
     if ([string]::IsNullOrWhiteSpace($EncryptedText)) { return $null }
     try {
         $enc = [Convert]::FromBase64String($EncryptedText)
-        $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
-            $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
-        )
-        [System.Text.Encoding]::UTF8.GetString($bytes)
+        $protectedDataType = [type]::GetType("System.Security.Cryptography.ProtectedData")
+        if ($null -eq $protectedDataType) {
+            return [System.Text.Encoding]::UTF8.GetString($enc)
+        }
+        try {
+            $bytes = $protectedDataType::Unprotect(
+                $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+            )
+            [System.Text.Encoding]::UTF8.GetString($bytes)
+        } catch {
+            [System.Text.Encoding]::UTF8.GetString($enc)
+        }
     } catch {
         return $null
     }
@@ -1585,7 +1637,7 @@ function _windo_resolve_artifact_payload {
         if ([string]::IsNullOrWhiteSpace([string]$Payload)) { return $null }
         if ([string]$Payload -match '^[\r\n\s\t]*\{') {
             if ([string]$Payload.Length -gt 262144) { return $null }
-            try { return $Payload | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
+            try { return (_windo_resolve_artifact_payload ($Payload | ConvertFrom-Json -ErrorAction Stop)) } catch { return $null }
         }
         return $null
     }
@@ -1596,14 +1648,14 @@ function _windo_resolve_artifact_payload {
         if ($Payload.Contains("Type")) { $payloadType = $Payload["Type"] }
         if ($Payload.Contains("Data")) { $payloadData = $Payload["Data"] }
     } else {
-        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Type") { $payloadType = $Payload.Type }
-        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Data") { $payloadData = $Payload.Data }
+        if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Type")) { $payloadType = $Payload.Type }
+        if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Data")) { $payloadData = $Payload.Data }
     }
 
-    if (-not [string]::IsNullOrWhiteSpace([string]$payloadType) -and ([string]$payloadType -ieq "dpapi-json") -and -not [string]::IsNullOrWhiteSpace([string]$payloadData)) {
-        $json = _windo_unprotect_text [string]$payloadData
+    if (([string]::IsNullOrWhiteSpace([string]$payloadType) -eq $false) -and ([string]$payloadType -ieq "dpapi-json") -and ([string]::IsNullOrWhiteSpace([string]$payloadData) -eq $false)) {
+        $json = _windo_unprotect_text ([string]$payloadData)
         if ($null -ne $json) {
-            try { return $json | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
+            try { return ($json | ConvertFrom-Json -ErrorAction Stop) } catch { return $null }
         }
         return $null
     }
@@ -2404,6 +2456,26 @@ function _windo_parse_runner_result([string]$OutPath, [string]$RequestId, [strin
             invariant = "Only known WINDO runner temp/request/result patterns under SecureDir are eligible; default is dry-run."
             exitCode = $(if ($skipped.Count -gt 0) { 3 } else { 0 })
         }
+    }
+
+    function _windo_prune_stale_runner_requests {
+        param([int]$OlderThanMinutes = 2)
+        $deleted = 0
+        $skipped = 0
+        try {
+            $cutoff = (Get-Date).AddMinutes(-1 * [Math]::Max(1, $OlderThanMinutes))
+            foreach ($item in @(Get-ChildItem -LiteralPath $SecureDir -Filter "windo_req.*.json" -File -ErrorAction SilentlyContinue)) {
+                try {
+                    if ($item.LastWriteTime -ge $cutoff) { $skipped++; continue }
+                    if (-not (_windo_path_is_under_root $item.FullName $SecureDir)) { $skipped++; continue }
+                    Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop
+                    $deleted++
+                } catch {
+                    $skipped++
+                }
+            }
+        } catch { }
+        [pscustomobject]@{ deleted = $deleted; skipped = $skipped; olderThanMinutes = [int]$OlderThanMinutes }
     }
 
     function _windo_runner_lifecycle_state {
@@ -16248,6 +16320,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
         Write-Host "[windo] Failed to secure request payload." -ForegroundColor Red
         return
     }
+    [void](_windo_prune_stale_runner_requests -OlderThanMinutes 2)
     Write-TextFileAtomic -Path $reqPath -Content ($sealedPending | ConvertTo-Json -Depth 20 -Compress) -Encoding ([System.Text.UTF8Encoding]::new($false))
 
     $sw = [Diagnostics.Stopwatch]::StartNew()

@@ -253,6 +253,7 @@ installerSha256 = deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbe
 
 $getWindoFileHashFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "Get-WindoFileHash"
 $generatedRuntimeBody = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "WindoFunctionBody" -EndAnchor '$WindoFunctionBody = $WindoFunctionBody.Replace'
+$generatedRunnerContent = Get-WindoSingleQuotedHereStringValueBeforeAnchor -Source $installerSource -VariableName "RunnerContent" -EndAnchor 'Write-Utf8NoBomFile -Path $RunnerPath -Content $RunnerContent'
 $verifyInstallerChecksumFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_verify_installer_sha256_optional"
 $getFileSha256Fn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_get_file_sha256_hex"
 $parseBoolFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_parse_bool_value"
@@ -264,6 +265,12 @@ if ($generatedRuntimeBody) {
     Assert-Pattern $generatedRuntimeBody '(?s)function\s+_windo_resolve_artifact_payload\b.*function\s+windo\b' "generated runtime exposes artifact payload resolver before windo command"
 } else {
     Assert-Equal $false $true "installer exposes generated runtime body"
+}
+if ($generatedRunnerContent) {
+    Assert-Pattern $generatedRunnerContent '(?s)function\s+Write-TextFileAtomic\b.*RUNNER START' "generated runner exposes atomic file writer before startup trace"
+    Assert-Pattern $generatedRunnerContent '(?s)function\s+_dpapi_protect\b.*RUNNER START' "generated runner exposes DPAPI result sealer before startup trace"
+} else {
+    Assert-Equal $false $true "installer exposes generated runner content"
 }
 if ($getWindoFileHashFn -and $verifyInstallerChecksumFn -and $getFileSha256Fn -and $parseBoolFn -and $releaseMetadataStateFn) {
     Invoke-Expression $parseBoolFn
