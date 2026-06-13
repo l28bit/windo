@@ -510,6 +510,64 @@ function Write-WindoInstallStep {
     }
 }
 
+function Write-WindoInstallerFinale {
+    $motion = Test-WindoInstallerMotionEnabled
+    if (-not $motion) {
+        Write-Host "  Windo. Choose Elevation before Execution." -ForegroundColor Cyan
+        return
+    }
+
+    $oldCursor = $true
+    try { $oldCursor = [Console]::CursorVisible; [Console]::CursorVisible = $false } catch { }
+    try {
+        Write-Host ""
+        Write-Host "  Windo" -ForegroundColor White
+        Start-Sleep -Milliseconds 650
+
+        Write-Host "  Choose Elevation" -ForegroundColor Cyan
+        Start-Sleep -Milliseconds 850
+
+        $graphic = @(
+            "        ╭──────────── SECURE INTENT ────────────╮",
+            "        │  operator intent  ->  consent gate    │",
+            "        │        locked broker / audited path   │",
+            "        ╰───────────────┬──────────────────────╯",
+            "                        │",
+            "                 ╔══════╧══════╗",
+            "                 ║   WINDO     ║",
+            "                 ║  ELEVATION  ║",
+            "                 ╚══════╤══════╝",
+            "                        │",
+            "        ╭───────────────┴──────────────────────╮",
+            "        │ elevated execution -> captured result │",
+            "        ╰──────────── AUDIT VERIFIED ───────────╯"
+        )
+        foreach ($line in $graphic) {
+            Write-Host $line -ForegroundColor DarkCyan
+            Start-Sleep -Milliseconds 75
+        }
+        Start-Sleep -Milliseconds 900
+
+        Write-Host "  before Execution." -ForegroundColor Green
+        Start-Sleep -Milliseconds 850
+
+        $fade = @(
+            @{ Text = "  Choose Elevation before Execution."; Color = [ConsoleColor]::White },
+            @{ Text = "  Choose Elevation before Execution."; Color = [ConsoleColor]::Cyan },
+            @{ Text = "  Choose Elevation before Execution."; Color = [ConsoleColor]::DarkCyan },
+            @{ Text = "  Choose Elevation before Execution."; Color = [ConsoleColor]::DarkGray }
+        )
+        foreach ($frame in $fade) {
+            Write-Host ("`r{0,-80}" -f $frame.Text) -NoNewline -ForegroundColor $frame.Color
+            Start-Sleep -Milliseconds 260
+        }
+        Write-Host ("`r" + (' ' * 80) + "`r") -NoNewline
+        Start-Sleep -Milliseconds 220
+    } finally {
+        try { [Console]::CursorVisible = $oldCursor } catch { }
+    }
+}
+
 Write-WindoEditionBanner -Phase "installer"
 
 function Ensure-DirLockedToCurrentUser {
@@ -17253,5 +17311,5 @@ Write-Host "    windo preflight" -ForegroundColor Yellow
 Write-Host "    windo dashboard --html" -ForegroundColor Yellow
 Write-Host "    windo version" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  Choose Elevation before Execution." -ForegroundColor Cyan
+Write-WindoInstallerFinale
 
