@@ -56,6 +56,7 @@ $ProfileDSecureDir = Join-Path $SecureDir "profile.d"
 
 $script:WindoScheduledTasksAvailable = $false
 $script:WindoWindowsFormsDrawingAvailable = $false
+$script:WindoInstallMotionEnabled = $null
 
 function Get-WindoRuntimeProfile {
     $isWindows = $null -ne $IsWindows -and [bool]$IsWindows
@@ -168,17 +169,174 @@ function Get-WindoEditionLabel {
     return "V$Semver"
 }
 
+function Test-WindoInstallerMotionEnabled {
+    if ($null -ne $script:WindoInstallMotionEnabled) { return [bool]$script:WindoInstallMotionEnabled }
+
+    $enabled = $false
+    try {
+        $mode = ([string]$env:WINDO_MOTION).Trim().ToLowerInvariant()
+        $installerMode = ([string]$env:WINDO_INSTALLER_VISUALS).Trim().ToLowerInvariant()
+        $reduced = ([string]$env:WINDO_REDUCED_MOTION).Trim().ToLowerInvariant()
+
+        $interactive = [System.Environment]::UserInteractive -and (-not [Console]::IsOutputRedirected)
+        if ($Host -and $Host.Name -match 'ServerRemoteHost') { $interactive = $false }
+
+        $enabled = $interactive -and
+            (-not $env:CI) -and
+            (-not $env:WINDO_NO_SPINNER) -and
+            ($mode -notin @('quiet', 'off', '0', 'false', 'no')) -and
+            ($installerMode -notin @('quiet', 'off', '0', 'false', 'no')) -and
+            ($reduced -notin @('1', 'true', 'yes', 'on'))
+
+        if ($mode -in @('on', '1', 'true', 'yes') -or $installerMode -in @('on', '1', 'true', 'yes')) {
+            $enabled = $interactive -and (-not $env:CI) -and (-not $env:WINDO_NO_SPINNER)
+        }
+    } catch {
+        $enabled = $false
+    }
+
+    $script:WindoInstallMotionEnabled = [bool]$enabled
+    return [bool]$script:WindoInstallMotionEnabled
+}
+
+function Write-WindoInstallerPulse {
+    param(
+        [Parameter(Mandatory=$true)][string]$Label,
+        [int]$Frames = 8,
+        [int]$DelayMs = 42
+    )
+
+    if (-not (Test-WindoInstallerMotionEnabled)) { return }
+
+    $glyphs = @('sudo', 'sudo>', 'sudo>>', 'sudo>>>', 'WIN+', 'ACL+', 'TASK+', 'AUDIT+')
+    $oldCursor = $true
+    try { $oldCursor = [Console]::CursorVisible; [Console]::CursorVisible = $false } catch { }
+    try {
+        for ($i = 0; $i -lt $Frames; $i++) {
+            $glyph = $glyphs[$i % $glyphs.Count]
+            Write-Host ("`r  [{0,-7}] {1}" -f $glyph, $Label) -NoNewline -ForegroundColor Cyan
+            Start-Sleep -Milliseconds $DelayMs
+        }
+        $width = 96
+        try { $width = [Math]::Max(40, [Math]::Min([Console]::WindowWidth - 1, 140)) } catch { }
+        Write-Host ("`r" + (' ' * $width) + "`r") -NoNewline
+    } catch {
+        Write-Host ""
+    } finally {
+        try { [Console]::CursorVisible = $oldCursor } catch { }
+    }
+}
+
+function Write-WindoInstallerPowerRail {
+    param(
+        [string]$Label = "bridging Linux sudo semantics to Windows elevation",
+        [int]$Cycles = 2
+    )
+
+    if (-not (Test-WindoInstallerMotionEnabled)) { return }
+
+    $frames = @(
+        "LINUX sudo    [■□□□□□□□□□□□] WINDOWS UAC",
+        "LINUX sudo    [■■■□□□□□□□□□] WINDOWS UAC",
+        "LINUX sudo    [■■■■■□□□□□□□] WINDOWS UAC",
+        "LINUX sudo    [■■■■■■■□□□□□] WINDOWS UAC",
+        "LINUX sudo    [■■■■■■■■■□□□] WINDOWS UAC",
+        "LINUX sudo    [■■■■■■■■■■■■] WINDOWS UAC"
+    )
+    $oldCursor = $true
+    try { $oldCursor = [Console]::CursorVisible; [Console]::CursorVisible = $false } catch { }
+    try {
+        for ($cycle = 0; $cycle -lt $Cycles; $cycle++) {
+            foreach ($frame in $frames) {
+                Write-Host ("`r  {0}  {1}" -f $frame, $Label) -NoNewline -ForegroundColor Cyan
+                Start-Sleep -Milliseconds 48
+            }
+        }
+        $width = 128
+        try { $width = [Math]::Max(40, [Math]::Min([Console]::WindowWidth - 1, 160)) } catch { }
+        Write-Host ("`r" + (' ' * $width) + "`r") -NoNewline
+    } catch {
+        Write-Host ""
+    } finally {
+        try { [Console]::CursorVisible = $oldCursor } catch { }
+    }
+}
+
+function Write-WindoInstallerBootLine {
+    param(
+        [Parameter(Mandatory=$true)][string]$Text,
+        [ConsoleColor]$Color = [ConsoleColor]::DarkGray,
+        [int]$DelayMs = 12
+    )
+
+    if (-not (Test-WindoInstallerMotionEnabled)) {
+        Write-Host $Text -ForegroundColor $Color
+        return
+    }
+
+    foreach ($char in $Text.ToCharArray()) {
+        Write-Host $char -NoNewline -ForegroundColor $Color
+        Start-Sleep -Milliseconds $DelayMs
+    }
+    Write-Host ""
+}
+
+function Write-WindoInstallerSignalBar {
+    param([string[]]$Items)
+
+    $colors = @([ConsoleColor]::Cyan, [ConsoleColor]::DarkCyan, [ConsoleColor]::Green, [ConsoleColor]::DarkGray)
+    for ($i = 0; $i -lt $Items.Count; $i++) {
+        $color = $colors[$i % $colors.Count]
+        Write-Host ("     {0}" -f $Items[$i]) -ForegroundColor $color
+        if (Test-WindoInstallerMotionEnabled) { Start-Sleep -Milliseconds 38 }
+    }
+}
+
 function Write-WindoEditionBanner {
     param([string]$Phase = "install")
+    $motion = Test-WindoInstallerMotionEnabled
+    if ($motion) {
+        Write-WindoInstallerPulse -Label "loading sudo-grade Windows elevation visuals" -Frames 12 -DelayMs 30
+        Write-WindoInstallerPowerRail
+    }
+
     Write-Host ""
-    Write-Host "  __        _____ _   _ ____   ___" -ForegroundColor Cyan
-    Write-Host "  \ \      / /_ _| \ | |  _ \ / _ \" -ForegroundColor Cyan
-    Write-Host "   \ \ /\ / / | ||  \| | | | | | | |" -ForegroundColor Cyan
-    Write-Host "    \ V  V /  | || |\  | |_| | |_| |" -ForegroundColor Cyan
-    Write-Host "     \_/\_/  |___|_| \_|____/ \___/" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host ("  WINDO {0} {1} :: {2}" -f $WindoVersion, (Get-WindoEditionLabel), $Phase.ToUpperInvariant()) -ForegroundColor White
-    Write-Host "  deliberate elevation | audit chain | security tools | operator visuals" -ForegroundColor DarkGray
+    Write-Host "  ╔════════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    $logo = @(
+        "  __        _____ _   _ ____   ___",
+        "  \ \      / /_ _| \ | |  _ \ / _ \",
+        "   \ \ /\ / / | ||  \| | | | | | | |",
+        "    \ V  V /  | || |\  | |_| | |_| |",
+        "     \_/\_/  |___|_| \_|____/ \___/"
+    )
+    foreach ($line in $logo) {
+        Write-Host ("  ║ {0,-64} ║" -f $line) -ForegroundColor White
+        if ($motion) { Start-Sleep -Milliseconds 28 }
+    }
+    Write-Host "  ╠════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host ("  ║ {0,-64} ║" -f ("WINDO {0} {1} :: {2}" -f $WindoVersion, (Get-WindoEditionLabel), $Phase.ToUpperInvariant())) -ForegroundColor White
+    Write-Host ("  ║ {0,-64} ║" -f "Linux sudo power on Windows, with deliberate UAC boundaries") -ForegroundColor Cyan
+    Write-Host ("  ║ {0,-64} ║" -f "secure tasks | audit chain | ACL hardening | operator command") -ForegroundColor DarkGray
+    Write-Host "  ╠════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
+    Write-Host ("  ║ {0,-64} ║" -f "sudo -> scheduled task runner -> audited elevated execution") -ForegroundColor Green
+    Write-Host ("  ║ {0,-64} ║" -f "no silent privilege jump; every boundary stays intentional") -ForegroundColor DarkGray
+    Write-Host "  ╚════════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    if ($motion) {
+        Write-WindoInstallerBootLine "     [sudo] intent captured     [windows] elevation broker armed     [audit] chain online" -Color Green -DelayMs 5
+        Write-WindoInstallerSignalBar -Items @(
+            "╭─ sudo muscle memory, Windows-safe execution",
+            "├─ hardened runner files under the current user's secure directory",
+            "├─ scheduled task boundary for deliberate elevation",
+            "╰─ local audit trail stays readable and verifiable"
+        )
+    } else {
+        Write-WindoInstallerSignalBar -Items @(
+            "╭─ sudo muscle memory, Windows-safe execution",
+            "├─ hardened runner files under the current user's secure directory",
+            "├─ scheduled task boundary for deliberate elevation",
+            "╰─ local audit trail stays readable and verifiable"
+        )
+    }
     Write-Host ""
 }
 
@@ -195,6 +353,9 @@ function Write-WindoInstallStep {
         "run" { "[..]" }
         "skip" { "[--]" }
         default { "[**]" }
+    }
+    if ($Status.ToLowerInvariant() -eq "run") {
+        Write-WindoInstallerPulse -Label $Label -Frames 6 -DelayMs 35
     }
     Write-Host ("  {0} {1}" -f $mark, $Label) -ForegroundColor $Color
     if (-not [string]::IsNullOrWhiteSpace($Detail)) {
