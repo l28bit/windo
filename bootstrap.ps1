@@ -331,15 +331,21 @@ if (-not (Test-WindoBootstrapHasText $script:WindoBootstrapTempRoot)) { $script:
 $Temp = Join-Path $script:WindoBootstrapTempRoot ("windo_install_" + [Guid]::NewGuid().ToString("n") + ".ps1")
 
 function Write-WindoBootstrapBanner {
+    $plateWidth = 72
+    $rule = "  +" + ("=" * $plateWidth) + "+"
+    $thin = "  +" + ("-" * $plateWidth) + "+"
+
     Write-Host ""
-    Write-Host "  __        _____ _   _ ____   ___" -ForegroundColor Cyan
-    Write-Host "  \ \      / /_ _| \ | |  _ \ / _ \" -ForegroundColor Cyan
-    Write-Host "   \ \ /\ / / | ||  \| | | | | | | |" -ForegroundColor Cyan
-    Write-Host "    \ V  V /  | || |\  | |_| | |_| |" -ForegroundColor Cyan
-    Write-Host "     \_/\_/  |___|_| \_|____/ \___/" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host ("  WINDO {0} {1} bootstrap" -f $script:WindoBootstrapExpectedVersion, (Get-WindoEditionLabel)) -ForegroundColor White
-    Write-Host "  API-first verified download | UAC handoff | Windows integration plane" -ForegroundColor DarkGray
+    Write-Host $rule -ForegroundColor Cyan
+    Write-Host ("  | {0,-$plateWidth} |" -f ("WINDO {0} {1} bootstrap" -f $script:WindoBootstrapExpectedVersion, (Get-WindoEditionLabel))) -ForegroundColor White
+    Write-Host ("  | {0,-$plateWidth} |" -f "API-first verified download · UAC handoff · Windows integration") -ForegroundColor DarkGray
+    Write-Host $thin -ForegroundColor Cyan
+    Write-Host "  |  __        _____ _   _ ____   ___" -ForegroundColor Cyan
+    Write-Host "  |  \ \      / /_ _| \ | |  _ \ / _ \" -ForegroundColor Cyan
+    Write-Host "  |   \ \ /\ / / | ||  \| | | | | | | |" -ForegroundColor Cyan
+    Write-Host "  |    \ V  V /  | || |\  | |_| | |_| |" -ForegroundColor Cyan
+    Write-Host "  |     \_/\_/  |___|_| \_|____/ \___/" -ForegroundColor Cyan
+    Write-Host $rule -ForegroundColor Cyan
     Write-Host ""
 }
 

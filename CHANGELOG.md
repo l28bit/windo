@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Built-in "profile" repair lane in midflightfuel/heal (lighter than full reinstall).
 
 ### Changed / Reliability
-- **Installer banner safe transfer**: installer motion no longer writes banner text char-by-char or stacks inline `>` glyphs (pulse/forge/burst). Token-based boot lines and bracket-style forge frames avoid PSReadLine/console transfer failures on sensitive hosts.
+- **Static plate installer banner**: replaced animated carrot/`>`-based motion with a simple `+---+` plate layout. No inline `\r` transfers, no `>` or `<` in banner text. Set `WINDO_INSTALLER_VISUALS=quiet` for a one-line banner.
 - **Profile block markers v4**: managed profile blocks now use `# [[ WINDO-BEGIN ]]` / `# [[ WINDO-END ]]` instead of `>>>…<<<` markers. Repair/uninstall/heal still recognize and remove legacy `>>>…<<<` blocks.
 - **Thin profile loader (v3 contract)**: $PROFILE now receives only a tiny loader that dots `windo_runtime.ps1`. Old inlined bloat is stripped on next upgrade. This is the primary defense against WINDO "breaking users' PowerShell profiles".
 - **No more failed-to-validate hash on download (default path)**: API-fetched installers are primarily attested by GitHub's content blob SHA returned at fetch time. Checksum manifest mismatches become advisory when the blob attests the bytes. Raw fallbacks still enforce checksums. Strict mode still honors attestation for recovery.
