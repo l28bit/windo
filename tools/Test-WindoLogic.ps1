@@ -1228,8 +1228,10 @@ if ($removeProfileBlockFn) {
         FailureItems = @()
     }
     $script:BackupRoot = $null
-    $script:BeginMarker = "# >>> WINDO-BEGIN >>>"
-    $script:EndMarker = "# <<< WINDO-END <<<"
+    $BeginMarker = "# [[ WINDO-BEGIN ]]"
+    $EndMarker = "# [[ WINDO-END ]]"
+    $WindoLegacyBeginMarker = "# >>> WINDO-BEGIN >>>"
+    $WindoLegacyEndMarker = "# <<< WINDO-END <<<"
     $profileCleanupDir = Join-Path ([IO.Path]::GetTempPath()) "windo-test-profile-cleanup"
     New-Item -ItemType Directory -Path $profileCleanupDir -Force | Out-Null
     $profileCleanupFixture = Join-Path $profileCleanupDir "profile-cleanup.txt"
@@ -1894,6 +1896,10 @@ Assert-Equal ($installerSource.Contains("function _windo_keybinding_inspect_chor
 Assert-Equal ($installerSource.Contains("keybindings doctor") -eq $true) $true "installer handles keybindings doctor subcommand"
 Assert-Equal ($installerSource.Contains("lastAudit") -eq $true) $true "installer session payload includes lastAudit"
 Assert-Equal ($installerSource.Contains('function Test-WindoInstallerConsoleInlineSafe') -eq $true) $true "installer guards inline banner motion for redirected consoles"
+Assert-Equal ($installerSource.Contains('function Test-WindoInstallerPsReadLineActive') -eq $true) $true "installer disables inline banner motion when PSReadLine is loaded"
+Assert-Equal ($installerSource.Contains('Write-WindoInstallerPulse -Label $Label -Frames 6') -eq $false) $true "install steps no longer stack inline pulse frames before each status line"
+Assert-Equal ($installerSource.Contains('function _windo_console_inline_safe') -eq $true) $true "runtime spinner path guards inline console writes"
+Assert-Equal ($installerSource.Contains('Write-Host -NoNewline ("`r{0} {1} " -f $Label, $frame)') -eq $false) $true "runtime motion animate avoids Write-Host inline spinner frames"
 Assert-Equal ($installerSource.Contains('foreach ($char in $Text.ToCharArray())') -eq $false) $true "installer banner boot line no longer transfers char-by-char"
 Assert-Equal ($installerSource.Contains('sudo>>>') -eq $false) $true "installer pulse banner avoids stacked > glyphs"
 Assert-Equal ($installerSource.Contains('# [[ WINDO-BEGIN ]]') -eq $true) $true "installer uses bracket profile begin marker"
@@ -1904,11 +1910,14 @@ $BeginMarker = "# [[ WINDO-BEGIN ]]"
 $EndMarker = "# [[ WINDO-END ]]"
 $WindoLegacyBeginMarker = "# >>> WINDO-BEGIN >>>"
 $WindoLegacyEndMarker = "# <<< WINDO-END <<<"
-$repairStart = $installerSource.IndexOf("function Get-WindoProfileMarkerPairs", [StringComparison]::Ordinal)
+$pairsStart = $installerSource.IndexOf("function Get-WindoProfileMarkerPairs", [StringComparison]::Ordinal)
+$pairsEnd = $installerSource.IndexOf("function Test-WindoProfileHasManagedBlock", $pairsStart, [StringComparison]::Ordinal)
+$repairStart = $installerSource.IndexOf("function Repair-WindoProfileTextForMarkerPair", [StringComparison]::Ordinal)
 $repairEnd = $installerSource.IndexOf("function Get-NoWindowActionArgs", $repairStart, [StringComparison]::Ordinal)
-Assert-Equal (($repairStart -ge 0 -and $repairEnd -gt $repairStart) -eq $true) $true "installer repair function can be extracted"
-if ($repairStart -ge 0 -and $repairEnd -gt $repairStart) {
-    Invoke-Expression $installerSource.Substring($repairStart, $repairEnd - $repairStart)
+Assert-Equal (($pairsStart -ge 0 -and $pairsEnd -gt $pairsStart -and $repairStart -ge 0 -and $repairEnd -gt $repairStart) -eq $true) $true "installer repair function can be extracted"
+if ($pairsStart -ge 0 -and $pairsEnd -gt $pairsStart -and $repairStart -ge 0 -and $repairEnd -gt $repairStart) {
+    $repairBlock = $installerSource.Substring($pairsStart, $pairsEnd - $pairsStart) + $installerSource.Substring($repairStart, $repairEnd - $repairStart)
+    Invoke-Expression $repairBlock
     $brokenProfile = "pre`r`n`"`r`n    if (!(Test-Path `$SecureDir)) { }`r`n    `$ProfileBlockBegin = `"$BeginMarker`"`r`n    `$ProfileBlockEnd = `"$EndMarker`"`r`n    Write-Host `"[windo] orphan`"`r`n$BeginMarker`r`nfunction windo { }`r`n$EndMarker`r`npost`r`n"
     Assert-Equal (Repair-WindoProfileText -Text $brokenProfile) "pre`r`npost`r`n" "profile repair removes orphan payload before valid bracket block"
     $legacyBrokenProfile = "pre`r`n$WindoLegacyBeginMarker`r`nfunction windo { }`r`n$WindoLegacyEndMarker`r`npost`r`n"

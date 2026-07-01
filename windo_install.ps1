@@ -216,8 +216,17 @@ function Test-WindoInstallerMotionEnabled {
     return [bool]$script:WindoInstallMotionEnabled
 }
 
+function Test-WindoInstallerPsReadLineActive {
+    try {
+        return [bool](Get-Module -Name PSReadLine -ErrorAction SilentlyContinue)
+    } catch {
+        return $false
+    }
+}
+
 function Test-WindoInstallerConsoleInlineSafe {
     if (-not (Test-WindoInstallerMotionEnabled)) { return $false }
+    if (Test-WindoInstallerPsReadLineActive) { return $false }
     try {
         if ([Console]::IsOutputRedirected) { return $false }
     } catch { return $false }
@@ -235,6 +244,10 @@ function Get-WindoInstallerConsoleWidth {
     try {
         if ([Console]::IsOutputRedirected) { return $Fallback }
     } catch { return $Fallback }
+    try {
+        $rawWidth = [int]$Host.UI.RawUI.WindowSize.Width
+        if ($rawWidth -gt 0) { return [Math]::Max(40, [Math]::Min($rawWidth - 1, $Max)) }
+    } catch { }
     try {
         $rawWidth = [int][Console]::WindowWidth
         if ($rawWidth -gt 0) { return [Math]::Max(40, [Math]::Min($rawWidth - 1, $Max)) }
@@ -262,7 +275,8 @@ function Write-WindoInstallerInlineStatus {
     if (-not (Test-WindoInstallerConsoleInlineSafe)) { return $false }
     try {
         if ($ClearWidth -gt 0) { Clear-WindoInstallerInlineLine -Width $ClearWidth }
-        Write-Host $Text -NoNewline -ForegroundColor $Color
+        # Console.Out avoids PSReadLine/Write-Host inline transfer failures on pwsh hosts.
+        [Console]::Out.Write($Text)
         return $true
     } catch {
         return $false
@@ -599,9 +613,6 @@ function Write-WindoInstallStep {
         "skip" { "[--]" }
         default { "[**]" }
     }
-    if ($Status.ToLowerInvariant() -eq "run") {
-        Write-WindoInstallerPulse -Label $Label -Frames 6 -DelayMs 35
-    }
     Write-Host ("  {0} {1}" -f $mark, $Label) -ForegroundColor $Color
     if (-not [string]::IsNullOrWhiteSpace($Detail)) {
         Write-Host ("       {0}" -f $Detail) -ForegroundColor DarkGray
@@ -656,10 +667,14 @@ function Write-WindoInstallerFinale {
             @{ Text = "  Choose Elevation before Execution."; Color = [ConsoleColor]::DarkGray }
         )
         foreach ($frame in $fade) {
-            Write-Host ("`r{0,-80}" -f $frame.Text) -NoNewline -ForegroundColor $frame.Color
+            $fadeLine = "{0,-80}" -f $frame.Text
+            if (-not (Write-WindoInstallerInlineStatus -Text ("`r{0}" -f $fadeLine) -ClearWidth 80)) {
+                Write-Host $frame.Text -ForegroundColor $frame.Color
+                break
+            }
             Start-Sleep -Milliseconds 260
         }
-        Write-Host ("`r" + (' ' * 80) + "`r") -NoNewline
+        Clear-WindoInstallerInlineLine -Width 80
         Start-Sleep -Milliseconds 220
     } finally {
         try { [Console]::CursorVisible = $oldCursor } catch { }
@@ -6454,6 +6469,7 @@ function _windo_draw_ascii_startup_frame {
     function _windo_motion_animate([string]$Label = "[windo] motion", [int]$Milliseconds = 850, [string]$Profile = "ambient", [bool]$UseColors = $false) {
         $policy = _windo_resolve_motion_policy
         if (-not $policy.enabled) { return $false }
+        if (-not (_windo_console_inline_safe)) { return $false }
         if ([string]::IsNullOrWhiteSpace($Label) -or $Milliseconds -le 0) { return $false }
 
         $effective = _windo_resolve_motion_profile_name -RequestedProfile $Profile
@@ -6472,8 +6488,7 @@ function _windo_draw_ascii_startup_frame {
         $i = 0
         while ($sw.ElapsedMilliseconds -lt $Milliseconds) {
             $frame = [string]$frames[$i % $frames.Count]
-            if ($UseColors) { Write-Host -NoNewline ("`r{0} {1} " -f $Label, $frame) -ForegroundColor [string]$colors[$i % $colors.Count] }
-            else { [Console]::Write(("`r{0} {1} " -f $Label, $frame)) }
+            [Console]::Write(("`r{0} {1} " -f $Label, $frame))
             $i++
             Start-Sleep -Milliseconds $interval
         }
@@ -6502,6 +6517,19 @@ function _windo_draw_ascii_startup_frame {
         return $null
     }
 
+    function _windo_console_inline_safe {
+        try {
+            if ([Console]::IsOutputRedirected) { return $false }
+        } catch { return $false }
+        try {
+            if (Get-Module -Name PSReadLine -ErrorAction SilentlyContinue) { return $false }
+        } catch { }
+        try {
+            if ($Host -and $Host.Name -match 'ServerRemoteHost') { return $false }
+        } catch { }
+        return $true
+    }
+
     function _windo_spinner_enabled {
         $policy = _windo_resolve_motion_policy
         return ([bool]$policy.enabled -and [string]$policy.motionProfile -ne "off")
@@ -6516,17 +6544,14 @@ function _windo_draw_ascii_startup_frame {
 
     function _windo_spinner_line([string]$Label, [int]$Frame, [string]$Profile = "auto") {
         if (-not (_windo_spinner_enabled)) { return }
+        if (-not (_windo_console_inline_safe)) { return }
         $effective = _windo_resolve_motion_profile_name -RequestedProfile $Profile
         if ($effective -eq "off") { return }
         $def = _windo_motion_profile_definition $effective
         $frames = @($def.frames)
         if ($frames.Count -eq 0) { return }
         $c = $frames[$Frame % $frames.Count]
-        if ($def.usesColor -and $def.colors.Count -gt 0) {
-            Write-Host -NoNewline ("`r{0} {1} " -f $Label, $c) -ForegroundColor [string]$def.colors[$Frame % $def.colors.Count]
-        } else {
-            [Console]::Write("`r${Label} ${c} ")
-        }
+        [Console]::Write("`r${Label} ${c} ")
     }
 
     function _windo_invoke_rest_with_spinner {
