@@ -32,9 +32,18 @@ $RuntimePath = Join-Path $SecureDir "windo_runtime.ps1"
 $SnapshotDir = Join-Path (Join-Path $HOME "Documents") "windo"
 $SnapshotRuntime = Join-Path $SnapshotDir "windo_runtime.ps1"
 
-$BeginMarker = "# >>> WINDO-BEGIN >>>"
-$EndMarker = "# <<< WINDO-END <<<"
-$ProfileBlockVersion = "3"
+$WindoLegacyBeginMarker = "# >>> WINDO-BEGIN >>>"
+$WindoLegacyEndMarker = "# <<< WINDO-END <<<"
+$BeginMarker = "# [[ WINDO-BEGIN ]]"
+$EndMarker = "# [[ WINDO-END ]]"
+$ProfileBlockVersion = "4"
+
+function Get-WindoProfileMarkerPairs {
+    return @(
+        @{ Begin = $BeginMarker; End = $EndMarker },
+        @{ Begin = $WindoLegacyBeginMarker; End = $WindoLegacyEndMarker }
+    )
+}
 
 function Write-Utf8NoBomFile {
     param([Parameter(Mandatory=$true)][string]$Path, [Parameter(Mandatory=$true)][string]$Content)
@@ -60,11 +69,15 @@ function Test-ProfileSyntax {
     return $true
 }
 
-function Repair-WindoProfileText {
-    param([Parameter(Mandatory=$true)][string]$Text)
+function Repair-WindoProfileTextForMarkerPair {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$BlockBeginMarker,
+        [Parameter(Mandatory = $true)][string]$BlockEndMarker
+    )
     $anchorPattern = '(?ms)(?:^|\r?\n)(?:"\s*\r?\n|function\s+Invoke-WindoBundledUninstall\b|function\s+windo\b|\s*\$WindoVersion\s*=|\s*if\s*\(\!\(Test-Path\s+\$SecureDir\)\))'
-    $beginLinePattern = '(?m)^[ \t]*' + [regex]::Escape($BeginMarker) + '[ \t]*\r?$'
-    $endLinePattern = '(?m)^[ \t]*' + [regex]::Escape($EndMarker) + '[ \t]*\r?$'
+    $beginLinePattern = '(?m)^[ \t]*' + [regex]::Escape($BlockBeginMarker) + '[ \t]*\r?$'
+    $endLinePattern = '(?m)^[ \t]*' + [regex]::Escape($BlockEndMarker) + '[ \t]*\r?$'
 
     $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
     while ($firstBeginMatch.Success) {
@@ -76,9 +89,8 @@ function Repair-WindoProfileText {
         $Text = $Text.Remove($start, $firstBeginMatch.Index - $start)
         $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
     }
-    $wellFormedBlockPattern = '(?ms)^[ \t]*' + [regex]::Escape($BeginMarker) + '[ \t]*\r?\n.*?^[ \t]*' + [regex]::Escape($EndMarker) + '[ \t]*\r?\n?'
+    $wellFormedBlockPattern = '(?ms)^[ \t]*' + [regex]::Escape($BlockBeginMarker) + '[ \t]*\r?\n.*?^[ \t]*' + [regex]::Escape($BlockEndMarker) + '[ \t]*\r?\n?'
     $Text = [regex]::Replace($Text, $wellFormedBlockPattern, '')
-    # strip orphan ends
     $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
     $firstEndMatch = [regex]::Match($Text, $endLinePattern)
     while ($firstEndMatch.Success -and (-not $firstBeginMatch.Success -or $firstEndMatch.Index -lt $firstBeginMatch.Index)) {
@@ -94,6 +106,14 @@ function Repair-WindoProfileText {
         $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
         $firstEndMatch = [regex]::Match($Text, $endLinePattern)
     }
+    return $Text
+}
+
+function Repair-WindoProfileText {
+    param([Parameter(Mandatory=$true)][string]$Text)
+    foreach ($pair in (Get-WindoProfileMarkerPairs)) {
+        $Text = Repair-WindoProfileTextForMarkerPair -Text $Text -BlockBeginMarker $pair.Begin -BlockEndMarker $pair.End
+    }
     return ($Text -replace "(\r?\n){3,}", "`r`n`r`n")
 }
 
@@ -106,9 +126,16 @@ function Remove-WindoProfileBlockFromPath {
         Write-Warning ("Could not read profile " + $Path + ": " + $_.Exception.Message)
         return $false
     }
-    $pattern = "(?ms)" + [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker) + "\r?\n?"
-    if ($text -notmatch $pattern) { return $false }
-    $updated = [regex]::Replace($text, $pattern, "")
+    $removedAny = $false
+    $updated = $text
+    foreach ($pair in (Get-WindoProfileMarkerPairs)) {
+        $pattern = "(?ms)" + [regex]::Escape($pair.Begin) + ".*?" + [regex]::Escape($pair.End) + "\r?\n?"
+        if ($updated -match $pattern) {
+            $updated = [regex]::Replace($updated, $pattern, "")
+            $removedAny = $true
+        }
+    }
+    if (-not $removedAny) { return $false }
     $updated = $updated -replace "(\r?\n){3,}", "`r`n`r`n"
     if ([string]::IsNullOrWhiteSpace($updated)) {
         Write-Utf8NoBomFile -Path $Path -Content ""
@@ -149,10 +176,10 @@ function Backup-Profile {
 function Write-ThinLoaderBlockToPath {
     param([Parameter(Mandatory=$true)][string]$Path, [switch]$ForceWrite)
     $thin = @"
-# >>> WINDO-BEGIN >>>
+# [[ WINDO-BEGIN ]]
 # WINDO-MANAGED-BLOCK: BEGIN
 # WINDO-PROFILE-BLOCK-VERSION: $ProfileBlockVersion
-# WINDO-PROFILE-VERSION: 8.5.8
+# WINDO-PROFILE-VERSION: 8.5.9
 # WINDO-CUSTOM-PROFILE-D: $(Join-Path (Join-Path $HOME 'Documents') 'windo\profile.d')
 # WINDO-CUSTOM-SECURE-PROFILE-D: $(Join-Path $SecureDir 'profile.d')
 # WINDO-NOTE: Do not edit this managed block. Put custom PowerShell in profile.d. Implementation is in windo_runtime.ps1 under .pwsh_secure.
@@ -163,7 +190,7 @@ if (Test-Path -LiteralPath `$__windoRuntime) {
     try { . `$__windoRuntime } catch { Write-Warning ("[windo] runtime load failed: " + `$_.Exception.Message) }
 } else { Write-Warning "[windo] runtime not found at `$__windoRuntime -- run 'windo install-latest' from a normal shell." }
 # WINDO-MANAGED-BLOCK: END
-# <<< WINDO-END <<<
+# [[ WINDO-END ]]
 "@
     $thin = $thin.Trim() + "`r`n"
 

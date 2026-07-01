@@ -19,8 +19,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$BeginMarker = "# >>> WINDO-BEGIN >>>"
-$EndMarker   = "# <<< WINDO-END <<<"
+$WindoLegacyBeginMarker = "# >>> WINDO-BEGIN >>>"
+$WindoLegacyEndMarker   = "# <<< WINDO-END <<<"
+$BeginMarker = "# [[ WINDO-BEGIN ]]"
+$EndMarker   = "# [[ WINDO-END ]]"
 $TaskMain    = "WindoElevatedRunner"
 $TaskUpdate  = "WindoSelfUpdate"
 $SecureDir   = Join-Path $HOME ".pwsh_secure"
@@ -166,14 +168,26 @@ function Remove-WindoProfileBlockFromPath {
         return $false
     }
 
-    $pattern = "(?ms)" + [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker) + "\r?\n?"
-    if ($text -notmatch $pattern) {
+    $removedAny = $false
+    $updated = $text
+    foreach ($pair in @(
+            @{ Begin = $BeginMarker; End = $EndMarker },
+            @{ Begin = $WindoLegacyBeginMarker; End = $WindoLegacyEndMarker }
+        )) {
+        $pattern = "(?ms)" + [regex]::Escape($pair.Begin) + ".*?" + [regex]::Escape($pair.End) + "\r?\n?"
+        if ($updated -match $pattern) {
+            $updated = [regex]::Replace($updated, $pattern, "")
+            $removedAny = $true
+        }
+    }
+    if (-not $removedAny) {
         Write-Host "[windo uninstall] No WINDO block found in profile: $Path" -ForegroundColor DarkYellow
         if ($null -ne $script:CleanupSummary -and $script:CleanupSummary.PSObject.Properties.Name -contains "ProfileBlocksMissing") { $script:CleanupSummary.ProfileBlocksMissing++ }
         return $false
     }
 
     $hasRollback = $false
+    $backupPath = $null
     try {
         $hasRollback = [bool](Get-Command Backup-ForRollback -CommandType Function -ErrorAction Stop)
     } catch { $hasRollback = $false }
@@ -187,7 +201,6 @@ function Remove-WindoProfileBlockFromPath {
         }
     }
 
-    $updated = [regex]::Replace($text, $pattern, "")
     $updated = $updated -replace "(\r?\n){3,}", "`r`n`r`n"
     if ([string]::IsNullOrWhiteSpace($updated)) {
         if (Get-Command Write-Utf8NoBomFile -CommandType Function -ErrorAction SilentlyContinue) {
