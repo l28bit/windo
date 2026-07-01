@@ -22,7 +22,7 @@ Maintainer: new windo subcommands must be added to $WindoBuiltinVerbs (single so
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$WindoVersion = "8.5.8"
+$WindoVersion = "8.5.9"
 $global:WINDO_EXIT_CODE = 0
 
 # Single source of truth for embedded profile: completer skip-list (plus '!!') and windo last-command first-token exclusions.
@@ -48,9 +48,26 @@ $LogFile      = Join-Path $SecureDir "windo_history.enc"
 $ManifestFile = Join-Path $SecureDir "windo_manifest.json"
 $SnapshotDir  = Join-Path (Join-Path $HOME "Documents") "windo"
 
-$BeginMarker  = "# >>> WINDO-BEGIN >>>"
-$EndMarker    = "# <<< WINDO-END <<<"
-$ProfileBlockVersion = "3"
+$WindoLegacyBeginMarker = "# >>> WINDO-BEGIN >>>"
+$WindoLegacyEndMarker   = "# <<< WINDO-END <<<"
+$BeginMarker  = "# [[ WINDO-BEGIN ]]"
+$EndMarker    = "# [[ WINDO-END ]]"
+$ProfileBlockVersion = "4"
+
+function Get-WindoProfileMarkerPairs {
+    return @(
+        @{ Begin = $BeginMarker; End = $EndMarker },
+        @{ Begin = $WindoLegacyBeginMarker; End = $WindoLegacyEndMarker }
+    )
+}
+
+function Test-WindoProfileHasManagedBlock {
+    param([Parameter(Mandatory = $true)][string]$Text)
+    foreach ($pair in (Get-WindoProfileMarkerPairs)) {
+        if ($Text -like "*$($pair.Begin)*" -and $Text -like "*$($pair.End)*") { return $true }
+    }
+    return $false
+}
 $ProfileDPublicDir = Join-Path $SnapshotDir "profile.d"
 $ProfileDSecureDir = Join-Path $SecureDir "profile.d"
 
@@ -199,6 +216,59 @@ function Test-WindoInstallerMotionEnabled {
     return [bool]$script:WindoInstallMotionEnabled
 }
 
+function Test-WindoInstallerConsoleInlineSafe {
+    if (-not (Test-WindoInstallerMotionEnabled)) { return $false }
+    try {
+        if ([Console]::IsOutputRedirected) { return $false }
+    } catch { return $false }
+    try {
+        if ($Host -and $Host.Name -match 'ServerRemoteHost') { return $false }
+    } catch { }
+    return $true
+}
+
+function Get-WindoInstallerConsoleWidth {
+    param(
+        [int]$Fallback = 120,
+        [int]$Max = 170
+    )
+    try {
+        if ([Console]::IsOutputRedirected) { return $Fallback }
+    } catch { return $Fallback }
+    try {
+        $rawWidth = [int][Console]::WindowWidth
+        if ($rawWidth -gt 0) { return [Math]::Max(40, [Math]::Min($rawWidth - 1, $Max)) }
+    } catch { }
+    return $Fallback
+}
+
+function Clear-WindoInstallerInlineLine {
+    param([int]$Width = 120)
+    if (-not (Test-WindoInstallerConsoleInlineSafe)) { return }
+    try {
+        $w = Get-WindoInstallerConsoleWidth -Fallback $Width -Max $Width
+        [Console]::Write("`r" + (' ' * $w) + "`r")
+    } catch {
+        Write-Host ""
+    }
+}
+
+function Write-WindoInstallerInlineStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [ConsoleColor]$Color = [ConsoleColor]::Cyan,
+        [int]$ClearWidth = 0
+    )
+    if (-not (Test-WindoInstallerConsoleInlineSafe)) { return $false }
+    try {
+        if ($ClearWidth -gt 0) { Clear-WindoInstallerInlineLine -Width $ClearWidth }
+        Write-Host $Text -NoNewline -ForegroundColor $Color
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Write-WindoInstallerPulse {
     param(
         [Parameter(Mandatory=$true)][string]$Label,
@@ -208,18 +278,22 @@ function Write-WindoInstallerPulse {
 
     if (-not (Test-WindoInstallerMotionEnabled)) { return }
 
-    $glyphs = @('sudo', 'sudo>', 'sudo>>', 'sudo>>>', 'WIN+', 'UAC+', 'ACL+', 'TASK+', 'AUDIT+')
+    # Avoid stacked '>' glyphs — they break PSReadLine / console inline transfers on some hosts.
+    $glyphs = @('sudo', 'sudo/', 'sudo//', 'sudo///', 'WIN+', 'UAC+', 'ACL+', 'TASK+', 'AUDIT+')
     $oldCursor = $true
     try { $oldCursor = [Console]::CursorVisible; [Console]::CursorVisible = $false } catch { }
     try {
+        $clearWidth = Get-WindoInstallerConsoleWidth -Fallback 96 -Max 140
         for ($i = 0; $i -lt $Frames; $i++) {
             $glyph = $glyphs[$i % $glyphs.Count]
-            Write-Host ("`r  [{0,-7}] {1}" -f $glyph, $Label) -NoNewline -ForegroundColor Cyan
+            $line = "  [{0,-7}] {1}" -f $glyph, $Label
+            if (-not (Write-WindoInstallerInlineStatus -Text ("`r{0}" -f $line) -Color Cyan -ClearWidth $clearWidth)) {
+                Write-Host $line -ForegroundColor Cyan
+                break
+            }
             Start-Sleep -Milliseconds $DelayMs
         }
-        $width = 96
-        try { $width = [Math]::Max(40, [Math]::Min([Console]::WindowWidth - 1, 140)) } catch { }
-        Write-Host ("`r" + (' ' * $width) + "`r") -NoNewline
+        Clear-WindoInstallerInlineLine -Width $clearWidth
     } catch {
         Write-Host ""
     } finally {
@@ -246,15 +320,18 @@ function Write-WindoInstallerPowerRail {
     $oldCursor = $true
     try { $oldCursor = [Console]::CursorVisible; [Console]::CursorVisible = $false } catch { }
     try {
+        $clearWidth = Get-WindoInstallerConsoleWidth -Fallback 128 -Max 160
         for ($cycle = 0; $cycle -lt $Cycles; $cycle++) {
             foreach ($frame in $frames) {
-                Write-Host ("`r  {0}  {1}" -f $frame, $Label) -NoNewline -ForegroundColor Cyan
+                $line = "  {0}  {1}" -f $frame, $Label
+                if (-not (Write-WindoInstallerInlineStatus -Text ("`r{0}" -f $line) -Color Cyan -ClearWidth $clearWidth)) {
+                    Write-Host $line -ForegroundColor Cyan
+                    return
+                }
                 Start-Sleep -Milliseconds 48
             }
         }
-        $width = 128
-        try { $width = [Math]::Max(40, [Math]::Min([Console]::WindowWidth - 1, 160)) } catch { }
-        Write-Host ("`r" + (' ' * $width) + "`r") -NoNewline
+        Clear-WindoInstallerInlineLine -Width $clearWidth
     } catch {
         Write-Host ""
     } finally {
@@ -274,24 +351,27 @@ function Write-WindoInstallerForge {
     $oldCursor = $true
     try { $oldCursor = [Console]::CursorVisible; [Console]::CursorVisible = $false } catch { }
     try {
+        $clearWidth = Get-WindoInstallerConsoleWidth -Fallback 132 -Max 170
         for ($cycle = 0; $cycle -lt $Cycles; $cycle++) {
             for ($frame = 0; $frame -lt 12; $frame++) {
                 $left = $tokens | Get-Random -Count 4
                 $right = $tokens | Get-Random -Count 4
                 $core = switch ($frame % 4) {
-                    0 { "   < sudo intent >" }
-                    1 { "  << consent gate >>" }
-                    2 { " <<< task broker >>>" }
-                    default { "<<<< audit chain >>>>" }
+                    0 { "   [ sudo intent ]" }
+                    1 { "  [[ consent gate ]]" }
+                    2 { " [[[ task broker ]]]" }
+                    default { "[[[[ audit chain ]]]]" }
                 }
                 $line = ("{0}  {1}  {2}" -f ($left -join " · "), $core, ($right -join " · "))
-                Write-Host ("`r  {0,-132}" -f $line) -NoNewline -ForegroundColor DarkCyan
+                $padded = "  {0,-132}" -f $line
+                if (-not (Write-WindoInstallerInlineStatus -Text ("`r{0}" -f $padded) -Color DarkCyan -ClearWidth $clearWidth)) {
+                    Write-Host $padded -ForegroundColor DarkCyan
+                    return
+                }
                 Start-Sleep -Milliseconds 34
             }
         }
-        $width = 132
-        try { $width = [Math]::Max(40, [Math]::Min([Console]::WindowWidth - 1, 170)) } catch { }
-        Write-Host ("`r" + (' ' * $width) + "`r") -NoNewline
+        Clear-WindoInstallerInlineLine -Width $clearWidth
     } catch {
         Write-Host ""
     } finally {
@@ -306,11 +386,16 @@ function Write-WindoInstallerIgnition {
 
     $frames = @("[          ]", "[=         ]", "[===       ]", "[=====     ]", "[=======   ]", "[========= ]", "[==========]")
     $stages = @("intent", "consent", "broker", "elevate", "capture", "verify", "ready")
+    $clearWidth = Get-WindoInstallerConsoleWidth -Fallback 80 -Max 96
     for ($i = 0; $i -lt $frames.Count; $i++) {
-        Write-Host ("`r  {0,-16} {1} {2,-8}" -f $Label, $frames[$i], $stages[$i]) -NoNewline -ForegroundColor Green
+        $line = "`r  {0,-16} {1} {2,-8}" -f $Label, $frames[$i], $stages[$i]
+        if (-not (Write-WindoInstallerInlineStatus -Text $line -Color Green -ClearWidth $clearWidth)) {
+            Write-Host ("  {0,-16} {1} {2,-8}" -f $Label, $frames[$i], $stages[$i]) -ForegroundColor Green
+            return
+        }
         Start-Sleep -Milliseconds 70
     }
-    Write-Host ("`r" + (' ' * 80) + "`r") -NoNewline
+    Clear-WindoInstallerInlineLine -Width $clearWidth
 }
 
 function Write-WindoInstallerLaunchSequence {
@@ -334,15 +419,20 @@ function Write-WindoInstallerTelemetrySweep {
     if (-not (Test-WindoInstallerMotionEnabled)) { return }
 
     $nodes = @("sudo", "intent", "uac", "broker", "runner", "capture", "audit", "return")
+    $clearWidth = Get-WindoInstallerConsoleWidth -Fallback 132 -Max 150
     for ($i = 0; $i -lt 18; $i++) {
         $active = $nodes[$i % $nodes.Count]
         $lineParts = foreach ($node in $nodes) {
             if ($node -eq $active) { "[{0}]" -f $node.ToUpperInvariant() } else { " {0} " -f $node }
         }
-        Write-Host ("`r  telemetry sweep :: {0}" -f ($lineParts -join " -> ")) -NoNewline -ForegroundColor Cyan
+        $line = "`r  telemetry sweep :: {0}" -f ($lineParts -join " -> ")
+        if (-not (Write-WindoInstallerInlineStatus -Text $line -Color Cyan -ClearWidth $clearWidth)) {
+            Write-Host ("  telemetry sweep :: {0}" -f ($lineParts -join " -> ")) -ForegroundColor Cyan
+            return
+        }
         Start-Sleep -Milliseconds 46
     }
-    Write-Host ("`r" + (' ' * 132) + "`r") -NoNewline
+    Clear-WindoInstallerInlineLine -Width $clearWidth
 }
 
 function Write-WindoInstallerBootLine {
@@ -352,14 +442,22 @@ function Write-WindoInstallerBootLine {
         [int]$DelayMs = 12
     )
 
-    if (-not (Test-WindoInstallerMotionEnabled)) {
+    if (-not (Test-WindoInstallerConsoleInlineSafe)) {
         Write-Host $Text -ForegroundColor $Color
         return
     }
 
-    foreach ($char in $Text.ToCharArray()) {
-        Write-Host $char -NoNewline -ForegroundColor $Color
-        Start-Sleep -Milliseconds $DelayMs
+    # Token-based reveal avoids char-by-char transfers that fail on '>' and PSReadLine hosts.
+    $parts = [regex]::Split($Text, '(\s+)')
+    foreach ($part in $parts) {
+        if ([string]::IsNullOrEmpty($part)) { continue }
+        try {
+            Write-Host $part -NoNewline -ForegroundColor $Color
+        } catch {
+            Write-Host $Text -ForegroundColor $Color
+            return
+        }
+        Start-Sleep -Milliseconds ([Math]::Max(1, $DelayMs * 2))
     }
     Write-Host ""
 }
@@ -477,8 +575,8 @@ function Write-WindoEditionBanner {
         )
     }
     Write-Host ""
-    Write-Host "     operator@windows > windo do -- <command>" -ForegroundColor Green
-    Write-Host "     execution path   > intent | consent | broker | elevate | capture | audit" -ForegroundColor DarkGray
+    Write-Host "     operator@windows :: windo do -- <command>" -ForegroundColor Green
+    Write-Host "     execution path   :: intent | consent | broker | elevate | capture | audit" -ForegroundColor DarkGray
     Write-WindoInstallerUseBrief
     Write-WindoInstallerCapabilityDeck
     if ($motion) {
@@ -648,14 +746,16 @@ function Remove-ExistingWindoBlockFromProfile {
     }
 }
 
-function Repair-WindoProfileText {
+function Repair-WindoProfileTextForMarkerPair {
     param(
-        [Parameter(Mandatory=$true)][string]$Text
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$BlockBeginMarker,
+        [Parameter(Mandatory = $true)][string]$BlockEndMarker
     )
 
     $anchorPattern = '(?ms)(?:^|\r?\n)(?:"\s*\r?\n|function\s+Invoke-WindoBundledUninstall\b|function\s+windo\b|\s*\$WindoVersion\s*=|\s*if\s*\(\!\(Test-Path\s+\$SecureDir\)\))'
-    $beginLinePattern = '(?m)^[ \t]*' + [regex]::Escape($BeginMarker) + '[ \t]*\r?$'
-    $endLinePattern = '(?m)^[ \t]*' + [regex]::Escape($EndMarker) + '[ \t]*\r?$'
+    $beginLinePattern = '(?m)^[ \t]*' + [regex]::Escape($BlockBeginMarker) + '[ \t]*\r?$'
+    $endLinePattern = '(?m)^[ \t]*' + [regex]::Escape($BlockEndMarker) + '[ \t]*\r?$'
 
     $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
     while ($firstBeginMatch.Success) {
@@ -674,7 +774,7 @@ function Repair-WindoProfileText {
         $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
     }
 
-    $wellFormedBlockPattern = '(?ms)^[ \t]*' + [regex]::Escape($BeginMarker) + '[ \t]*\r?\n.*?^[ \t]*' + [regex]::Escape($EndMarker) + '[ \t]*\r?\n?'
+    $wellFormedBlockPattern = '(?ms)^[ \t]*' + [regex]::Escape($BlockBeginMarker) + '[ \t]*\r?\n.*?^[ \t]*' + [regex]::Escape($BlockEndMarker) + '[ \t]*\r?\n?'
     $Text = [regex]::Replace($Text, $wellFormedBlockPattern, '')
 
     $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
@@ -698,6 +798,18 @@ function Repair-WindoProfileText {
 
         $firstBeginMatch = [regex]::Match($Text, $beginLinePattern)
         $firstEndMatch = [regex]::Match($Text, $endLinePattern)
+    }
+
+    return $Text
+}
+
+function Repair-WindoProfileText {
+    param(
+        [Parameter(Mandatory=$true)][string]$Text
+    )
+
+    foreach ($pair in (Get-WindoProfileMarkerPairs)) {
+        $Text = Repair-WindoProfileTextForMarkerPair -Text $Text -BlockBeginMarker $pair.Begin -BlockEndMarker $pair.End
     }
 
     return ($Text -replace "(\r?\n){3,}", "`r`n`r`n")
@@ -1560,8 +1672,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$BeginMarker = "# >>> WINDO-BEGIN >>>"
-$EndMarker   = "# <<< WINDO-END <<<"
+$BeginMarker = "# [[ WINDO-BEGIN ]]"
+$EndMarker   = "# [[ WINDO-END ]]"
+$WindoLegacyBeginMarker = "# >>> WINDO-BEGIN >>>"
+$WindoLegacyEndMarker = "# <<< WINDO-END <<<"
 $TaskMain    = "WindoElevatedRunner"
 $TaskUpdate  = "WindoSelfUpdate"
 $SecureDir   = Join-Path $HOME ".pwsh_secure"
@@ -1620,13 +1734,23 @@ function Remove-WindoProfileBlockFromPath {
         return $false
     }
 
-    $pattern = "(?ms)" + [regex]::Escape($BeginMarker) + ".*?" + [regex]::Escape($EndMarker) + "\r?\n?"
-    if ($text -notmatch $pattern) {
+    $removedAny = $false
+    $updated = $text
+    foreach ($pair in @(
+            @{ Begin = $BeginMarker; End = $EndMarker },
+            @{ Begin = $WindoLegacyBeginMarker; End = $WindoLegacyEndMarker }
+        )) {
+        $pattern = "(?ms)" + [regex]::Escape($pair.Begin) + ".*?" + [regex]::Escape($pair.End) + "\r?\n?"
+        if ($updated -match $pattern) {
+            $updated = [regex]::Replace($updated, $pattern, "")
+            $removedAny = $true
+        }
+    }
+    if (-not $removedAny) {
         Write-Host "[windo uninstall] No WINDO block found in profile: $Path" -ForegroundColor DarkYellow
         return $false
     }
 
-    $updated = [regex]::Replace($text, $pattern, "")
     $updated = $updated -replace "(\r?\n){3,}", "`r`n`r`n"
     if ([string]::IsNullOrWhiteSpace($updated)) {
         Write-Utf8NoBomFile -Path $Path -Content ""
@@ -1746,12 +1870,12 @@ if (-not $healInstalled) {
 param([switch]$Profile, [switch]$All, [switch]$Force)
 $ErrorActionPreference="Stop"; Set-StrictMode -Version Latest
 $HOME=$env:USERPROFILE; $SecureDir=Join-Path $HOME ".pwsh_secure"; $rt=Join-Path $SecureDir "windo_runtime.ps1"
-$BeginMarker="# >>> WINDO-BEGIN >>>"; $EndMarker="# <<< WINDO-END <<<"
+$BeginMarker="# [[ WINDO-BEGIN ]]"; $EndMarker="# [[ WINDO-END ]]"; $LegacyBegin="# >>> WINDO-BEGIN >>>"; $LegacyEnd="# <<< WINDO-END <<<"
 function W { param($p,$c) $d=Split-Path $p -Parent; if($d -and -not (Test-Path $d)){New-Item -ItemType Directory -Path $d -Force|Out-Null}; $t=Join-Path $d (".tmp"+[Guid]::NewGuid()+".tmp"); [IO.File]::WriteAllText($t,$c,[Text.UTF8Encoding]::new($false)); Move-Item $t $p -Force }
-function RepairText { param($t) $bp="(?ms)"+[regex]::Escape($BeginMarker)+".*?"+[regex]::Escape($EndMarker)+"\r?\n?"; if($t -notmatch $bp){return $t}; $u=[regex]::Replace($t,$bp,""); return ($u -replace "(\r?\n){3,}","`r`n`r`n") }
+function RepairText { param($t) foreach($pair in @(@{B=$BeginMarker;E=$EndMarker},@{B=$LegacyBegin;E=$LegacyEnd})){ $bp="(?ms)"+[regex]::Escape($pair.B)+".*?"+[regex]::Escape($pair.E)+"\r?\n?"; if($t -match $bp){ $t=[regex]::Replace($t,$bp,"") } }; return ($t -replace "(\r?\n){3,}","`r`n`r`n") }
 function GetPaths { $s=@(); try{ if($PROFILE){$s+=[string]$PROFILE.CurrentUserCurrentHost;$s+=[string]$PROFILE.CurrentUserAllHosts} }catch{}; $s += @((Join-Path $HOME 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'),(Join-Path $HOME 'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1')); $hs=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); foreach($p in $s){if($p){[void]$hs.Add($p)}}; return @($hs) }
 function BackupP { param($p) if(-not(Test-Path $p)){return $null}; $b=Join-Path $SecureDir "profile_backups"; if(-not(Test-Path $b)){New-Item -ItemType Directory -Path $b -Force|Out-Null}; $bp=Join-Path $b ("profile."+ (Get-Date -Format yyyyMMdd-HHmmss) +".heal.bak"); Copy-Item $p $bp -Force; return $bp }
-function WriteThin { param($p) $loader="# >>> WINDO-BEGIN >>>`n# WINDO-MANAGED-BLOCK: BEGIN`n# WINDO-PROFILE-BLOCK-VERSION: 3`n# WINDO-PROFILE-VERSION: 8.5.8`n# WINDO-NOTE: thin loader - implementation in windo_runtime.ps1`n`$__r=Join-Path (Join-Path `$HOME '.pwsh_secure') 'windo_runtime.ps1'; if(Test-Path `$__r){ . `$__r } else { Write-Warning 'WINDO runtime missing; run windo install-latest from normal shell.' }`n# <<< WINDO-END <<<`n"; $loader=$loader.Trim()+"`r`n"; if(Test-Path $p){ $c=Get-Content -Raw $p -EA SilentlyContinue; $c=if($c){RepairText $c}else{''}; $nt=$c.TrimEnd()+"`r`n`r`n"+$loader }else{ $nt=$loader }; [void]([Management.Automation.Language.Parser]::ParseInput($nt,[ref]$null,[ref]$null)); $bk=BackupP $p; W -p $p -c $nt; Write-Host "[heal] thin loader -> $p $(if($bk){'(backup '+$bk+')'})" -ForegroundColor Green }
+function WriteThin { param($p) $loader="# [[ WINDO-BEGIN ]]`n# WINDO-MANAGED-BLOCK: BEGIN`n# WINDO-PROFILE-BLOCK-VERSION: 4`n# WINDO-PROFILE-VERSION: 8.5.9`n# WINDO-NOTE: thin loader - implementation in windo_runtime.ps1`n`$__r=Join-Path (Join-Path `$HOME '.pwsh_secure') 'windo_runtime.ps1'; if(Test-Path `$__r){ . `$__r } else { Write-Warning 'WINDO runtime missing; run windo install-latest from normal shell.' }`n# [[ WINDO-END ]]`n"; $loader=$loader.Trim()+"`r`n"; if(Test-Path $p){ $c=Get-Content -Raw $p -EA SilentlyContinue; $c=if($c){RepairText $c}else{''}; $nt=$c.TrimEnd()+"`r`n`r`n"+$loader }else{ $nt=$loader }; [void]([Management.Automation.Language.Parser]::ParseInput($nt,[ref]$null,[ref]$null)); $bk=BackupP $p; W -p $p -c $nt; Write-Host "[heal] thin loader -> $p $(if($bk){'(backup '+$bk+')'})" -ForegroundColor Green }
 Write-Host "WINDO compact heal (profile focus)" -ForegroundColor Cyan
 if($Profile -or $All -or -not $Profile){ foreach($pp in GetPaths){ try{ $raw=Get-Content -Raw $pp -EA SilentlyContinue; if($raw){ $cl=RepairText $raw; if($cl -ne $raw){ W -p $pp -c $cl } }; WriteThin $pp }catch{ Write-Warning $_ } } }
 if(-not(Test-Path $rt)){ $snap=Join-Path (Join-Path $HOME 'Documents\windo') 'windo_runtime.ps1'; if(Test-Path $snap){ Copy-Item $snap $rt -Force; Write-Host "[heal] restored runtime from snapshot" -ForegroundColor Green } }
@@ -2070,8 +2194,10 @@ function windo {
     $PrefsFile    = Join-Path $SecureDir "windo_prefs.json"
     $ManifestFile = Join-Path $SecureDir "windo_manifest.json"
     $SchemaVersion = "3.0"
-    $ProfileBlockBegin = "# >>> WINDO-BEGIN >>>"
-    $ProfileBlockEnd = "# <<< WINDO-END <<<"
+    $ProfileBlockBegin = "# [[ WINDO-BEGIN ]]"
+    $ProfileBlockEnd = "# [[ WINDO-END ]]"
+    $ProfileBlockBeginLegacy = "# >>> WINDO-BEGIN >>>"
+    $ProfileBlockEndLegacy = "# <<< WINDO-END <<<"
     $WindoBuiltins = @(__WINDO_BUILTIN_ARRAY__)
 
     if (!(Test-Path $SecureDir)) { New-Item -ItemType Directory -Path $SecureDir | Out-Null }
@@ -4764,8 +4890,16 @@ Use: windo prompt --json   (machine-readable bundle)
                 codename = "Dependable Refuel + Thin Loader"
                 theme = "Profile hygiene (thin loader), hash validation that doesn't fail users, and operational built-in healers."
                 focus = @("thin profile loader v3", "windo_runtime.ps1 decoupling", "blob-attested downloads (no more hash validate fails)", "windo heal + profile healer lane", "midflightfuel finalized")
-                status = "current"
+                status = "shipped"
                 operatorValue = "WINDO no longer bloats or risks breaking $PROFILE; downloads are dependable by default; recovery has first-class built-in healers that work even with damaged profiles."
+            },
+            [pscustomobject]@{
+                version = "8.5.9"
+                codename = "Banner Safe Transfer"
+                theme = "Installer banner motion and profile markers avoid stacked '>' glyphs that break console/PSReadLine inline transfers."
+                focus = @("safe installer inline status", "token-based boot line", "bracket profile markers v4", "legacy marker cleanup", "burst spinner without > frames")
+                status = "current"
+                operatorValue = "Installer visuals and profile refresh no longer trip console transfer errors on hosts sensitive to inline '>' rendering."
             }
         )
     }
@@ -6130,7 +6264,7 @@ Use: windo prompt --json   (machine-readable bundle)
             "steady" { return @{ frames = @("|", "-", "|", "-", "=", "-", "|", "-", "/"); intervalMs = 180; colors = @("Gray", "DarkGray"); clearWidth = 102; usesColor = $false } }
             "standard" { return @{ frames = @("|", "/", "-", "\"); intervalMs = 110; colors = @("Cyan"); clearWidth = 112; usesColor = $false } }
             "rich" { return @{ frames = @("|", "/", "-", "\\", "=", "==="); intervalMs = 80; colors = @("Cyan", "Blue", "Magenta", "DarkCyan"); clearWidth = 118; usesColor = $true } }
-            "burst" { return @{ frames = @(">", ">>", ">>>", " >>", "  >", " >"); intervalMs = 70; colors = @("Cyan", "Blue", "Cyan", "White", "Blue"); clearWidth = 120; usesColor = $true } }
+            "burst" { return @{ frames = @(".", "..", "...", " ..", "  .", " ."); intervalMs = 70; colors = @("Cyan", "Blue", "Cyan", "White", "Blue"); clearWidth = 120; usesColor = $true } }
             "cinematic" { return @{ frames = @("[=    ]", "[ =   ]", "[  =  ]", "[   = ]", "[    =]", "[   = ]", "[  =  ]", "[ =   ]"); intervalMs = 75; colors = @("Cyan", "Blue", "DarkCyan", "Cyan", "DarkCyan", "Blue", "Cyan", "White"); clearWidth = 132; usesColor = $true } }
             default { return @{ frames = @("|", "/", "-", "\"); intervalMs = 110; colors = @("Cyan"); clearWidth = 112; usesColor = $false } }
         }
@@ -6479,7 +6613,7 @@ function _windo_draw_ascii_startup_frame {
         if (Test-Path -LiteralPath $profPath) {
             try {
                 $pt = Get-Content -Raw -LiteralPath $profPath -ErrorAction Stop
-                $profHasBlock = ($pt -match [regex]::Escape($ProfileBlockBegin))
+                $profHasBlock = ($pt -match [regex]::Escape($ProfileBlockBegin)) -or ($pt -match [regex]::Escape($ProfileBlockBeginLegacy))
                 if ($pt -match '# WINDO-PROFILE-VERSION:\s*([0-9]+\.[0-9]+\.[0-9]+)') {
                     $profVer = $Matches[1]
                 } elseif ($pt -match '\$WindoVersion\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"') {
@@ -8423,7 +8557,7 @@ Write-TextFileAtomic -Path $trayPath -Content $trayScript -Encoding ([System.Tex
         if (!(Test-Path -LiteralPath $path)) { return @{ present = $false; hasWindoBlock = $false } }
         try {
             $t = Get-Content -Raw -LiteralPath $path -ErrorAction Stop
-            $has = ($t -match [regex]::Escape($ProfileBlockBegin))
+            $has = ($t -match [regex]::Escape($ProfileBlockBegin)) -or ($t -match [regex]::Escape($ProfileBlockBeginLegacy))
             return @{ present = $true; hasWindoBlock = [bool]$has }
         } catch {
             return @{ present = $true; hasWindoBlock = $false }
@@ -8826,7 +8960,10 @@ if ($changed) { Write-TextFileAtomic -Path $path -Content $body -Encoding ([Syst
         }
         $profileText = ""
         try { if (Test-Path -LiteralPath $PROFILE) { $profileText = Get-Content -Raw -LiteralPath $PROFILE } } catch { $profileText = "" }
-        $hasWindoBlock = [bool]($profileText -like "*# >>> WINDO-BEGIN >>>*" -and $profileText -like "*# <<< WINDO-END <<<*")
+        $hasWindoBlock = [bool](
+            (($profileText -like "*$ProfileBlockBegin*") -and ($profileText -like "*$ProfileBlockEnd*")) -or
+            (($profileText -like "*$ProfileBlockBeginLegacy*") -and ($profileText -like "*$ProfileBlockEndLegacy*"))
+        )
         $hasCompleterBlock = [bool]($profileText -like "*Register-WindoArgumentCompleter*" -and $profileText -like "*Register-ArgumentCompleter -CommandName windo -Native*")
         $hasEarlyReturnRisk = [bool]($profileText -like "*if (-not `$policy.enabled) { return }*" -or $profileText -like "*if (`$null -eq `$selectedPrefixChord) { return }*")
         $hasBuiltinCompletion = @($sample | Where-Object { $_ -in @("doctor", "help", "install-latest", "integrate") }).Count -gt 0
