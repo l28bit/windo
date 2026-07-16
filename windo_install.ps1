@@ -777,17 +777,20 @@ function Get-NoWindowActionArgs {
     param([Parameter(Mandatory=$true)][string]$ScriptPath)
 
     $pwshwCmd = Get-Command "pwshw.exe" -ErrorAction SilentlyContinue
-    $escapedScriptPath = $ScriptPath.Replace("'", "''")
+    # Scheduled-task actions are parsed by the native process launcher. Single
+    # quotes are PowerShell syntax, not reliable Windows command-line quoting;
+    # use a double-quoted -File value so paths containing spaces actually run.
+    $quotedScriptPath = '"' + ([System.IO.Path]::GetFullPath($ScriptPath)) + '"'
     if ($pwshwCmd) {
         return @{
             Execute = $pwshwCmd.Source
-            Argument = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '$escapedScriptPath'"
+            Argument = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File $quotedScriptPath"
         }
     }
 
     return @{
         Execute = "powershell.exe"
-        Argument = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File '$escapedScriptPath'"
+        Argument = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $quotedScriptPath"
     }
 }
 
@@ -1468,13 +1471,14 @@ try {
     Write-Trace "Imported ScheduledTasks"
 
     $PwshwCmd = Get-Command "pwshw.exe" -ErrorAction SilentlyContinue
+    $quotedRunnerPath = [char]34 + ([System.IO.Path]::GetFullPath($RunnerPath)) + [char]34
     if ($PwshwCmd) {
         $Exe = $PwshwCmd.Source
-        $Arg = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '$($RunnerPath.Replace(\"'\", \"''\"))'"
+        $Arg = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File $quotedRunnerPath"
         Write-Trace ("Using pwshw.exe: " + $Exe)
     } else {
         $Exe = "powershell.exe"
-        $Arg = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File '$($RunnerPath.Replace(\"'\", \"''\"))'"
+        $Arg = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $quotedRunnerPath"
         Write-Trace "Using powershell.exe hidden fallback"
     }
 
@@ -6596,6 +6600,62 @@ function _windo_draw_ascii_startup_frame {
         return $null
     }
 
+    function _windo_runner_task_action_healthy {
+        try {
+            $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            $action = @($task.Actions | Select-Object -First 1)
+            if ($action.Count -eq 0) { return $false }
+            $runnerCmd = Get-Command "pwshw.exe" -ErrorAction SilentlyContinue
+            $expectedExe = if ($runnerCmd) { [string]$runnerCmd.Source } else { "powershell.exe" }
+            $expectedArg = if ($runnerCmd) {
+                "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + [char]34 + ([System.IO.Path]::GetFullPath($RunnerPath)) + [char]34
+            } else {
+                "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File " + [char]34 + ([System.IO.Path]::GetFullPath($RunnerPath)) + [char]34
+            }
+            return ([string]$action[0].Execute -ieq $expectedExe -and [string]$action[0].Arguments -ieq $expectedArg)
+        } catch {
+            return $false
+        }
+    }
+
+    function _windo_start_direct_elevated_runner {
+        try {
+            $runnerCmd = Get-Command "pwshw.exe" -ErrorAction SilentlyContinue
+            $exe = if ($runnerCmd) { [string]$runnerCmd.Source } else { "powershell.exe" }
+            $args = @("-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", $RunnerPath)
+            $process = Start-Process -FilePath $exe -Verb RunAs -ArgumentList $args -Wait -PassThru -ErrorAction Stop
+            return [pscustomobject]@{ started = $true; declined = $false; exitCode = [int]$process.ExitCode }
+        } catch [System.ComponentModel.Win32Exception] {
+            if ($_.Exception.NativeErrorCode -eq 1223) {
+                return [pscustomobject]@{ started = $false; declined = $true; exitCode = 1223 }
+            }
+            return [pscustomobject]@{ started = $false; declined = $false; exitCode = 1; error = $_.Exception.Message }
+        } catch {
+            return [pscustomobject]@{ started = $false; declined = $false; exitCode = 1; error = $_.Exception.Message }
+        }
+    }
+
+    function _windo_get_published_blob_sha1 {
+        # The Contents API can still provide the Git object id when inline
+        # content is unavailable for a large file. This lets raw fallback use
+        # the same transport attestation as the API download path.
+        $apiUrl = _windo_installer_api_url
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $resp = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 35 -ErrorAction Stop
+                $obj = $resp.Content | ConvertFrom-Json -ErrorAction Stop
+                if ($obj.sha -and ([string]$obj.sha -match '^[a-fA-F0-9]{40}$')) {
+                    return ([string]$obj.sha).ToUpperInvariant()
+                }
+                return $null
+            } catch {
+                if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) { return $null }
+                Start-Sleep -Milliseconds $script:_windo_retry_delays_ms[[Math]::Min($attempt - 1, 2)]
+            }
+        }
+        return $null
+    }
+
     function _windo_get_published_installer_text {
         $apiUrl = _windo_installer_api_url
         $apiError = $null
@@ -6606,6 +6666,9 @@ function _windo_draw_ascii_startup_frame {
                 $obj = $resp.Content | ConvertFrom-Json -ErrorAction Stop
                 if ($obj.content) {
                     $bytes = [Convert]::FromBase64String(([string]$obj.content -replace '\s', ''))
+                    if ($obj.size -and ([int64]$obj.size -ne [int64]$bytes.Length)) {
+                        throw "GitHub Contents API returned incomplete installer content."
+                    }
                     $text = [System.Text.Encoding]::UTF8.GetString($bytes)
                     $resolvedBlobSha = if ($obj.sha) { [string]$obj.sha } else { $null }
                     return [pscustomobject]@{
@@ -6637,7 +6700,8 @@ function _windo_draw_ascii_startup_frame {
                 Invoke-WebRequest -Uri $rawUrl -UseBasicParsing -TimeoutSec 35 -OutFile $tmpFile -ErrorAction Stop
                 $bytes = [System.IO.File]::ReadAllBytes($tmpFile)
                 $text = [System.Text.Encoding]::UTF8.GetString($bytes)
-                return [pscustomobject]@{ status = "available"; source = "raw-fallback"; url = $rawUrl; text = $text; bytes = $bytes; version = (_windo_extract_installer_version $text); blobSha = $null; error = $apiError; attempt = $attempt }
+                $resolvedBlobSha = _windo_get_published_blob_sha1
+                return [pscustomobject]@{ status = "available"; source = "raw-fallback"; url = $rawUrl; text = $text; bytes = $bytes; version = (_windo_extract_installer_version $text); blobSha = $resolvedBlobSha; error = $apiError; attempt = $attempt }
             } catch {
                 if (-not (_windo_is_retryable_web_error $_) -or $attempt -ge 3) {
                     $msg = $_.Exception.Message
@@ -16690,7 +16754,32 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
     Write-TextFileAtomic -Path $reqPath -Content ($sealedPending | ConvertTo-Json -Depth 20 -Compress) -Encoding ([System.Text.UTF8Encoding]::new($false))
 
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    Start-ScheduledTask -TaskName $TaskName | Out-Null
+    $runnerLaunch = "scheduled-task"
+    if (-not (_windo_runner_task_action_healthy)) {
+        Write-Host "[windo] Scheduled runner action is stale or malformed; using direct UAC runner fallback." -ForegroundColor Yellow
+        $directLaunch = _windo_start_direct_elevated_runner
+        if (-not $directLaunch.started) {
+            if ($directLaunch.declined) { Write-Host "[windo] UAC elevation was declined. No elevated command was run." -ForegroundColor Yellow }
+            else { Write-Host "[windo] Direct UAC runner could not start: $($directLaunch.error)" -ForegroundColor Red }
+            _windo_set_exit 1
+            return
+        }
+        $runnerLaunch = "direct-uac"
+    } else {
+        try {
+            Start-ScheduledTask -TaskName $TaskName | Out-Null
+        } catch {
+            Write-Host "[windo] Scheduled runner could not start; using direct UAC runner fallback." -ForegroundColor Yellow
+            $directLaunch = _windo_start_direct_elevated_runner
+            if (-not $directLaunch.started) {
+                if ($directLaunch.declined) { Write-Host "[windo] UAC elevation was declined. No elevated command was run." -ForegroundColor Yellow }
+                else { Write-Host "[windo] Direct UAC runner could not start: $($directLaunch.error)" -ForegroundColor Red }
+                _windo_set_exit 1
+                return
+            }
+            $runnerLaunch = "direct-uac"
+        }
+    }
     $dispatchProfile = _windo_resolve_motion_profile_name -Plan $motionPlan -Context "dispatch" -RequestedProfile $motionPlan.motionProfileHint
     $dispatchDelay = _windo_motion_interval_ms $dispatchProfile
 
@@ -17242,14 +17331,25 @@ $thinLoader = @'
 # Keep your customizations in Documents\windo\profile.d or .pwsh_secure\profile.d -- they are loaded after this and survive upgrades.
 $__windoSecureDir = Join-Path $HOME ".pwsh_secure"
 $__windoRuntime = Join-Path $__windoSecureDir "windo_runtime.ps1"
-if (Test-Path -LiteralPath $__windoRuntime) {
+$__windoRuntimeCandidates = @(
+    $__windoRuntime
+    (Join-Path (Join-Path $HOME "Documents") "windo\windo_runtime.ps1")
+)
+$__windoRuntimeLoaded = $false
+foreach ($__windoCandidate in $__windoRuntimeCandidates) {
+    if ($__windoRuntimeLoaded -or -not (Test-Path -LiteralPath $__windoCandidate)) { continue }
     try {
-        . $__windoRuntime
+        . $__windoCandidate
+        $__windoRuntimeLoaded = $true
+        if ($__windoCandidate -ne $__windoRuntime) {
+            Write-Warning "[windo] Loaded runtime from local snapshot; refresh WINDO from a normal shell when convenient."
+        }
     } catch {
-        Write-Warning ("[windo] runtime load failed from profile: " + $_.Exception.Message + "`n  Repair: windo install-latest (normal shell) or restart after manual fix.")
+        Write-Warning ("[windo] runtime load failed from " + $__windoCandidate + ": " + $_.Exception.Message)
     }
-} else {
-    Write-Warning "[windo] runtime not found at $__windoRuntime -- the windo command may be unavailable until repaired. Run 'windo install-latest' from a normal (non-elevated) PowerShell window."
+}
+if (-not $__windoRuntimeLoaded) {
+    Write-Warning "[windo] WINDO runtime is missing or invalid. Run 'windo heal --profile' or 'windo install-latest' from a normal PowerShell window."
 }
 '@
 $thinLoader = $thinLoader.Replace('__BLOCKVER__', $ProfileBlockVersion)

@@ -413,6 +413,26 @@ function Invoke-WindoBootstrapDownload {
     Invoke-WindoBootstrapRestMethod -Uri $Uri -OutFile $OutFile
 }
 
+function Get-WindoBootstrapPublishedBlobSha1 {
+    # The Contents API returns the Git object id even when a large file's
+    # inline content is unavailable. Use it to attest raw-fallback bytes.
+    $apiUrl = Get-WindoBootstrapInstallerApiUrl
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $api = Invoke-WindoBootstrapWebRequest -Uri $apiUrl -TimeoutSec 35 -UseBasicParsing
+            $obj = $api.Content | ConvertFrom-Json -ErrorAction Stop
+            if ($obj.sha -and ([string]$obj.sha -match '^[a-fA-F0-9]{40}$')) {
+                return ([string]$obj.sha).ToUpperInvariant()
+            }
+            return $null
+        } catch {
+            if (-not (_windo_bootstrap_is_retryable_web_error $_) -or $attempt -ge 3) { return $null }
+            Start-Sleep -Milliseconds $script:_windo_bootstrap_retry_ms[[Math]::Min($attempt - 1, 2)]
+        }
+    }
+    return $null
+}
+
 function Get-WindoBootstrapInstallerRawUrl {
     "https://raw.githubusercontent.com/l28bit/windo/$((Get-WindoBootstrapReleaseRef))/windo_install.ps1"
 }
@@ -433,6 +453,9 @@ function Save-WindoBootstrapPublishedInstaller {
             $obj = $api.Content | ConvertFrom-Json -ErrorAction Stop
             if ($obj.content) {
                 $bytes = [Convert]::FromBase64String(([string]$obj.content -replace '\s', ''))
+                if ($obj.size -and ([int64]$obj.size -ne [int64]$bytes.Length)) {
+                    throw "GitHub Contents API returned incomplete installer content."
+                }
                 [IO.File]::WriteAllBytes($OutFile, $bytes)
                 return [pscustomobject]@{
                     Source = "github-api"
@@ -452,7 +475,8 @@ function Save-WindoBootstrapPublishedInstaller {
     $rawUrl = Get-WindoBootstrapInstallerRawUrl
     try {
         Invoke-WindoBootstrapDownload -Uri $rawUrl -OutFile $OutFile -Label "Downloading installer via raw fallback..."
-        return [pscustomobject]@{ Source = "raw-fallback"; Url = $rawUrl; ApiError = $apiError; Attempt = 1; BlobSha = $null }
+        $blobSha = Get-WindoBootstrapPublishedBlobSha1
+        return [pscustomobject]@{ Source = "raw-fallback"; Url = $rawUrl; ApiError = $apiError; Attempt = 1; BlobSha = $blobSha }
     } catch {
         throw "Published installer was not available. github-api: $apiError; raw: $($_.Exception.Message)"
     }
