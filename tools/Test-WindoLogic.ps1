@@ -1301,7 +1301,7 @@ try {
     Remove-Item -Path $checksumFixtureDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.8"') -eq $true) $true "installer version is 8.5.8"
+Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.9"') -eq $true) $true "installer version is 8.5.9"
 Assert-Equal ($installerSource.Contains('function _windo_release_branch') -and $installerSource.Contains("'prometheus'") -and $installerSource.Contains('"Exodus"')) $true "installer normalizes legacy Prometheus alias to Exodus"
 Assert-Equal ($installerSource.Contains('publishedContractBranch = "Exodus"') -eq $true) $true "release contract published branch is Exodus"
 Assert-Equal ($installerSource.Contains('function _windo_release_contract') -eq $true) $true "installer exposes release contract helper"
@@ -1311,6 +1311,7 @@ Assert-Equal ($installerSource.Contains('windo version --contract') -eq $true) $
 Assert-Equal ($installerSource.Contains('version = "8.4.0"') -and $installerSource.Contains('Prometheus Contract')) $true "roadmap includes V8.4 release train entry"
 Assert-Equal ($installerSource.Contains('version = "8.5.5"') -and $installerSource.Contains('Bootstrap Handoff Guard')) $true "roadmap includes V8.5.5 release train entry"
 Assert-Equal ($installerSource.Contains('version = "8.5.6"') -and $installerSource.Contains('Dr. Run')) $true "roadmap includes V8.5.6 release train entry"
+Assert-Equal ($installerSource.Contains('version = "8.5.9"') -and $installerSource.Contains('Banner Safe Transfer')) $true "roadmap includes V8.5.9 release train entry"
 Assert-Equal ($installerSource.Contains('version = "8.5.8"') -and $installerSource.Contains('Dependable Refuel')) $true "roadmap includes V8.5.8 release train entry"
 Assert-Equal ($installerSource.Contains('history search') -eq $true) $true "history help documents search subcommand"
 Assert-Equal ($installerSource.Contains('function _windo_filter_log_entries') -eq $true) $true "installer exposes history filter helper"
@@ -1326,7 +1327,7 @@ Assert-Equal ($installerSource.Contains('function _windo_midflightfuel_apply_act
 Assert-Equal (($installerSource.Contains('if ($Command.Count -ge 1 -and ($Command[0] -eq "midflightfuel"') -or ($installerSource -match 'midflightfuel.*heal')) -eq $true) $true "installer handles midflightfuel command"
 Assert-Equal ($installerSource.Contains('repairCommand = $(if ([string]::IsNullOrWhiteSpace($RepairAction))') -eq $true) $true "preflight rows carry repair command metadata"
 Assert-Equal ($installerSource.Contains('Repair option: windo heal') -eq $true) $true "preflight prints heal repair option"
-Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.8"') -eq $true) $true "bootstrap expected version is 8.5.8"
+Assert-Equal ($bootstrapSource.Contains('WindoBootstrapExpectedVersion = "8.5.9"') -eq $true) $true "bootstrap expected version is 8.5.9"
 Assert-Equal ($bootstrapSource.Contains('function Get-WindoEditionLabel') -eq $true) $true "bootstrap derives edition label"
 Assert-Equal ($bootstrapSource.Contains('{1} bootstrap"') -eq $true) $true "bootstrap banner is edition-aware"
 Assert-Equal ($bootstrapSource.Contains("Save-WindoBootstrapPublishedInstaller") -eq $true) $true "bootstrap downloads installer API-first"
@@ -1437,12 +1438,12 @@ if ($generatedFunctionBody -and $generatedPsReadLineBlock -and $generatedComplet
 
     # v3+ thin loader simulation (profile should contain only small loader + headers; runtime holds bulk)
     $thinLoaderSim = @'
-# >>> WINDO-BEGIN >>>
+# [[ WINDO-BEGIN ]]
 # WINDO-MANAGED-BLOCK: BEGIN
-# WINDO-PROFILE-BLOCK-VERSION: 3
-# WINDO-PROFILE-VERSION: 8.5.8
+# WINDO-PROFILE-BLOCK-VERSION: 4
+# WINDO-PROFILE-VERSION: 8.5.9
 # WINDO-NOTE: Do not edit this managed block. Put custom PowerShell in profile.d. Implementation is in windo_runtime.ps1 under .pwsh_secure.
-# WINDO thin loader (profile block v3). Real logic lives in windo_runtime.ps1 (managed, updated on install-latest).
+# WINDO thin loader (profile block v4). Real logic lives in windo_runtime.ps1 (managed, updated on install-latest).
 $__windoSecureDir = Join-Path $HOME ".pwsh_secure"
 $__windoRuntime = Join-Path $__windoSecureDir "windo_runtime.ps1"
 $__windoRuntimeCandidates = @($__windoRuntime, (Join-Path (Join-Path $HOME "Documents") "windo\windo_runtime.ps1"))
@@ -1453,12 +1454,12 @@ foreach ($__windoCandidate in $__windoRuntimeCandidates) {
 }
 if (-not $__windoRuntimeLoaded) { Write-Warning "[windo] runtime not found or invalid" }
 # WINDO-MANAGED-BLOCK: END
-# <<< WINDO-END <<<
+# [[ WINDO-END ]]
 '@
     $thinErrors = $null
     $thinTokens = $null
     [System.Management.Automation.Language.Parser]::ParseInput($thinLoaderSim, [ref]$thinTokens, [ref]$thinErrors) | Out-Null
-    Assert-Equal ($thinErrors.Count) 0 "thin profile loader (v3) parses cleanly"
+    Assert-Equal ($thinErrors.Count) 0 "thin profile loader (v4) parses cleanly"
 
     $profileSmokePath = Join-Path ([IO.Path]::GetTempPath()) ("windo-generated-profile-smoke-" + [Guid]::NewGuid().ToString("N") + ".ps1")
     try {
@@ -1896,18 +1897,26 @@ Assert-Equal ($installerSource.Contains("WINDO_EXTRAS_INDEX_URL") -eq $true) $tr
 Assert-Equal ($installerSource.Contains("function _windo_keybinding_inspect_chord_for_doctor") -eq $true) $true "installer defines keybindings doctor inspector"
 Assert-Equal ($installerSource.Contains("keybindings doctor") -eq $true) $true "installer handles keybindings doctor subcommand"
 Assert-Equal ($installerSource.Contains("lastAudit") -eq $true) $true "installer session payload includes lastAudit"
+Assert-Equal ($installerSource.Contains('function Test-WindoInstallerConsoleInlineSafe') -eq $true) $true "installer guards inline banner motion for redirected consoles"
+Assert-Equal ($installerSource.Contains('foreach ($char in $Text.ToCharArray())') -eq $false) $true "installer banner boot line no longer transfers char-by-char"
+Assert-Equal ($installerSource.Contains('sudo>>>') -eq $false) $true "installer pulse banner avoids stacked > glyphs"
+Assert-Equal ($installerSource.Contains('# [[ WINDO-BEGIN ]]') -eq $true) $true "installer uses bracket profile begin marker"
 Assert-Equal ($installerSource.Contains("function Repair-WindoProfileText") -eq $true) $true "installer repairs corrupted orphan WINDO profile blocks"
 Assert-Equal ($installerSource.Contains('$profileText = Repair-WindoProfileText -Text $profileText') -eq $true) $true "installer normalizes profile text before writing profile block"
 Assert-Equal ($installerSource.Contains('$repaired = Repair-WindoProfileText -Text $text') -eq $true) $true "installer removes existing profile blocks through the repair path"
-$BeginMarker = "# >>> WINDO-BEGIN >>>"
-$EndMarker = "# <<< WINDO-END <<<"
-$repairStart = $installerSource.IndexOf("function Repair-WindoProfileText", [StringComparison]::Ordinal)
+$BeginMarker = "# [[ WINDO-BEGIN ]]"
+$EndMarker = "# [[ WINDO-END ]]"
+$WindoLegacyBeginMarker = "# >>> WINDO-BEGIN >>>"
+$WindoLegacyEndMarker = "# <<< WINDO-END <<<"
+$repairStart = $installerSource.IndexOf("function Get-WindoProfileMarkerPairs", [StringComparison]::Ordinal)
 $repairEnd = $installerSource.IndexOf("function Get-NoWindowActionArgs", $repairStart, [StringComparison]::Ordinal)
 Assert-Equal (($repairStart -ge 0 -and $repairEnd -gt $repairStart) -eq $true) $true "installer repair function can be extracted"
 if ($repairStart -ge 0 -and $repairEnd -gt $repairStart) {
     Invoke-Expression $installerSource.Substring($repairStart, $repairEnd - $repairStart)
     $brokenProfile = "pre`r`n`"`r`n    if (!(Test-Path `$SecureDir)) { }`r`n    `$ProfileBlockBegin = `"$BeginMarker`"`r`n    `$ProfileBlockEnd = `"$EndMarker`"`r`n    Write-Host `"[windo] orphan`"`r`n$BeginMarker`r`nfunction windo { }`r`n$EndMarker`r`npost`r`n"
-    Assert-Equal (Repair-WindoProfileText -Text $brokenProfile) "pre`r`npost`r`n" "profile repair removes orphan payload before valid block"
+    Assert-Equal (Repair-WindoProfileText -Text $brokenProfile) "pre`r`npost`r`n" "profile repair removes orphan payload before valid bracket block"
+    $legacyBrokenProfile = "pre`r`n$WindoLegacyBeginMarker`r`nfunction windo { }`r`n$WindoLegacyEndMarker`r`npost`r`n"
+    Assert-Equal (Repair-WindoProfileText -Text $legacyBrokenProfile) "pre`r`npost`r`n" "profile repair removes legacy >>> marker blocks"
 }
 Assert-Equal ($installerSource.Contains("function _windo_verify_log_state") -eq $true) $true "installer has shared audit-chain verifier"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "dashboard")') -eq $true) $true "installer handles dashboard command"
