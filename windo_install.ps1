@@ -1414,6 +1414,19 @@ try {
         exit 0
     }
 
+    # Claim the queued item before reading or executing it. This keeps a
+    # timed-out client or a second UAC launch from replaying the same command.
+    # Rename is atomic because both paths live under SecureDir.
+    $claimedPath = Join-Path $SecureDir ($req.Name -replace '^windo_req\.', 'windo_run.')
+    try {
+        Move-Item -LiteralPath $req.FullName -Destination $claimedPath -ErrorAction Stop
+        $req = Get-Item -LiteralPath $claimedPath -ErrorAction Stop
+        "CLAIMED: $($req.Name)" | Add-Content -Path $RunnerLast -Encoding UTF8
+    } catch {
+        "CLAIM FAILED: $($_.Exception.Message)" | Add-Content -Path $RunnerLast -Encoding UTF8
+        exit 0
+    }
+
     try {
         $pending = _windo_resolve_artifact_payload (Get-Content -Raw -Path $req.FullName)
     } catch {
@@ -2614,6 +2627,16 @@ function _windo_parse_runner_result([string]$OutPath, [string]$RequestId, [strin
     $runnerTimedOut = _windo_to_bool (_windo_get_member_value $obj "RunnerTimedOut") $false
     $outputTruncated = _windo_to_bool (_windo_get_member_value $obj "OutputTruncated") $false
     $merged = _windo_merge_runner_output $stdout $stderr $outputText
+
+    # A result is only valid for the request that is currently being waited
+    # on. Never let a stale/corrupt result file be presented as success.
+    if ([string]::IsNullOrWhiteSpace([string]$requestId) -or
+        ([string]$requestId -cne [string]$RequestId)) {
+        $default.Output = "<RESULT CORRELATION MISMATCH>"
+        $default.ExitCode = -4
+        $default.StdErr = "Runner result RequestId did not match the submitted request."
+        return [pscustomobject]$default
+    }
 
     return [pscustomobject]@{
         Timestamp       = if ($null -ne $ts) { [string]$ts } else { $fallbackTimestamp }
@@ -6757,8 +6780,11 @@ function _windo_draw_ascii_startup_frame {
             $runnerCmd = Get-Command "pwshw.exe" -ErrorAction SilentlyContinue
             $exe = if ($runnerCmd) { [string]$runnerCmd.Source } else { "powershell.exe" }
             $args = @("-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", $RunnerPath)
-            $process = Start-Process -FilePath $exe -Verb RunAs -ArgumentList $args -Wait -PassThru -ErrorAction Stop
-            return [pscustomobject]@{ started = $true; declined = $false; exitCode = [int]$process.ExitCode }
+            # UAC consent is the launch boundary; the dispatcher owns result
+            # waiting. Do not hold the interactive shell for the full child
+            # timeout when the scheduled-task path is unavailable.
+            $process = Start-Process -FilePath $exe -Verb RunAs -ArgumentList $args -WindowStyle Hidden -PassThru -ErrorAction Stop
+            return [pscustomobject]@{ started = $true; declined = $false; exitCode = $null; processId = [int]$process.Id }
         } catch [System.ComponentModel.Win32Exception] {
             if ($_.Exception.NativeErrorCode -eq 1223) {
                 return [pscustomobject]@{ started = $false; declined = $true; exitCode = 1223 }
@@ -15900,13 +15926,53 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             $rcontent = Get-Content -Raw -Path $RunnerLast -ErrorAction SilentlyContinue
             if ($rcontent -and $rcontent -match [regex]::Escape($tid)) { $runnerHint = "(RequestId appears in runner log tail)" }
         }
-        $pl = @{ requestId = $tid; logEntry = $found; runnerLogNote = $runnerHint }
+        $pendingResult = $null
+        $pendingState = "not-found"
+        if ($tid -match '^[a-f0-9]{32}$') {
+            $queuedPath = Join-Path $SecureDir ("windo_req.$tid.json")
+            $runningPath = Join-Path $SecureDir ("windo_run.$tid.json")
+            $resultPath = Join-Path $SecureDir ("windo_res.$tid.json")
+            if (Test-Path -LiteralPath $queuedPath) { $pendingState = "queued" }
+            elseif (Test-Path -LiteralPath $runningPath) { $pendingState = "running" }
+            if (Test-Path -LiteralPath $resultPath) {
+                try {
+                    $candidate = _windo_resolve_artifact_payload (Get-Content -Raw -LiteralPath $resultPath -ErrorAction Stop)
+                    if ($candidate -and [string]$(_windo_get_member_value $candidate "RequestId") -ceq $tid) {
+                        $pendingResult = [ordered]@{
+                            command = [string](_windo_get_member_value $candidate "Command")
+                            exitCode = _windo_to_int (_windo_get_member_value $candidate "ExitCode") 1
+                            durationMs = _windo_to_int (_windo_get_member_value $candidate "DurationMs") 0
+                            output = [string](_windo_get_member_value $candidate "Output")
+                            runnerTimedOut = _windo_to_bool (_windo_get_member_value $candidate "RunnerTimedOut") $false
+                            outputTruncated = _windo_to_bool (_windo_get_member_value $candidate "OutputTruncated") $false
+                        }
+                        $pendingState = "completed-awaiting-audit"
+                    }
+                } catch { }
+            }
+        }
+        $pl = @{ requestId = $tid; logEntry = $found; runnerLogNote = $runnerHint; state = $pendingState; pendingResult = $pendingResult }
         if ($JsonOutput) {
             _emit_json "trace" $pl
-            if ($found) { _windo_set_exit 0 } else { _windo_set_exit 2 }
+            if ($found -or $pendingResult -or $pendingState -in @("queued", "running")) { _windo_set_exit 0 } else { _windo_set_exit 2 }
             return
         }
         if (-not $found) {
+            if ($pendingResult) {
+                Write-Host "[windo] Delayed result for RequestId=$tid" -ForegroundColor Cyan
+                Write-Host "  State    : $pendingState"
+                Write-Host "  Command  : $($pendingResult.command)"
+                Write-Host "  ExitCode : $($pendingResult.exitCode)"
+                Write-Host "  Duration : $($pendingResult.durationMs)ms"
+                _windo_set_exit 0
+                return
+            }
+            if ($pendingState -in @("queued", "running")) {
+                Write-Host "[windo] Request $tid is still $pendingState; no command replay will occur." -ForegroundColor Yellow
+                if ($runnerHint) { Write-Host "  $runnerHint" -ForegroundColor DarkGray }
+                _windo_set_exit 0
+                return
+            }
             Write-Host "[windo] No audit log entry for RequestId: $tid" -ForegroundColor Yellow
             if ($runnerHint) { Write-Host "  $runnerHint" -ForegroundColor DarkGray }
             Write-Host "  Try: windo log -n 50" -ForegroundColor DarkGray
@@ -16939,7 +17005,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             Command    = $cmdLine
             ExitCode   = -2
             Output     = "<TIMEOUT WAITING FOR RESULT>`n$hint"
-            Elevation  = "FAILED"
+            Elevation  = "PENDING"
             DurationMs = [int]$sw.Elapsed.TotalMilliseconds
             Version    = $WindoVersion
             RequestId  = $reqId

@@ -153,6 +153,13 @@ function Get-WindoProfilePathList {
 function Remove-WindoProfileBlockFromPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
+    # Keep this function self-contained so it remains safe when embedded or
+    # unit-tested outside the script's top-level variable scope.
+    $markerPairs = @(
+        @{ Begin = if ([string]::IsNullOrWhiteSpace([string]$BeginMarker)) { '# [[ WINDO-BEGIN ]]' } else { [string]$BeginMarker }; End = if ([string]::IsNullOrWhiteSpace([string]$EndMarker)) { '# [[ WINDO-END ]]' } else { [string]$EndMarker } },
+        @{ Begin = if ([string]::IsNullOrWhiteSpace([string]$WindoLegacyBeginMarker)) { '# >>> WINDO-BEGIN >>>' } else { [string]$WindoLegacyBeginMarker }; End = if ([string]::IsNullOrWhiteSpace([string]$WindoLegacyEndMarker)) { '# <<< WINDO-END <<<' } else { [string]$WindoLegacyEndMarker } }
+    )
+
     if (!(Test-Path -LiteralPath $Path)) {
         Write-Host "[windo uninstall] Profile not present: $Path" -ForegroundColor DarkGray
         if ($null -ne $script:CleanupSummary -and $script:CleanupSummary.PSObject.Properties.Name -contains "ProfileScanned") { $script:CleanupSummary.ProfileScanned++ }
@@ -170,10 +177,7 @@ function Remove-WindoProfileBlockFromPath {
 
     $removedAny = $false
     $updated = $text
-    foreach ($pair in @(
-            @{ Begin = $BeginMarker; End = $EndMarker },
-            @{ Begin = $WindoLegacyBeginMarker; End = $WindoLegacyEndMarker }
-        )) {
+    foreach ($pair in $markerPairs) {
         $pattern = "(?ms)" + [regex]::Escape($pair.Begin) + ".*?" + [regex]::Escape($pair.End) + "\r?\n?"
         if ($updated -match $pattern) {
             $updated = [regex]::Replace($updated, $pattern, "")
@@ -201,7 +205,6 @@ function Remove-WindoProfileBlockFromPath {
         }
     }
 
-    $updated = $updated -replace "(\r?\n){3,}", "`r`n`r`n"
     if ([string]::IsNullOrWhiteSpace($updated)) {
         if (Get-Command Write-Utf8NoBomFile -CommandType Function -ErrorAction SilentlyContinue) {
             Write-Utf8NoBomFile -Path $Path -Content ""
@@ -210,9 +213,9 @@ function Remove-WindoProfileBlockFromPath {
         }
     } else {
         if (Get-Command Write-Utf8NoBomFile -CommandType Function -ErrorAction SilentlyContinue) {
-            Write-Utf8NoBomFile -Path $Path -Content ($updated.TrimEnd() + "`r`n")
+            Write-Utf8NoBomFile -Path $Path -Content $updated
         } else {
-            [System.IO.File]::WriteAllText($Path, ($updated.TrimEnd() + "`r`n"), [Text.UTF8Encoding]::new($false))
+            [System.IO.File]::WriteAllText($Path, $updated, [Text.UTF8Encoding]::new($false))
         }
     }
     Write-Host "[windo uninstall] Removed WINDO block from profile: $Path" -ForegroundColor Green

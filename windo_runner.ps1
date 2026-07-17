@@ -240,6 +240,34 @@ function _windo_unprotect_text([string]$EncryptedText) {
     return _dpapi_unprotect $EncryptedText
 }
 
+function _dpapi_protect([string]$Text) {
+    $protectedDataType = [type]::GetType("System.Security.Cryptography.ProtectedData")
+    if ($null -eq $protectedDataType) {
+        return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([string]$Text))
+    }
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+        $enc = $protectedDataType::Protect(
+            $bytes, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+        )
+        return [Convert]::ToBase64String($enc)
+    } catch {
+        return $null
+    }
+}
+
+function _windo_build_artifact_payload([object]$Payload) {
+    if ($null -eq $Payload) { return $null }
+    try {
+        $json = $Payload | ConvertTo-Json -Depth 20 -Compress
+        $protected = _dpapi_protect $json
+        if ([string]::IsNullOrWhiteSpace($protected)) { return $null }
+        return [ordered]@{ Version = 1; Type = "dpapi-json"; Data = $protected }
+    } catch {
+        return $null
+    }
+}
+
 function _windo_resolve_preserve_environment([object]$Payload) {
     if ($null -eq $Payload) { return $null }
 
@@ -338,6 +366,19 @@ try {
         exit 0
     }
 
+    # Claim the queue item before reading or executing it. A timed-out client,
+    # a second UAC launch, or a runner restart must never see the same command
+    # as a fresh queued request. Rename is atomic within SecureDir.
+    $claimedPath = Join-Path $SecureDir ($req.Name -replace '^windo_req\.', 'windo_run.')
+    try {
+        Move-Item -LiteralPath $req.FullName -Destination $claimedPath -ErrorAction Stop
+        $req = Get-Item -LiteralPath $claimedPath -ErrorAction Stop
+        Write-RunnerTrace "CLAIMED: $($req.Name)"
+    } catch {
+        Write-RunnerTrace ("CLAIM FAILED: " + $_.Exception.Message)
+        exit 0
+    }
+
     try {
         $pendingRaw = Get-Content -Raw -Path $req.FullName
         $pending = _windo_resolve_artifact_payload $pendingRaw
@@ -404,7 +445,9 @@ try {
             OutputTruncated = $false
         }
         try {
-            $result | ConvertTo-Json -Compress | Write-TextFileAtomic -Path $outPath -Encoding (New-Object System.Text.UTF8Encoding($false))
+            $sealedResult = _windo_build_artifact_payload $result
+            if ($null -eq $sealedResult) { throw "Unable to secure validation result." }
+            $sealedResult | ConvertTo-Json -Compress | Write-TextFileAtomic -Path $outPath -Encoding (New-Object System.Text.UTF8Encoding($false))
         } catch {
             Write-RunnerTrace ("EXIT 4: failed to write validation result: $($_.Exception.Message)")
             try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".failed") -ErrorAction SilentlyContinue } catch {}
@@ -469,7 +512,9 @@ try {
     }
 
     try {
-        $result | ConvertTo-Json -Compress | Write-TextFileAtomic -Path $outPath -Encoding (New-Object System.Text.UTF8Encoding($false))
+        $sealedResult = _windo_build_artifact_payload $result
+        if ($null -eq $sealedResult) { throw "Unable to secure result." }
+        $sealedResult | ConvertTo-Json -Compress | Write-TextFileAtomic -Path $outPath -Encoding (New-Object System.Text.UTF8Encoding($false))
         Write-RunnerTrace "WROTE RESULT: ExitCode=$exitCode DurationMs=$durationMs TimedOut=$timedOut Truncated=$truncated"
     } catch {
         Write-RunnerTrace ("EXIT 4: failed to write result JSON: $($_.Exception.Message)")

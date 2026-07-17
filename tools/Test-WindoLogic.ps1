@@ -1912,7 +1912,15 @@ $repairStart = $installerSource.IndexOf("function Get-WindoProfileMarkerPairs", 
 $repairEnd = $installerSource.IndexOf("function Get-NoWindowActionArgs", $repairStart, [StringComparison]::Ordinal)
 Assert-Equal (($repairStart -ge 0 -and $repairEnd -gt $repairStart) -eq $true) $true "installer repair function can be extracted"
 if ($repairStart -ge 0 -and $repairEnd -gt $repairStart) {
-    Invoke-Expression $installerSource.Substring($repairStart, $repairEnd - $repairStart)
+    # Extract the dependent functions individually. The source region also
+    # contains installer-time initialization and the animated banner, neither
+    # of which belongs in this isolated repair test.
+    $repairFunctions = @(
+        (Get-WindoFunctionTextFromSource -Source $installerSource -Name "Get-WindoProfileMarkerPairs")
+        (Get-WindoFunctionTextFromSource -Source $installerSource -Name "Repair-WindoProfileTextForMarkerPair")
+        (Get-WindoFunctionTextFromSource -Source $installerSource -Name "Repair-WindoProfileText")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    Invoke-Expression ($repairFunctions -join "`r`n")
     $brokenProfile = "pre`r`n`"`r`n    if (!(Test-Path `$SecureDir)) { }`r`n    `$ProfileBlockBegin = `"$BeginMarker`"`r`n    `$ProfileBlockEnd = `"$EndMarker`"`r`n    Write-Host `"[windo] orphan`"`r`n$BeginMarker`r`nfunction windo { }`r`n$EndMarker`r`npost`r`n"
     Assert-Equal (Repair-WindoProfileText -Text $brokenProfile) "pre`r`npost`r`n" "profile repair removes orphan payload before valid bracket block"
     $legacyBrokenProfile = "pre`r`n$WindoLegacyBeginMarker`r`nfunction windo { }`r`n$WindoLegacyEndMarker`r`npost`r`n"
