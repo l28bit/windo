@@ -38,7 +38,7 @@ if (-not (Get-Command -Name wincmd -ErrorAction SilentlyContinue)) {
             return
         }
         Set-Item -Path ("Function:\global:" + $Name) -Value $ScriptBlock
-        Write-Verbose ("wincmd registered " + $Name + ($(if ($Description) { " - " + $Description } else { "" } ))
+        Write-Verbose ("wincmd registered " + $Name + ($(if ($Description) { " - " + $Description } else { "" } )))
     }
 }
 
@@ -614,7 +614,7 @@ $cmdNetcatSend = {
                     bytes = $lineBytes.Count
                     text = $Text
                     preview = (_netops_preview_bytes -Bytes $lineBytes -MaxChars 160)
-                    to = "$RemoteHost:$Port"
+                    to = "${RemoteHost}:$Port"
                 })
         }
 
@@ -1041,7 +1041,7 @@ $cmdSubnetScan = {
     $ips = _netops_expand_subnet -Cidr $Cidr -HostLimit $effectiveHostLimit
     $results = [System.Collections.ArrayList]@()
     foreach ($ip in @($ips)) {
-        [void]$results.Add(_netops_scan_host -IpAddress $ip -TimeoutSeconds $TimeoutSeconds)
+        [void]$results.Add((_netops_scan_host -IpAddress $ip -TimeoutSeconds $TimeoutSeconds))
     }
     return @($results)
 }
@@ -1149,7 +1149,7 @@ $cmdRdpVnc = {
         }
     }
 
-    if (-not _netops_is_admin) {
+    if (-not (_netops_is_admin)) {
         if ($Mode -eq 'apply') {
             throw "apply mode requires an elevated shell."
         }
@@ -1326,7 +1326,7 @@ $cmdRdpVnc = {
         }
         [void]$rows.Add($rdp)
     }
-    if ($vncEnabled) { [void]$rows.Add(_netops_vnc_status) }
+    if ($vncEnabled) { [void]$rows.Add((_netops_vnc_status)) }
     if ($rows.Count -gt 0) { return @($rows) }
 }
 

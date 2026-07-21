@@ -13,6 +13,7 @@ $destRoot = Join-Path $root ("versions\v{0}" -f $Version)
 $copyPairs = @(
     @{ Src = "windo_install.ps1"; Dst = "windo_install.ps1" }
     @{ Src = "windo_uninstall.ps1"; Dst = "windo_uninstall.ps1" }
+    @{ Src = "windo_heal.ps1"; Dst = "windo_heal.ps1" }
     @{ Src = "checksums\installer.sha256"; Dst = "checksums\installer.sha256" }
     @{ Src = "README.md"; Dst = "README.md" }
     @{ Src = "SECURITY.md"; Dst = "SECURITY.md" }

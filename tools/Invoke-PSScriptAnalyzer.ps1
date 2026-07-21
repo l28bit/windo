@@ -6,22 +6,14 @@ if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
 }
 $root = Split-Path $PSScriptRoot -Parent
 $files = @(
-    (Join-Path $root "bootstrap.ps1"),
-    (Join-Path $root "windo_install.ps1"),
-    (Join-Path $root "windo_uninstall.ps1"),
-    (Join-Path $root "windo_runner.ps1"),
-    (Join-Path $root "windo_self_update.ps1"),
-    (Join-Path $root "tools\Validate-Windo.ps1"),
-    (Join-Path $root "tools\build.ps1"),
-    (Join-Path $root "tools\Test-WindoLogic.ps1"),
-    (Join-Path $root "tools\Encode-ChildExec.ps1"),
-    (Join-Path $root "tools\Sync-VersionSnapshot.ps1"),
-    (Join-Path $root "tools\Invoke-PSScriptAnalyzer.ps1")
-)
+    @(Get-ChildItem -LiteralPath $root -File -Filter "*.ps1")
+    @(Get-ChildItem -LiteralPath (Join-Path $root "tools") -File -Filter "*.ps1")
+    @(Get-ChildItem -LiteralPath (Join-Path $root "src") -File -Recurse -Filter "*.ps1")
+    @(Get-ChildItem -LiteralPath (Join-Path $root "extras") -File -Recurse -Filter "*.ps1")
+) | Select-Object -ExpandProperty FullName -Unique | Sort-Object
 # Severity Error only: WINDO scripts intentionally use Write-Host, empty catch in hot paths, and UTF-8 no BOM.
 $allIssues = @()
 foreach ($f in $files) {
-    if (!(Test-Path -LiteralPath $f)) { continue }
     $allIssues += Invoke-ScriptAnalyzer -Path $f -Severity @("Error")
 }
 if ($allIssues.Count -gt 0) {

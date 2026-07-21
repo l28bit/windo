@@ -187,6 +187,7 @@ Assert-Equal ($null -eq (Test-WindoNormalizePublishedInstallerSha256 "nope")) $t
 Assert-Equal ($null -eq (Test-WindoNormalizePublishedInstallerSha256 "")) $true "normalize empty"
 
 $installerSource = Get-Content -Path (Join-Path $root "windo_install.ps1") -Raw
+$installerBytes = [System.IO.File]::ReadAllBytes((Join-Path $root "windo_install.ps1"))
 $runnerSource = Get-Content -Path (Join-Path $root "windo_runner.ps1") -Raw
 $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
@@ -194,7 +195,15 @@ $moduleSource = Get-Content -Path (Join-Path $root "extras\samples\network-ops\L
 $moduleManifest = Get-Content -Path (Join-Path $root "extras\samples\network-ops\module.json") -Raw
 $uninstallSource = Get-Content -Path (Join-Path $root "windo_uninstall.ps1") -Raw
 $selfUpdateSource = Get-Content -Path (Join-Path $root "windo_self_update.ps1") -Raw
+$healSource = Get-Content -Path (Join-Path $root "windo_heal.ps1") -Raw
 $syncScript = Join-Path $root "tools\Sync-InstallerChecksum.ps1"
+
+$networkOpsParseErrors = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $root "extras\samples\network-ops\Load.ps1"), [ref]$null, [ref]$networkOpsParseErrors)
+Assert-Equal (@($installerBytes | Where-Object { $_ -gt 0x7F }).Count -eq 0) $true "installer remains ASCII-only for Windows PowerShell compatibility"
+Assert-Equal $networkOpsParseErrors.Count 0 "network-ops module parses successfully"
+Assert-Equal ($moduleSource.Contains('to = "${RemoteHost}:$Port"')) $true "network-ops safely delimits host before port"
+Assert-Equal ($healSource -match '(?m)^\$HOME\s*=') $false "standalone healer does not overwrite PowerShell HOME"
 
 $installTaskMain = [regex]::Match($installerSource, '(?m)^\$TaskMain\s*=\s*"([^"]+)"')
 $installTaskUpdate = [regex]::Match($installerSource, '(?m)^\$TaskUpdate\s*=\s*"([^"]+)"')

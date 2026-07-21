@@ -1,9 +1,9 @@
 name: Validate PowerShell
 on:
   push:
-    branches: [ Genisis, main ]
+    branches: [ Exodus ]
   pull_request:
-    branches: [ Genisis, main ]
+    branches: [ Exodus ]
 jobs:
   validate:
     runs-on: windows-latest

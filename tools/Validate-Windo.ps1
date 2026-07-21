@@ -18,6 +18,11 @@ function Get-WindoPublishedTextFileSha256([string]$Path) {
     }
 }
 
+function Test-WindoAsciiSource([string]$Path) {
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    return (@($bytes | Where-Object { $_ -gt 0x7F }).Count -eq 0)
+}
+
 function Get-WindoChecksumManifest([string]$Content) {
     $manifest = @{}
     if ($null -eq $Content) { return $manifest }
@@ -111,18 +116,15 @@ function Test-WindoChecksumManifestMetadata {
 }
 
 $files = @(
-    "bootstrap.ps1",
-    "windo_install.ps1",
-    "windo_uninstall.ps1",
-    "windo_runner.ps1",
-    "windo_self_update.ps1",
-    "src\windo\snippets\StatsTimeFilter.ps1",
-    "src\windo\snippets\WindoConfigEffective.ps1"
-)
+    @(Get-ChildItem -LiteralPath $root -File -Filter "*.ps1")
+    @(Get-ChildItem -LiteralPath (Join-Path $root "tools") -File -Filter "*.ps1")
+    @(Get-ChildItem -LiteralPath (Join-Path $root "src") -File -Recurse -Filter "*.ps1")
+    @(Get-ChildItem -LiteralPath (Join-Path $root "extras") -File -Recurse -Filter "*.ps1")
+) | Select-Object -ExpandProperty FullName -Unique | Sort-Object
 $ok = $true
 $releaseTarget = Get-WindoReleaseTargetMeta
-foreach ($f in $files) {
-    $p = Join-Path $root $f
+foreach ($p in $files) {
+    $f = $p.Substring($root.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
     if (!(Test-Path $p)) { Write-Warning "Missing: $f"; $ok = $false; continue }
     $err = $null
     $null = [System.Management.Automation.Language.Parser]::ParseFile($p, [ref]$null, [ref]$err)
@@ -134,6 +136,20 @@ foreach ($f in $files) {
     } else {
         Write-Host "OK   $f" -ForegroundColor Green
     }
+}
+try {
+    $installerEncodingPath = Join-Path $root "windo_install.ps1"
+    if (Test-WindoAsciiSource -Path $installerEncodingPath) {
+        Write-Host "OK   windo_install.ps1 ASCII source" -ForegroundColor Green
+    } else {
+        Write-Host "FAIL windo_install.ps1 ASCII source" -ForegroundColor Red
+        Write-Host "The installer must remain ASCII-only so Windows PowerShell 5.1 parses it correctly without relying on encoding metadata."
+        $ok = $false
+    }
+} catch {
+    Write-Host "FAIL windo_install.ps1 ASCII source" -ForegroundColor Red
+    Write-Host "Could not inspect installer encoding: $($_.Exception.Message)"
+    $ok = $false
 }
 try {
     $installerPath = Join-Path $root "windo_install.ps1"
@@ -223,6 +239,12 @@ try {
 }
 
 try {
+    $currentBranch = $null
+    try {
+        $candidateBranch = (git -C $root rev-parse --abbrev-ref HEAD).Trim()
+        if ($candidateBranch -and $candidateBranch -ne "HEAD") { $currentBranch = $candidateBranch }
+    } catch {}
+
     $versionMatch = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $root "windo_install.ps1")), '\$WindoVersion\s*=\s*"(?<v>\d+\.\d+\.\d+)"')
     if ($versionMatch.Success) {
         $version = $versionMatch.Groups['v'].Value
@@ -280,9 +302,12 @@ try {
                 }
             }
         } else {
-            Write-Host "WARN versions/v$version/checksums/installer.sha256" -ForegroundColor Yellow
+            $snapshotStatus = if ($currentBranch -eq "Exodus") { "FAIL" } else { "WARN" }
+            $snapshotColor = if ($snapshotStatus -eq "FAIL") { "Red" } else { "Yellow" }
+            Write-Host "$snapshotStatus versions/v$version/checksums/installer.sha256" -ForegroundColor $snapshotColor
             Write-Host "No versions/v$version snapshot exists for this branch. Skipping snapshot checksum validation."
             Write-Host "Create it with ./tools/Sync-VersionSnapshot.ps1 -Version $version so future releases can validate installer payload parity."
+            if ($snapshotStatus -eq "FAIL") { $ok = $false }
         }
     }
 } catch {
