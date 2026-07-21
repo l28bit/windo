@@ -75,14 +75,14 @@ try {
     }
 
     $PwshwCmd = Get-Command "pwshw.exe" -ErrorAction SilentlyContinue
-    $escapedRunnerPath = $RunnerPath.Replace("'", "''")
+    $quotedRunnerPath = [char]34 + ([System.IO.Path]::GetFullPath($RunnerPath)) + [char]34
     if ($PwshwCmd) {
         $Exe = $PwshwCmd.Source
-        $Arg = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '$escapedRunnerPath'"
+        $Arg = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File $quotedRunnerPath"
         Write-Trace ("Using pwshw.exe: " + $Exe)
     } else {
         $Exe = "powershell.exe"
-        $Arg = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File '$escapedRunnerPath'"
+        $Arg = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $quotedRunnerPath"
         Write-Trace "Using powershell.exe hidden fallback"
     }
 

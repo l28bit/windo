@@ -186,9 +186,18 @@ function Write-ThinLoaderBlockToPath {
 # WINDO thin loader (profile block v$ProfileBlockVersion). Real logic lives in windo_runtime.ps1 (managed, updated on install-latest).
 `$__windoSecureDir = Join-Path `$HOME ".pwsh_secure"
 `$__windoRuntime = Join-Path `$__windoSecureDir "windo_runtime.ps1"
-if (Test-Path -LiteralPath `$__windoRuntime) {
-    try { . `$__windoRuntime } catch { Write-Warning ("[windo] runtime load failed: " + `$_.Exception.Message) }
-} else { Write-Warning "[windo] runtime not found at `$__windoRuntime -- run 'windo install-latest' from a normal shell." }
+`$__windoRuntimeCandidates = @(`$__windoRuntime, (Join-Path (Join-Path `$HOME "Documents") "windo\windo_runtime.ps1"))
+`$__windoRuntimeLoaded = `$false
+foreach (`$__windoCandidate in `$__windoRuntimeCandidates) {
+    if (`$__windoRuntimeLoaded -or -not (Test-Path -LiteralPath `$__windoCandidate)) { continue }
+    try {
+        . `$__windoCandidate
+        `$__windoRuntimeLoaded = `$true
+    } catch {
+        Write-Warning ("[windo] runtime load failed from " + `$__windoCandidate + ": " + `$_.Exception.Message)
+    }
+}
+if (-not `$__windoRuntimeLoaded) { Write-Warning "[windo] WINDO runtime is missing or invalid -- run 'windo heal --profile' or 'windo install-latest' from a normal shell." }
 # WINDO-MANAGED-BLOCK: END
 # [[ WINDO-END ]]
 "@

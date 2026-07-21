@@ -216,6 +216,8 @@ Assert-Equal ($selfUpdateSource.Contains('__RUNNER_PATH__')) $true "self-update 
 Assert-Equal ($selfUpdateSource.Contains('__STAMP_FILE__')) $true "self-update template uses stamp file token for installer replacement"
 Assert-Equal ($selfUpdateSource.Contains('__USER_ID__')) $true "self-update template uses user token for installer replacement"
 Assert-Equal (($selfUpdateSource.Contains('<user>') -or $selfUpdateSource.Contains('DOMAIN\User')) ) $false "self-update template has no legacy placeholder values"
+Assert-Equal ($installerSource.Contains('_windo_runner_task_action_healthy') -and $installerSource.Contains('_windo_start_direct_elevated_runner')) $true "runtime has direct UAC runner fallback"
+Assert-Equal ($bootstrapSource.Contains('Get-WindoBootstrapPublishedBlobSha1')) $true "bootstrap raw fallback can retrieve GitHub blob attestation"
 Assert-Equal ($installerRegisterTaskCount -ge 2) $true "installer registers both WindoElevatedRunner and WindoSelfUpdate"
 
 $parseManifestFn = Get-WindoFunctionTextFromSource -Source $installerSource -Name "_windo_parse_manifest_value"
@@ -1059,15 +1061,13 @@ if ($noWindowActionFn) {
     Assert-Pattern $noWindowAction.Argument '-NoProfile' "task action includes -NoProfile"
     Assert-Pattern $noWindowAction.Argument '-NonInteractive' "task action includes -NonInteractive"
     $quotedSampleRunner = '"' + $sampleRunner + '"'
-    $singleQuotedSampleRunner = "'" + $sampleRunner + "'"
-    Assert-State "task action quotes runner script path" $true (($noWindowAction.Argument -like "*$quotedSampleRunner*") -or ($noWindowAction.Argument -like "*$singleQuotedSampleRunner*")) "task action quotes runner script path"
+    Assert-State "task action uses native-safe double quotes" $true ($noWindowAction.Argument -like "*$quotedSampleRunner*") "single-quoted -File paths fail under scheduled-task process launch"
     $spacedRunner = Join-Path ([IO.Path]::GetTempPath()) "windo-task-action-spaces\windo runner.ps1"
     New-Item -ItemType Directory -Path (Split-Path $spacedRunner) -Force | Out-Null
     New-Item -ItemType File -Path $spacedRunner -Force | Out-Null
     $spacedNoWindowAction = Get-NoWindowActionArgs -ScriptPath $spacedRunner
     $quotedSpacedRunner = '"' + $spacedRunner + '"'
-    $singleQuotedSpacedRunner = "'" + $spacedRunner + "'"
-    Assert-State "task action quotes spaced runner path" $true (($spacedNoWindowAction.Argument -like "*$quotedSpacedRunner*") -or ($spacedNoWindowAction.Argument -like "*$singleQuotedSpacedRunner*")) "task action quotes spaced runner path"
+    Assert-State "task action double-quotes spaced runner path" $true ($spacedNoWindowAction.Argument -like "*$quotedSpacedRunner*") "spaced runner paths must use native-safe double quotes"
     Remove-Item -Path (Split-Path $spacedRunner) -Recurse -Force -ErrorAction SilentlyContinue
 } else {
     Assert-Equal $false $true "installer exposes task action builder"
@@ -1446,9 +1446,13 @@ if ($generatedFunctionBody -and $generatedPsReadLineBlock -and $generatedComplet
 # WINDO thin loader (profile block v4). Real logic lives in windo_runtime.ps1 (managed, updated on install-latest).
 $__windoSecureDir = Join-Path $HOME ".pwsh_secure"
 $__windoRuntime = Join-Path $__windoSecureDir "windo_runtime.ps1"
-if (Test-Path -LiteralPath $__windoRuntime) {
-    try { . $__windoRuntime } catch { Write-Warning ("[windo] runtime load failed: " + $_.Exception.Message) }
-} else { Write-Warning "[windo] runtime not found" }
+$__windoRuntimeCandidates = @($__windoRuntime, (Join-Path (Join-Path $HOME "Documents") "windo\windo_runtime.ps1"))
+$__windoRuntimeLoaded = $false
+foreach ($__windoCandidate in $__windoRuntimeCandidates) {
+    if ($__windoRuntimeLoaded -or -not (Test-Path -LiteralPath $__windoCandidate)) { continue }
+    try { . $__windoCandidate; $__windoRuntimeLoaded = $true } catch { Write-Warning ("[windo] runtime load failed: " + $_.Exception.Message) }
+}
+if (-not $__windoRuntimeLoaded) { Write-Warning "[windo] runtime not found or invalid" }
 # WINDO-MANAGED-BLOCK: END
 # [[ WINDO-END ]]
 '@
@@ -1908,7 +1912,15 @@ $repairStart = $installerSource.IndexOf("function Get-WindoProfileMarkerPairs", 
 $repairEnd = $installerSource.IndexOf("function Get-NoWindowActionArgs", $repairStart, [StringComparison]::Ordinal)
 Assert-Equal (($repairStart -ge 0 -and $repairEnd -gt $repairStart) -eq $true) $true "installer repair function can be extracted"
 if ($repairStart -ge 0 -and $repairEnd -gt $repairStart) {
-    Invoke-Expression $installerSource.Substring($repairStart, $repairEnd - $repairStart)
+    # Extract the dependent functions individually. The source region also
+    # contains installer-time initialization and the animated banner, neither
+    # of which belongs in this isolated repair test.
+    $repairFunctions = @(
+        (Get-WindoFunctionTextFromSource -Source $installerSource -Name "Get-WindoProfileMarkerPairs")
+        (Get-WindoFunctionTextFromSource -Source $installerSource -Name "Repair-WindoProfileTextForMarkerPair")
+        (Get-WindoFunctionTextFromSource -Source $installerSource -Name "Repair-WindoProfileText")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    Invoke-Expression ($repairFunctions -join "`r`n")
     $brokenProfile = "pre`r`n`"`r`n    if (!(Test-Path `$SecureDir)) { }`r`n    `$ProfileBlockBegin = `"$BeginMarker`"`r`n    `$ProfileBlockEnd = `"$EndMarker`"`r`n    Write-Host `"[windo] orphan`"`r`n$BeginMarker`r`nfunction windo { }`r`n$EndMarker`r`npost`r`n"
     Assert-Equal (Repair-WindoProfileText -Text $brokenProfile) "pre`r`npost`r`n" "profile repair removes orphan payload before valid bracket block"
     $legacyBrokenProfile = "pre`r`n$WindoLegacyBeginMarker`r`nfunction windo { }`r`n$WindoLegacyEndMarker`r`npost`r`n"
