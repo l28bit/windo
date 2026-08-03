@@ -11,10 +11,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Built-in "profile" repair lane in midflightfuel/heal (lighter than full reinstall).
 
 ### Changed / Reliability
+- **Bootstrap verification is fail-closed**: published SHA256 mismatches are fatal, checksum-source failures require commit-pinned Git blob attestation, and strict verification errors are no longer swallowed.
+- **Reliable installer elevation handoff**: paths containing spaces are quoted as one native argument line; interactive CI/automation flags still request UAC, while headless sessions fail instead of reporting a partial install.
+- **Caller shell survives the README one-liner**: `iex (irm ...)` returns with `$global:WINDO_EXIT_CODE`; direct `-File` execution retains native process exit codes.
+- **Exact elevated invocation contract**: `windo [global options] -- <target> [args...]` preserves target option-looking tokens and built-in name collisions, while caller host, working directory, stdout/stderr, and exit code cross the elevation boundary.
+- **Per-user runner isolation**: task and mutex names are SID-scoped; legacy tasks are removed only when ownership and action checks prove they belong to the current user.
+- **Fail-closed request protection and bounded termination**: DPAPI resolution no longer falls back to plaintext Base64, queued requests are not pruned behind long jobs, and timeouts terminate the child process tree with bounded stream draining.
+- **Verified install success**: profile activation and success output require Add-Type, the full ScheduledTasks command surface, and a healthy highest-runlevel task for the current SID.
+- **Deterministic release hashes**: `.gitattributes` pins release artifacts to LF and checksum tooling hashes the exact LF text domain published by GitHub, independent of Windows checkout settings.
+- **Cross-host release signatures**: checksum manifests default to deterministic `RSA-PKCS1-SHA256`, which verifies on Windows PowerShell 5.1 and PowerShell 7; schema and declared padding are enforced consistently offline and at runtime.
 - **Installer banner safe transfer**: installer motion no longer writes banner text char-by-char or stacks inline `>` glyphs (pulse/forge/burst). Token-based boot lines and bracket-style forge frames avoid PSReadLine/console transfer failures on sensitive hosts.
 - **Profile block markers v4**: managed profile blocks now use `# [[ WINDO-BEGIN ]]` / `# [[ WINDO-END ]]` instead of `>>>…<<<` markers. Repair/uninstall/heal still recognize and remove legacy `>>>…<<<` blocks.
 - **Thin profile loader (v3 contract)**: $PROFILE now receives only a tiny loader that dots `windo_runtime.ps1`. Old inlined bloat is stripped on next upgrade. This is the primary defense against WINDO "breaking users' PowerShell profiles".
-- **No more failed-to-validate hash on download (default path)**: API-fetched installers are primarily attested by GitHub's content blob SHA returned at fetch time. Checksum manifest mismatches become advisory when the blob attests the bytes. Raw fallbacks still enforce checksums. Strict mode still honors attestation for recovery.
+- **Commit-pinned download integrity**: API-fetched installers are attested by GitHub's content blob SHA and checked against the checksum manifest from the same resolved commit. Manifest mismatches are never advisory.
 - Expanded preflight -> heal suggestions (profile-block issues now suggest `windo heal --profile`).
 - Heal script and runtime are snapshotted and included in manifest for integrity posture.
 
