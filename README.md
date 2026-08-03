@@ -25,11 +25,12 @@ Release source contract:
 ---
 
 ## What's new in WINDO V8.5.9
-- **Banner-safe installer transfer** — installer status and motion output now uses token-based lines and bracket-style frames, avoiding console/PSReadLine failures from character-by-character banner rendering or repeated `>` glyphs.
+- **Fail-closed bootstrap verification** — a published checksum mismatch is now always fatal. If the manifest endpoint is temporarily unavailable, bootstrap continues only when the downloaded bytes match the commit-pinned GitHub blob object.
+- **Reliable UAC handoff** — installer paths containing spaces are quoted as one native argument line, interactive automation flags no longer suppress required elevation, and headless bootstrap refuses to report a partial install as successful.
+- **Caller-shell safety** — the recommended `iex (irm ...)` bootstrap returns control to the current shell and publishes `$global:WINDO_EXIT_CODE`; direct `-File` invocation still returns a native process exit code.
 - **Thin profile loader contract** — the managed block injected into `$PROFILE` is now a tiny stable loader (~10 lines) that dots `windo_runtime.ps1` from `.pwsh_secure`. The full implementation no longer lives in your personal profile. Old bloated blocks are automatically stripped on upgrade. This eliminates profile parse failures and bloat caused by WINDO.
-- **Profile marker migration** — new managed blocks use `# [[ WINDO-BEGIN ]]` / `# [[ WINDO-END ]]`; existing legacy marker blocks are still removed during upgrade, repair, and uninstall.
 - **Runtime decoupling** — `windo_runtime.ps1` (and snapshot) now carries the command surface, keybindings, completer, module/profile.d loaders. Profile updates are minimal and safe.
-- **Hash validation healers** — API-sourced installer downloads are now primarily attested via GitHub content blob SHA (no separate checksum fetch required for trust). Checksum drift is advisory when source-attested. Raw fallbacks still use checksums. "Failed to validate hash" should no longer occur on standard (API) download paths.
+- **Hash validation healers** — API-sourced installer downloads are commit-pinned and attested by GitHub content blob SHA. Published checksum mismatches are never treated as advisory.
 - **Built-in healers finalized** — `windo midflightfuel` and preflight now use lighter "profile" repair lane (writes thin loader safely with backup+guard). Added `windo heal` surface and a standalone `%USERPROFILE%\.pwsh_secure\windo_heal.ps1` that can repair profiles and run curated fixes even if the profile block is missing/broken. Midflightfuel is now more operational for common recovery without full reinstall.
 
 ## What's new in WINDO V8.5
@@ -74,15 +75,15 @@ WINDO does **not** bypass Windows security boundaries; it uses a controlled elev
 
 ## Install / Update
 
-- **Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1), saves `windo_install.ps1` to a **temp file**, verifies its checksum when published on the configured tracking source (or overridden via `WINDO_TRACKING_BRANCH` / `WINDO_RELEASE_COMMIT`), then starts it from the temp file. The **full installer is not** piped through `Invoke-Expression`. The temp file is removed afterward.
+- **Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1), resolves one release commit, saves `windo_install.ps1` to a **temp file**, and requires an exact match against that commit's published checksum. If the manifest endpoint is temporarily unavailable, the commit-pinned Git blob identity is the only automatic fallback. The **full installer is not** piped through `Invoke-Expression`. The temp file is removed afterward.
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1)
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1')
 ```
 
-Use a **standard (non-elevated)** session for bootstrap handoff. If you need strict install verification in automated `install-latest`/`upgrade` flows, pair `WINDO_STRICT_INSTALLER_VERIFICATION=1` with `windo install-latest --force --non-interactive` or `WINDO_INSTALL_NONINTERACTIVE=1`.
+Use a **standard (non-elevated), interactive** session for bootstrap handoff and approve the UAC prompt. Automation flags skip confirmation; they do not weaken checksum validation or the required elevation handoff. Headless automation should fetch and verify the release in an unprivileged stage, then run the trusted local installer from its controlled elevated stage.
 
-**Upgrade from any installed v2.x / v3.x:** with WINDO loaded in your profile, run **`windo install-latest`** from a **normal (non-elevated)** window. The installer is **not** downloaded while Administrator (avoids high-privilege fetch). After checksum verification you get a **prompt** before the installer runs; in interactive sessions WINDO then requests **UAC elevation** so scheduled tasks and secure-dir ACL work can complete. Use **`windo install-latest --force`** or **`WINDO_INSTALL_NONINTERACTIVE=1`** in CI/automation.
+**Upgrade from any installed v2.x / v3.x:** with WINDO loaded in your profile, run **`windo install-latest`** from a **normal (non-elevated)** window. The installer is **not** downloaded while Administrator (avoids high-privilege fetch). After checksum verification you get a **prompt** before the installer runs; WINDO then requests **UAC elevation** so scheduled tasks and secure-dir ACL work can complete. `--force` or `WINDO_INSTALL_NONINTERACTIVE=1` skips confirmation only; it does not make a headless session capable of completing UAC.
 
 ```powershell
 windo install-latest
@@ -92,14 +93,15 @@ windo install-latest
 
 After answering the installer confirmation prompt, WINDO performs a one-shot elevated handoff attempt (UAC) to complete runner/task registration and secure-dir updates.
 
-If elevation is blocked, use one of these recovery commands from a normal shell:
+If elevation is blocked, retry from a normal shell and approve UAC. For an existing installation, load the profile before invoking `windo`:
 
 ```powershell
-Start-Process pwsh.exe -Verb RunAs -ArgumentList '-NoProfile','-Command','windo install-latest'
+. $PROFILE
+windo install-latest
 windo self-update
 ```
 
-**Bootstrap** (`iex (irm …/bootstrap.ps1)`): same rule—**do not run from an elevated shell**; the script exits with instructions. After download it is prompted before launch (or set **`WINDO_BOOTSTRAP_FORCE_INSTALL=1`** / **`WINDO_INSTALL_NONINTERACTIVE=1`** / **`CI`** for unattended).
+**Bootstrap** (`iex (irm …/bootstrap.ps1)`): same rule—**do not run from an elevated shell**. The script returns to the caller and sets `$global:WINDO_EXIT_CODE`; direct `pwsh -File bootstrap.ps1` invocation returns the same native exit code. After verification it prompts before launch. **`WINDO_BOOTSTRAP_FORCE_INSTALL=1`**, **`WINDO_INSTALL_NONINTERACTIVE=1`**, and **`CI=1`** skip only the confirmation prompt; an interactive UAC handoff is still required for a complete install.
 
 ## Troubleshooting install/update and verification behavior
 
@@ -121,28 +123,23 @@ If you see an old/foreign prompt (for example `Input content`) while running ins
 
 - Check `SUDO_PROMPT`: `Get-Item Env:SUDO_PROMPT` and clear it if set.
 - Rerun from a clean, non-elevated PowerShell session.
-- In automation, use `windo install-latest --force` or `WINDO_INSTALL_NONINTERACTIVE=1` instead of manually answering legacy prompts.
+- In an interactive automation host, `windo install-latest --force` or `WINDO_INSTALL_NONINTERACTIVE=1` skips confirmation but still requires UAC. Headless jobs need the two-stage verified-download/local-elevated-install flow described above.
 - `windo self-update`:
-  - starts the `WindoSelfUpdate` task,
+  - starts the current user's SID-scoped `WindoSelfUpdate-<identity-scope>` task,
   - prompts for installer repair when task state is missing or blocked,
   - skips the repair prompt in non-interactive mode and returns a repair recommendation.
 - `windo self-update --dry-run` prints planned repair/task start only and does not execute.
 
 ### Hash and strict-mode behavior
 
-- Default behavior is compatibility mode: checksum validation runs when checksums are available and continues on most drift paths after warnings.
-- Set `WINDO_STRICT_INSTALLER_VERIFICATION=1` to require strict installer checks instead of compatibility-path warnings. In strict mode, checksum, source, and branch mismatches (including checksum-source failures) are treated as hard failures instead of warnings.
-- `WINDO_SKIP_INSTALLER_SHA256=1` disables installer checksum checks in both bootstrap and upgrade/install flows.
+- Bootstrap fails closed on every published checksum mismatch. It may use the commit-pinned GitHub blob identity only when a checksum source is temporarily unavailable.
+- `windo install-latest` / `upgrade` retain `WINDO_STRICT_INSTALLER_VERIFICATION=1` for callers that require all source and metadata fallbacks to fail closed.
+- `WINDO_SKIP_INSTALLER_SHA256=1` is an explicit emergency override that disables installer checksum checks. Do not use it in normal installation or automation.
 
 ### Known limitations
 
-- Compatibility paths are accepted as warnings in non-strict mode:
-  - GitHub blob SHA1 match to object hash,
-  - snapshot checksum match for the same version,
-  - checksum-source fetch or parsing failures that still have a valid fallback path,
-  - release metadata/branch drift.
-- In strict mode, those compatibility paths fail the install path.
-- Bootstrap can fail early in strict mode when the published checksum source is unavailable or unparseable.
+- The README one-liner requires Windows PowerShell 5.1+ or PowerShell 7 on Windows 10+ and access to GitHub API/raw endpoints.
+- A truly headless session cannot approve UAC. Use a two-stage automation flow with unprivileged download/verification and a trusted local elevated install stage.
 
 Or use the bootstrap one-liner above, or run `.\windo_install.ps1` from a clone. There is no version gate: the installer replaces the WINDO profile block and refreshes secure-dir artifacts.
 
@@ -263,6 +260,16 @@ Append **`--json`** or **`-Json`** to supported commands for structured output. 
 
 Append **`--dry-run`** (or **`-DryRun`**) on elevated commands or `windo replay` / `windo !!` to print what would run **without** starting the task, writing req/res files, or appending the audit log. **`windo self-update --dry-run`** prints that the update task would be started only.
 
+For an external elevated command, **`--` is the exact-argv boundary**. WINDO consumes global options only before that boundary and forwards every token after it—including `--json`, `--dry-run`, `-n`, `-E`, `--timeout`, empty strings, and names that collide with WINDO built-ins—to the target. Prefer this form in scripts:
+
+```powershell
+windo -- whoami.exe /all
+windo -- pwsh.exe -NoProfile -File .\maintenance.ps1 --json
+windo -- winget.exe install --id Git.Git --exact
+```
+
+Elevated targets run in a fresh, no-profile, non-interactive PowerShell child. WINDO preserves the caller's supported PowerShell host, current filesystem working directory, argv, stdout/stderr, and exit code. It does **not** forward stdin or a console/TTY, so prompts, password entry, full-screen programs, profile-only aliases/functions, and interactive installers are unsupported; pass input through arguments or files.
+
 ### V8.4 example commands
 
 These show the safer defaults and explicit options introduced for network scanning and container handoff:
@@ -313,7 +320,8 @@ Representative `windo net-scan ping` JSON payload (safe default `hostLimit=254`,
 }
 ```
 
-Global sudo-like flags for elevated commands can be placed before the command:
+Global sudo-like flags for elevated commands must be placed before the command or exact-argv boundary:
+
 - `--non-interactive` (or `-n`) to avoid install confirmation prompts for `install-latest` in automation
 - `--preserve-env` (or `-E`) to pass selected env vars into the elevated child
 - `--timeout` (or `-t`) to set a per-command runner timeout override (`10`, `10s`, `500ms`)
@@ -408,7 +416,7 @@ Optional **modules** and **extras** (v3.2+): [`docs/modules-and-extras.md`](docs
 | `WINDO_MOTION` | **v4.2.0+** Override saved motion policy for the current process: `auto`, `on`, `quiet`, or `off`. |
 | `WINDO_RUNNER_TIMEOUT_MS` | Max wait for the elevated child process (default **7200000** ms = 2 h; max **86400000**). |
 | `WINDO_RUNNER_MAX_OUTPUT_BYTES` | Approximate cap on captured stdout+stderr (default **4194304**; split per stream in the runner). |
-| `WINDO_MAX_COMMAND_CHARS` | Max length of the command line passed to `cmd.exe` (default **8191**). |
+| `WINDO_MAX_COMMAND_CHARS` | Max length of the validated display and encoded PowerShell execution commands (default **8191**). |
 | `WINDO_TRACKING_BRANCH` | Override tracking branch used for installer source checks (default `Exodus`). |
 | `WINDO_RELEASE_COMMIT` | Optional pinned 40-hex commit hash for release artifact lookups (`bootstrap.ps1`, `windo_install.ps1`). |
 | `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the configured branch (`bootstrap.ps1`, **`windo install-latest`** / **`upgrade`**). |
@@ -421,8 +429,8 @@ Optional **modules** and **extras** (v3.2+): [`docs/modules-and-extras.md`](docs
 | `WINDO_DISABLE_PSREADLINE_BINDINGS` | Set to `1`/`true` to disable WINDO keybindings for the session. |
 | `WINDO_AUTO_DETECT_ALT_BINDINGS` | Set to `0`/`false` to disable automatic fallback for Alt-based chords (default: enabled). |
 | `WINDO_KEYBINDING_FALLBACK_CHORD` | Alternate chord to fallback to when automatic Alt detection cannot keep `Alt+*` usable. Default: `Alt+;`. |
-| `WINDO_INSTALL_NONINTERACTIVE` | **v3.1.1+** If set, **`windo install-latest`** runs the downloaded installer **without** an interactive confirmation (for CI; use with care). |
-| `WINDO_BOOTSTRAP_FORCE_INSTALL` | **v3.1.1+** If set, **`bootstrap.ps1`** launches the installer **without** **`Read-Host`** after download (CI / scripts). |
+| `WINDO_INSTALL_NONINTERACTIVE` | Skips the install-latest confirmation prompt. It does not suppress required elevation or make headless UAC possible. |
+| `WINDO_BOOTSTRAP_FORCE_INSTALL` | Skips bootstrap's `Read-Host` confirmation. It does not suppress required elevation or make headless UAC possible. |
 
 **Automation exit codes (`$global:WINDO_EXIT_CODE`):** set after **`windo doctor`**, **`windo integrity`**, and **`windo verify`** (also exposed as **`exitCode`** in JSON payloads where applicable).
 

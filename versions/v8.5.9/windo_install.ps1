@@ -34,8 +34,38 @@ $WindoBuiltinVerbs = @(
     'do', 'upd', 'recdo', 'dr'
 )
 $WindoBuiltinVerbsArrayLiteral = ($WindoBuiltinVerbs | ForEach-Object { "'$_'" }) -join ','
+function Get-WindoCurrentIdentitySid {
+    try {
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        if ($identity -and $identity.User -and -not [string]::IsNullOrWhiteSpace([string]$identity.User.Value)) {
+            return [string]$identity.User.Value
+        }
+    } catch { }
+    return $null
+}
+
+function Get-WindoIdentityScopeToken {
+    $sid = Get-WindoCurrentIdentitySid
+    if (-not [string]::IsNullOrWhiteSpace($sid)) { return ($sid -replace '[^A-Za-z0-9_-]', '_') }
+
+    # Windows should always expose a SID. Keep a deterministic full-account
+    # fallback for constrained test/recovery hosts without collapsing domains.
+    $account = "$env:USERDOMAIN\$env:USERNAME"
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($account.ToLowerInvariant())
+        $hex = -join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("X2") })
+        return "ACCOUNT-$($hex.Substring(0, 16))"
+    } finally { $sha.Dispose() }
+}
+
 $TaskMain     = "WindoElevatedRunner"
 $TaskUpdate   = "WindoSelfUpdate"
+$LegacyTaskMain = $TaskMain
+$LegacyTaskUpdate = $TaskUpdate
+$WindoIdentityScopeToken = Get-WindoIdentityScopeToken
+$TaskMain = "$TaskMain-$WindoIdentityScopeToken"
+$TaskUpdate = "$TaskUpdate-$WindoIdentityScopeToken"
 
 $SecureDir    = Join-Path $HOME ".pwsh_secure"
 $RunnerPath   = Join-Path $SecureDir "windo_runner.ps1"
@@ -75,15 +105,38 @@ $script:WindoScheduledTasksAvailable = $false
 $script:WindoWindowsFormsDrawingAvailable = $false
 $script:WindoInstallMotionEnabled = $null
 
-function Get-WindoRuntimeProfile {
-    $isWindows = $null -ne $IsWindows -and [bool]$IsWindows
-    if (-not $isWindows) {
-        try {
-            $isWindows = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
-        } catch {
-            $isWindows = $false
+function Get-WindoRequiredScheduledTaskCommands {
+    return @(
+        "Get-ScheduledTask",
+        "Register-ScheduledTask",
+        "Unregister-ScheduledTask",
+        "Set-ScheduledTask",
+        "Start-ScheduledTask",
+        "New-ScheduledTaskAction",
+        "New-ScheduledTaskPrincipal",
+        "New-ScheduledTaskSettingsSet"
+    )
+}
+
+function Get-WindoMissingScheduledTaskCommands {
+    $missing = [System.Collections.Generic.List[string]]::new()
+    foreach ($commandName in @(Get-WindoRequiredScheduledTaskCommands)) {
+        if ($null -eq (Get-Command $commandName -ErrorAction SilentlyContinue)) {
+            [void]$missing.Add($commandName)
         }
     }
+    return @($missing.ToArray())
+}
+
+function Get-WindoRuntimeProfile {
+    # $IsWindows exists only in PowerShell 6+. Resolve it without referencing an
+    # undefined variable so Windows PowerShell 5.1 remains valid under strict mode.
+    $isWindows = $false
+    try { $isWindows = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT } catch { }
+    try {
+        $isWindowsVariable = Get-Variable -Name IsWindows -ErrorAction SilentlyContinue
+        if ($null -ne $isWindowsVariable) { $isWindows = [bool]$isWindowsVariable.Value }
+    } catch { }
 
     $osVersion = $null
     try { $osVersion = [System.Environment]::OSVersion.Version } catch { }
@@ -92,11 +145,13 @@ function Get-WindoRuntimeProfile {
     try { $psVersion = [version]$PSVersionTable.PSVersion } catch { }
 
     $addTypeCapable = $true
+    $addTypeError = $null
     try {
         $probeType = "__WindoHostProbe_" + [guid]::NewGuid().ToString("N")
         Add-Type -TypeDefinition "public static class $probeType {}" -ErrorAction Stop | Out-Null
     } catch {
         $addTypeCapable = $false
+        $addTypeError = $_.Exception.Message
     }
 
     $languageMode = "Unknown"
@@ -104,6 +159,7 @@ function Get-WindoRuntimeProfile {
 
     $supportsBackgroundJobs = [bool](Get-Command Start-Job -ErrorAction SilentlyContinue)
     $supportsWebCmdlets = [bool](Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue) -and [bool](Get-Command Invoke-RestMethod -ErrorAction SilentlyContinue)
+    $missingScheduledTaskCommands = @(Get-WindoMissingScheduledTaskCommands)
 
     $windowsFormsDrawingAvailable = $false
     if ($isWindows) {
@@ -121,8 +177,10 @@ function Get-WindoRuntimeProfile {
         IsWindows10OrLater = if ($null -ne $osVersion) { $osVersion.Major -ge 10 } else { $false }
         IsPowerShellSupported = if ($null -ne $psVersion) { $psVersion -ge [version]'5.1' } else { $false }
         PSVersion = if ($null -ne $psVersion) { [string]$psVersion } else { "unknown" }
-        ScheduledTasksAvailable = [bool](Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)
+        ScheduledTasksAvailable = ($missingScheduledTaskCommands.Count -eq 0)
+        MissingScheduledTaskCommands = @($missingScheduledTaskCommands)
         AddTypeCapable = [bool]$addTypeCapable
+        AddTypeError = $addTypeError
         WindowsFormsDrawingAvailable = [bool]$windowsFormsDrawingAvailable
         LanguageMode = [string]$languageMode
         SupportsBackgroundJobs = [bool]$supportsBackgroundJobs
@@ -146,7 +204,7 @@ function Assert-WindoHostCompatibility {
         throw "WINDO installer requires PowerShell 5.1+."
     }
     if ($profile.LanguageMode -ne "FullLanguage") {
-        Write-WindoInstallStep -Status warn -Label "Constrained language mode" -Detail "Installer will keep to supported command paths for constrained hosts."
+        throw "WINDO installer requires FullLanguage mode so its required Add-Type bridge can be compiled. Current language mode: $($profile.LanguageMode)."
     }
     if (-not $profile.SupportsWebCmdlets) {
         throw "WINDO installer requires Invoke-WebRequest and Invoke-RestMethod."
@@ -157,10 +215,12 @@ function Assert-WindoHostCompatibility {
 
     $script:WindoScheduledTasksAvailable = $profile.ScheduledTasksAvailable
     if (-not $script:WindoScheduledTasksAvailable) {
-        Write-WindoInstallStep -Status warn -Label "ScheduledTasks module missing" -Detail "Proceeding with best-effort non-task mode."
+        $missing = @($profile.MissingScheduledTaskCommands) -join ", "
+        throw "WINDO installer requires the complete Windows ScheduledTasks command surface. Missing: $missing. Run from Windows PowerShell 5.1 or PowerShell 7 on Windows with the ScheduledTasks module available."
     }
     if (-not $profile.AddTypeCapable) {
-        Write-WindoInstallStep -Status warn -Label "CSharp compilation blocked" -Detail "Runner features will be limited; some elevated execution paths can be degraded."
+        $detail = if ([string]::IsNullOrWhiteSpace([string]$profile.AddTypeError)) { "Add-Type probe failed." } else { [string]$profile.AddTypeError }
+        throw "WINDO installer requires Add-Type to compile its child-process bridge. Check PowerShell language mode, WDAC/AppLocker policy, and .NET availability. $detail"
     }
     if (-not $profile.WindowsFormsDrawingAvailable) {
         Write-WindoInstallStep -Status warn -Label "Windows Forms unavailable" -Detail "Native GUI surfaces (tray/panel/studio) will be disabled."
@@ -177,6 +237,44 @@ function Assert-WindoScheduledTasksAvailable {
     if (-not $script:WindoScheduledTasksAvailable) {
         throw "Scheduled task cmdlets are unavailable in this session; elevated task automation is disabled."
     }
+}
+
+function Assert-WindoInstallSuccessGate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][object]$RuntimeProfile,
+        [Parameter(Mandatory=$true)][bool]$ScheduledTasksReady,
+        [Parameter(Mandatory=$true)][AllowNull()][object]$MainTaskHealth
+    )
+
+    $failures = [System.Collections.Generic.List[string]]::new()
+    $runtimeProperties = @($RuntimeProfile.PSObject.Properties.Name)
+    if ($runtimeProperties -notcontains "AddTypeCapable" -or -not [bool]$RuntimeProfile.AddTypeCapable) {
+        [void]$failures.Add("required Add-Type capability is unavailable")
+    }
+    if (-not $ScheduledTasksReady) {
+        [void]$failures.Add("required ScheduledTasks capabilities are unavailable")
+    }
+
+    if ($null -eq $MainTaskHealth) {
+        [void]$failures.Add("the main elevated task was not verified")
+    } else {
+        $healthProperties = @($MainTaskHealth.PSObject.Properties.Name)
+        if ($healthProperties -notcontains "healthy" -or -not [bool]$MainTaskHealth.healthy) {
+            $detail = if ($healthProperties -contains "details" -and -not [string]::IsNullOrWhiteSpace([string]$MainTaskHealth.details)) {
+                [string]$MainTaskHealth.details
+            } else {
+                "health verification failed"
+            }
+            [void]$failures.Add("the main elevated task is unhealthy: $detail")
+        }
+    }
+
+    if ($failures.Count -gt 0) {
+        throw ("WINDO installation did not complete; the PowerShell profile was not activated. " + ($failures -join "; ") + ". Approve the bootstrap UAC handoff or run the verified installer from an elevated PowerShell session.")
+    }
+
+    return $true
 }
 
 function Get-WindoEditionLabel {
@@ -278,7 +376,7 @@ function Write-WindoInstallerPulse {
 
     if (-not (Test-WindoInstallerMotionEnabled)) { return }
 
-    # Avoid stacked '>' glyphs - they break PSReadLine / console inline transfers on some hosts.
+    # Avoid stacked '>' glyphs — they break PSReadLine / console inline transfers on some hosts.
     $glyphs = @('sudo', 'sudo/', 'sudo//', 'sudo///', 'WIN+', 'UAC+', 'ACL+', 'TASK+', 'AUDIT+')
     $oldCursor = $true
     try { $oldCursor = [Console]::CursorVisible; [Console]::CursorVisible = $false } catch { }
@@ -310,12 +408,12 @@ function Write-WindoInstallerPowerRail {
     if (-not (Test-WindoInstallerMotionEnabled)) { return }
 
     $frames = @(
-        "LINUX sudo    [#...........] WINDOWS UAC",
-        "LINUX sudo    [###.........] WINDOWS UAC",
-        "LINUX sudo    [#####.......] WINDOWS UAC",
-        "LINUX sudo    [#######.....] WINDOWS UAC",
-        "LINUX sudo    [#########...] WINDOWS UAC",
-        "LINUX sudo    [############] WINDOWS UAC"
+        "LINUX sudo    [■□□□□□□□□□□□] WINDOWS UAC",
+        "LINUX sudo    [■■■□□□□□□□□□] WINDOWS UAC",
+        "LINUX sudo    [■■■■■□□□□□□□] WINDOWS UAC",
+        "LINUX sudo    [■■■■■■■□□□□□] WINDOWS UAC",
+        "LINUX sudo    [■■■■■■■■■□□□] WINDOWS UAC",
+        "LINUX sudo    [■■■■■■■■■■■■] WINDOWS UAC"
     )
     $oldCursor = $true
     try { $oldCursor = [Console]::CursorVisible; [Console]::CursorVisible = $false } catch { }
@@ -362,7 +460,7 @@ function Write-WindoInstallerForge {
                     2 { " [[[ task broker ]]]" }
                     default { "[[[[ audit chain ]]]]" }
                 }
-                $line = ("{0}  {1}  {2}" -f ($left -join " - "), $core, ($right -join " - "))
+                $line = ("{0}  {1}  {2}" -f ($left -join " · "), $core, ($right -join " · "))
                 $padded = "  {0,-132}" -f $line
                 if (-not (Write-WindoInstallerInlineStatus -Text ("`r{0}" -f $padded) -Color DarkCyan -ClearWidth $clearWidth)) {
                     Write-Host $padded -ForegroundColor DarkCyan
@@ -468,7 +566,7 @@ function Write-WindoInstallerFrameLine {
         [ConsoleColor]$Color = [ConsoleColor]::DarkGray,
         [int]$Width = 72
     )
-    Write-Host ("  | {0,-$Width} |" -f $Text) -ForegroundColor $Color
+    Write-Host ("  ║ {0,-$Width} ║" -f $Text) -ForegroundColor $Color
 }
 
 function Write-WindoInstallerSignalBar {
@@ -492,15 +590,15 @@ function Write-WindoInstallerCapabilityDeck {
         @{ Icon = "ops"; Title = "Command Plane"; Detail = "admin/responder ready" }
     )
 
-    Write-Host "     +---------------------- WINDO SUDO CONTROL DECK ----------------------+" -ForegroundColor DarkCyan
+    Write-Host "     ╭────────────────────── WINDO SUDO CONTROL DECK ──────────────────────╮" -ForegroundColor DarkCyan
     for ($i = 0; $i -lt $cards.Count; $i += 2) {
         $left = $cards[$i]
         $right = $cards[$i + 1]
-        Write-Host ("     | [{0,-4}] {1,-16} {2,-28} |" -f $left.Icon, $left.Title, $left.Detail) -ForegroundColor Cyan
-        Write-Host ("     | [{0,-4}] {1,-16} {2,-28} |" -f $right.Icon, $right.Title, $right.Detail) -ForegroundColor Green
+        Write-Host ("     │ [{0,-4}] {1,-16} {2,-28} │" -f $left.Icon, $left.Title, $left.Detail) -ForegroundColor Cyan
+        Write-Host ("     │ [{0,-4}] {1,-16} {2,-28} │" -f $right.Icon, $right.Title, $right.Detail) -ForegroundColor Green
         if (Test-WindoInstallerMotionEnabled) { Start-Sleep -Milliseconds 45 }
     }
-    Write-Host "     +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
+    Write-Host "     ╰──────────────────────────────────────────────────────────────────────╯" -ForegroundColor DarkCyan
 }
 
 function Write-WindoInstallerUseBrief {
@@ -511,15 +609,15 @@ function Write-WindoInstallerUseBrief {
         @{ Mark = "SAFE"; Text = "no silent elevation, privilege drift, or secret dumping"; Color = [ConsoleColor]::DarkGray }
     )
 
-    Write-Host "     +---------------------- WHAT YOU ARE ABOUT TO USE ---------------------+" -ForegroundColor Cyan
+    Write-Host "     ╭────────────────────── WHAT YOU ARE ABOUT TO USE ─────────────────────╮" -ForegroundColor Cyan
     foreach ($line in $lines) {
-        Write-Host ("     | {0,-5} {1,-61} |" -f $line.Mark, $line.Text) -ForegroundColor $line.Color
+        Write-Host ("     │ {0,-5} {1,-61} │" -f $line.Mark, $line.Text) -ForegroundColor $line.Color
         if (Test-WindoInstallerMotionEnabled) { Start-Sleep -Milliseconds 40 }
     }
-    Write-Host "     +---------------------------- EXAMPLE FLOW ----------------------------+" -ForegroundColor DarkCyan
-    Write-Host "     | windo do -- ipconfig /all                                           |" -ForegroundColor Green
-    Write-Host "     | windo pkg install <tool>     windo doctor     windo verify          |" -ForegroundColor DarkGray
-    Write-Host "     +----------------------------------------------------------------------+" -ForegroundColor Cyan
+    Write-Host "     ├──────────────────────────── EXAMPLE FLOW ────────────────────────────┤" -ForegroundColor DarkCyan
+    Write-Host "     │ windo do -- ipconfig /all                                           │" -ForegroundColor Green
+    Write-Host "     │ windo pkg install <tool>     windo doctor     windo verify          │" -ForegroundColor DarkGray
+    Write-Host "     ╰──────────────────────────────────────────────────────────────────────╯" -ForegroundColor Cyan
 }
 
 function Write-WindoEditionBanner {
@@ -534,7 +632,7 @@ function Write-WindoEditionBanner {
     }
 
     Write-Host ""
-    Write-Host "  +==========================================================================+" -ForegroundColor Cyan
+    Write-Host "  ╔══════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
     $logo = @(
         " __        _____ _   _ ____   ___",
         " \ \      / /_ _| \ | |  _ \ / _ \",
@@ -547,31 +645,31 @@ function Write-WindoEditionBanner {
         Write-WindoInstallerFrameLine -Text $line -Color White -Width 72
         if ($motion) { Start-Sleep -Milliseconds 28 }
     }
-    Write-Host "  +==========================================================================+" -ForegroundColor Cyan
+    Write-Host "  ╠══════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
     Write-WindoInstallerFrameLine -Text ("WINDO {0} {1} :: {2}" -f $WindoVersion, (Get-WindoEditionLabel), $Phase.ToUpperInvariant()) -Color White -Width 72
     Write-WindoInstallerFrameLine -Text "Linux sudo muscle memory, rebuilt for Windows elevation boundaries" -Color Cyan -Width 72
     Write-WindoInstallerFrameLine -Text "secure tasks | audit chain | ACL hardening | operator command plane" -Color DarkGray -Width 72
-    Write-Host "  +==========================================================================+" -ForegroundColor Cyan
+    Write-Host "  ╠══════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
     Write-WindoInstallerFrameLine -Text "sudo -> consent -> scheduled task broker -> elevated result -> audit" -Color Green -Width 72
     Write-WindoInstallerFrameLine -Text "no silent privilege jump; every boundary stays intentional and visible" -Color DarkGray -Width 72
     Write-WindoInstallerFrameLine -Text "operator prompt feel, enterprise-grade traceability underneath" -Color DarkCyan -Width 72
-    Write-Host "  +==========================================================================+" -ForegroundColor Cyan
+    Write-Host "  ╚══════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
     if ($motion) {
         Write-WindoInstallerBootLine "     [sudo] intent captured     [windows] elevation broker armed     [audit] chain online" -Color Green -DelayMs 5
         Write-WindoInstallerSignalBar -Items @(
-            "+- sudo muscle memory, Windows-safe execution",
-            "+- hardened runner files under the current user's secure directory",
-            "+- scheduled task boundary for deliberate elevation",
-            "+- command output returns to the operator without shell auto-elevation",
-            "+- local audit trail stays readable and verifiable"
+            "╭─ sudo muscle memory, Windows-safe execution",
+            "├─ hardened runner files under the current user's secure directory",
+            "├─ scheduled task boundary for deliberate elevation",
+            "├─ command output returns to the operator without shell auto-elevation",
+            "╰─ local audit trail stays readable and verifiable"
         )
     } else {
         Write-WindoInstallerSignalBar -Items @(
-            "+- sudo muscle memory, Windows-safe execution",
-            "+- hardened runner files under the current user's secure directory",
-            "+- scheduled task boundary for deliberate elevation",
-            "+- command output returns to the operator without shell auto-elevation",
-            "+- local audit trail stays readable and verifiable"
+            "╭─ sudo muscle memory, Windows-safe execution",
+            "├─ hardened runner files under the current user's secure directory",
+            "├─ scheduled task boundary for deliberate elevation",
+            "├─ command output returns to the operator without shell auto-elevation",
+            "╰─ local audit trail stays readable and verifiable"
         )
     }
     Write-Host ""
@@ -626,19 +724,19 @@ function Write-WindoInstallerFinale {
         Start-Sleep -Milliseconds 850
 
         $graphic = @(
-            "        +------------ SECURE INTENT ------------+",
-            "        |  operator intent  ->  consent gate    |",
-            "        |        locked broker / audited path   |",
-            "        +---------------+----------------------+",
-            "                        |",
-            "                 +======+======+",
-            "                 |   WINDO     |",
-            "                 |  ELEVATION  |",
-            "                 +======+======+",
-            "                        |",
-            "        +---------------+----------------------+",
-            "        | elevated execution -> captured result |",
-            "        +------------ AUDIT VERIFIED -----------+"
+            "        ╭──────────── SECURE INTENT ────────────╮",
+            "        │  operator intent  ->  consent gate    │",
+            "        │        locked broker / audited path   │",
+            "        ╰───────────────┬──────────────────────╯",
+            "                        │",
+            "                 ╔══════╧══════╗",
+            "                 ║   WINDO     ║",
+            "                 ║  ELEVATION  ║",
+            "                 ╚══════╤══════╝",
+            "                        │",
+            "        ╭───────────────┴──────────────────────╮",
+            "        │ elevated execution -> captured result │",
+            "        ╰──────────── AUDIT VERIFIED ───────────╯"
         )
         foreach ($line in $graphic) {
             Write-Host $line -ForegroundColor DarkCyan
@@ -916,6 +1014,22 @@ function Get-WindoFileHash {
     (Get-FileHash -Path $Path -Algorithm SHA256).Hash
 }
 
+function Test-WindoTaskPrincipalIsCurrentUser([object]$PrincipalUserId) {
+    if ([string]::IsNullOrWhiteSpace([string]$PrincipalUserId)) { return $false }
+    $currentSid = Get-WindoCurrentIdentitySid
+    if (-not [string]::IsNullOrWhiteSpace($currentSid)) {
+        try {
+            $actualSid = if ([string]$PrincipalUserId -match '^[sS]-\d-(?:\d+-)+\d+$') {
+                ([System.Security.Principal.SecurityIdentifier]::new([string]$PrincipalUserId)).Value
+            } else {
+                ([System.Security.Principal.NTAccount]::new([string]$PrincipalUserId)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+            }
+            return ([string]$actualSid -ieq [string]$currentSid)
+        } catch { return $false }
+    }
+    return ([string]$PrincipalUserId -ieq "$env:USERDOMAIN\$env:USERNAME")
+}
+
 function Get-WindoScheduledTask {
     param([Parameter(Mandatory=$true)][string]$TaskName)
     Assert-WindoScheduledTasksAvailable
@@ -958,9 +1072,14 @@ function New-WindoScheduledTaskPrincipal {
 }
 
 function New-WindoScheduledTaskSettingsSet {
-    param([switch]$StartWhenAvailable, [switch]$AllowStartIfOnBatteries, [switch]$DontStopIfGoingOnBatteries)
+    param(
+        [switch]$StartWhenAvailable,
+        [switch]$AllowStartIfOnBatteries,
+        [switch]$DontStopIfGoingOnBatteries,
+        [string]$MultipleInstances = "IgnoreNew"
+    )
     Assert-WindoScheduledTasksAvailable
-    New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances $MultipleInstances
 }
 
 function _windo_normalize_task_field {
@@ -983,9 +1102,24 @@ function _windo_task_user_matches {
     $expectedNorm = _windo_normalize_task_field $Expected
     if ($actualNorm -ieq $expectedNorm) { return $true }
 
-    $actualLeaf = if ($actualNorm -match '\\') { ($actualNorm -split '\\')[-1] } else { $actualNorm }
-    $expectedLeaf = if ($expectedNorm -match '\\') { ($expectedNorm -split '\\')[-1] } else { $expectedNorm }
-    return (-not [string]::IsNullOrWhiteSpace($actualLeaf)) -and ($actualLeaf -ieq $expectedLeaf)
+    # Task Scheduler can return DOMAIN\user, UPN, or a SID. Resolve both
+    # complete identities to SIDs; never compare username leaves because the
+    # same leaf can belong to different domains or local accounts.
+    try {
+        $actualSid = if ($actualNorm -match '^s-\d-(?:\d+-)+\d+$') {
+            ([System.Security.Principal.SecurityIdentifier]::new($Actual)).Value
+        } else {
+            ([System.Security.Principal.NTAccount]::new($Actual)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+        }
+        $expectedSid = if ($expectedNorm -match '^s-\d-(?:\d+-)+\d+$') {
+            ([System.Security.Principal.SecurityIdentifier]::new($Expected)).Value
+        } else {
+            ([System.Security.Principal.NTAccount]::new($Expected)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+        }
+        return (-not [string]::IsNullOrWhiteSpace([string]$actualSid)) -and ([string]$actualSid -ieq [string]$expectedSid)
+    } catch {
+        return $false
+    }
 }
 
 function _windo_get_task_setting_bool {
@@ -1032,8 +1166,8 @@ function Test-WindoScheduledTaskHealth {
         if (-not $result.enabled) { $issues.Add("task is disabled or state is unknown") }
 
         $actions = $task.Actions
-        if ($null -eq $actions -or $actions.Count -eq 0) {
-            $issues.Add("task has no actions")
+        if ($null -eq $actions -or @($actions).Count -ne 1) {
+            $issues.Add("task must have exactly one action")
         } else {
             $action = @($actions | Select-Object -First 1)
             if ($null -eq $action -or $action.Count -eq 0) {
@@ -1055,6 +1189,10 @@ function Test-WindoScheduledTaskHealth {
                 $result.principalMatch = $false
                 $issues.Add("task run-level is not Highest")
             }
+            if ([string]$task.Principal.LogonType -ne "Interactive") {
+                $result.principalMatch = $false
+                $issues.Add("task logon type is not Interactive")
+            }
         } else {
             $issues.Add("task principal is missing")
         }
@@ -1064,10 +1202,12 @@ function Test-WindoScheduledTaskHealth {
             $startWhenAvailable = [bool]$settings.StartWhenAvailable
             $allowOnBatteries = _windo_get_task_setting_bool -Settings $settings -AllowName "AllowStartIfOnBatteries" -DisallowName "DisallowStartIfOnBatteries"
             $dontStopOnBatteries = _windo_get_task_setting_bool -Settings $settings -AllowName "DontStopIfGoingOnBatteries" -DisallowName "StopIfGoingOnBatteries"
-            $result.settingsMatch = $startWhenAvailable -and $allowOnBatteries -and $dontStopOnBatteries
+            $multipleInstances = [string]$settings.MultipleInstances
+            $result.settingsMatch = $startWhenAvailable -and $allowOnBatteries -and $dontStopOnBatteries -and ($multipleInstances -eq "IgnoreNew")
             if (-not $startWhenAvailable) { $issues.Add("StartWhenAvailable is false") }
             if (-not $allowOnBatteries) { $issues.Add("AllowStartIfOnBatteries is false") }
             if (-not $dontStopOnBatteries) { $issues.Add("DontStopIfGoingOnBatteries is false") }
+            if ($multipleInstances -ne "IgnoreNew") { $issues.Add("MultipleInstances is not IgnoreNew") }
         } else {
             $issues.Add("task settings block is missing")
         }
@@ -1086,17 +1226,49 @@ function Test-WindoScheduledTaskHealth {
     return [pscustomobject]$result
 }
 
-Write-WindoInstallStep -Status run -Label "Loading ScheduledTasks module" -Detail "required for the elevated runner and self-update tasks"
-Import-Module ScheduledTasks -ErrorAction Stop
-$script:WindoScheduledTasksAvailable = [bool](
-    (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) -and
-    (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) -and
-    (Get-Command New-ScheduledTaskAction -ErrorAction SilentlyContinue)
-)
-if (-not $script:WindoScheduledTasksAvailable) {
-    throw "ScheduledTasks module imported, but required scheduled task cmdlets are unavailable."
+function Remove-WindoOwnedLegacyScheduledTask {
+    param(
+        [Parameter(Mandatory=$true)][string]$LegacyTaskName,
+        [Parameter(Mandatory=$true)][string]$ScopedTaskName,
+        [Parameter(Mandatory=$true)][string]$ExpectedUserId,
+        [Parameter(Mandatory=$true)][string]$ExpectedExecute,
+        [Parameter(Mandatory=$true)][string]$ExpectedArgument
+    )
+    if ($LegacyTaskName -ieq $ScopedTaskName) { return "not-applicable" }
+    try {
+        $task = Get-WindoScheduledTask -TaskName $LegacyTaskName
+    } catch { return "missing" }
+
+    $actions = @($task.Actions)
+    $owned = (
+        $null -ne $task.Principal -and
+        (_windo_task_user_matches -Actual ([string]$task.Principal.UserId) -Expected $ExpectedUserId) -and
+        $actions.Count -eq 1 -and
+        (_windo_normalize_task_field ([string]$actions[0].Execute)) -eq (_windo_normalize_task_field $ExpectedExecute) -and
+        (_windo_normalize_task_field ([string]$actions[0].Arguments)) -eq (_windo_normalize_task_field $ExpectedArgument)
+    )
+    if (-not $owned) {
+        Write-Warning "WINDO: Preserving foreign or mismatched legacy task '$LegacyTaskName'."
+        return "foreign"
+    }
+    Unregister-WindoScheduledTask -TaskName $LegacyTaskName
+    return "removed"
 }
+
+Write-WindoInstallStep -Status run -Label "Loading ScheduledTasks module" -Detail "required for the elevated runner and self-update tasks"
+try {
+    Import-Module ScheduledTasks -ErrorAction Stop
+} catch {
+    throw "WINDO installation requires the Windows ScheduledTasks module and cannot continue before profile activation. $($_.Exception.Message)"
+}
+$missingScheduledTaskCommands = @(Get-WindoMissingScheduledTaskCommands)
+$script:WindoScheduledTasksAvailable = ($missingScheduledTaskCommands.Count -eq 0)
+if (-not $script:WindoScheduledTasksAvailable) {
+    throw "ScheduledTasks module imported, but required commands are unavailable: $($missingScheduledTaskCommands -join ', ')."
+}
+$installerRuntimeProfile = Assert-WindoHostCompatibility
 Write-WindoInstallStep -Status ok -Label "ScheduledTasks module ready" -Color Green
+Write-WindoInstallStep -Status ok -Label "Required Add-Type bridge capability ready" -Color Green
 Write-WindoInstallStep -Status run -Label "Hardening secure directory" -Detail $SecureDir
 Ensure-DirLockedToCurrentUser -Path $SecureDir
 Write-WindoInstallStep -Status ok -Label "Secure directory ready" -Color Green
@@ -1108,51 +1280,107 @@ $SecureDir  = Join-Path $HOME ".pwsh_secure"
 $RunnerLast = Join-Path $SecureDir "windo_runner_last.txt"
 $MutexName  = "Global\WindoRunnerMutex"
 
-function Write-TextFileAtomic {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true)][string]$Path,
-        [Parameter(ValueFromPipeline=$true)][AllowNull()][string]$Content,
-        [System.Text.Encoding]$Encoding = ([System.Text.UTF8Encoding]::new($false))
-    )
-    begin { $chunks = [System.Collections.Generic.List[string]]::new() }
-    process { if ($null -ne $Content) { [void]$chunks.Add([string]$Content) } }
-    end {
-        $dir = Split-Path -Parent $Path
-        if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        $tmpDir = if ($dir) { $dir } else { (Get-Location).Path }
-        $tmp = Join-Path $tmpDir (".tmp-" + [Guid]::NewGuid().ToString("n") + ".tmp")
-        try {
-            [System.IO.File]::WriteAllText($tmp, (($chunks -join [Environment]::NewLine)), $Encoding)
-            Move-Item -LiteralPath $tmp -Destination $Path -Force
-        } catch {
-            if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
-            throw
+function Get-WindoRunnerCurrentIdentitySid {
+    try {
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        if ($identity -and $identity.User -and -not [string]::IsNullOrWhiteSpace([string]$identity.User.Value)) {
+            return [string]$identity.User.Value
         }
+    } catch { }
+    return $null
+}
+
+function Get-WindoRunnerIdentityScopeToken {
+    $sid = Get-WindoRunnerCurrentIdentitySid
+    if (-not [string]::IsNullOrWhiteSpace($sid)) { return ($sid -replace '[^A-Za-z0-9_-]', '_') }
+    $account = "$env:USERDOMAIN\$env:USERNAME"
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($account.ToLowerInvariant())
+        $hex = -join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("X2") })
+        return "ACCOUNT-$($hex.Substring(0, 16))"
+    } finally { $sha.Dispose() }
+}
+
+$MutexName = "$MutexName-$(Get-WindoRunnerIdentityScopeToken)"
+
+function New-WindoRunnerMutex {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][ref]$CreatedNew
+    )
+    return New-Object System.Threading.Mutex($false, $Name, $CreatedNew)
+}
+
+function Release-WindoRunnerMutex {
+    param([Parameter(Mandatory = $true)]$Mutex)
+    try { $Mutex.ReleaseMutex() } catch {}
+}
+
+function Close-WindoRunnerMutex {
+    param([Parameter(Mandatory = $true)]$Mutex)
+    try { $Mutex.Dispose() } catch {}
+}
+
+function Write-TextFileAtomic {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Content,
+        [Parameter()][System.Text.Encoding]$Encoding = (New-Object System.Text.UTF8Encoding($false))
+    )
+    $dir = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($dir) -and !(Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $tmp = Join-Path $dir (".windo_tmp_" + [Guid]::NewGuid().ToString("n") + ".tmp")
+    try {
+        [System.IO.File]::WriteAllText($tmp, $Content, $Encoding)
+        Move-Item -LiteralPath $tmp -Destination $Path -Force
+    } finally {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
     }
 }
 
-function _dpapi_protect([string]$s) {
-    $protectedDataType = [type]::GetType("System.Security.Cryptography.ProtectedData")
-    if ($null -eq $protectedDataType) {
-        return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([string]$s))
+function Write-RunnerTrace {
+    param([string]$Message, [switch]$Overwrite)
+    if ($Overwrite) {
+        Write-TextFileAtomic -Path $RunnerLast -Content $Message -Encoding (New-Object System.Text.UTF8Encoding($false))
+    } else {
+        $Message | Add-Content -Path $RunnerLast -Encoding UTF8
     }
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($s)
-    $enc = $protectedDataType::Protect(
-        $bytes, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+}
+
+function Invoke-WindoRunnerChildExec {
+    param(
+        [Parameter(Mandatory = $true)][string]$PowerShellPath,
+        [Parameter(Mandatory = $true)][string]$CommandLine,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][int]$TimeoutMs,
+        [Parameter(Mandatory = $true)][int]$MaxCharsPerStream,
+        [Parameter(Mandatory = $true)]$StdOut,
+        [Parameter(Mandatory = $true)]$StdErr,
+        [Parameter(Mandatory = $true)]$TimedOut,
+        [Parameter(Mandatory = $true)]$Truncated,
+        [Parameter(Mandatory = $true)]$ExitCode
     )
-    [Convert]::ToBase64String($enc)
+    [WindoRunner.ChildExec]::RunPowerShell($PowerShellPath, $CommandLine, $WorkingDirectory, $TimeoutMs, $MaxCharsPerStream, $StdOut, $StdErr, $TimedOut, $Truncated, $ExitCode)
 }
 
 if (-not ("WindoRunner.ChildExec" -as [type])) {
     $cs = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(
-        'dXNpbmcgU3lzdGVtOwp1c2luZyBTeXN0ZW0uRGlhZ25vc3RpY3M7CnVzaW5nIFN5c3RlbS5JTzsKdXNpbmcgU3lzdGVtLlRleHQ7CnVzaW5nIFN5c3RlbS5UaHJlYWRpbmcuVGFza3M7CgpuYW1lc3BhY2UgV2luZG9SdW5uZXIKewogICAgcHVibGljIHN0YXRpYyBjbGFzcyBDaGlsZEV4ZWMKICAgIHsKICAgICAgICBwdWJsaWMgc3RhdGljIHN0cmluZyBSZWFkU3RyZWFtVG9NYXgoU3RyZWFtUmVhZGVyIHIsIGludCBtYXhDaGFycywgUHJvY2VzcyBwKQogICAgICAgIHsKICAgICAgICAgICAgdmFyIHNiID0gbmV3IFN0cmluZ0J1aWxkZXIoKTsKICAgICAgICAgICAgdmFyIGJ1ZiA9IG5ldyBjaGFyWzgxOTJdOwogICAgICAgICAgICBpbnQgdG90YWwgPSAwOwogICAgICAgICAgICB3aGlsZSAodG90YWwgPCBtYXhDaGFycykKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgaW50IG4gPSByLlJlYWQoYnVmLCAwLCBNYXRoLk1pbihidWYuTGVuZ3RoLCBtYXhDaGFycyAtIHRvdGFsKSk7CiAgICAgICAgICAgICAgICBpZiAobiA8PSAwKSBicmVhazsKICAgICAgICAgICAgICAgIHNiLkFwcGVuZChidWYsIDAsIG4pOwogICAgICAgICAgICAgICAgdG90YWwgKz0gbjsKICAgICAgICAgICAgfQogICAgICAgICAgICBpZiAodG90YWwgPj0gbWF4Q2hhcnMpCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIHRyeSB7IGlmICghcC5IYXNFeGl0ZWQpIHAuS2lsbCgpOyB9IGNhdGNoIHsgfQogICAgICAgICAgICAgICAgdHJ5IHsgcC5XYWl0Rm9yRXhpdCgxNTAwMCk7IH0gY2F0Y2ggeyB9CiAgICAgICAgICAgIH0KICAgICAgICAgICAgcmV0dXJuIHNiLlRvU3RyaW5nKCk7CiAgICAgICAgfQoKICAgICAgICBwdWJsaWMgc3RhdGljIHZvaWQgUnVuQ21kKAogICAgICAgICAgICBzdHJpbmcgYXJndW1lbnRzLAogICAgICAgICAgICBpbnQgdGltZW91dE1zLAogICAgICAgICAgICBpbnQgbWF4Q2hhcnNQZXJTdHJlYW0sCiAgICAgICAgICAgIG91dCBzdHJpbmcgc3Rkb3V0LAogICAgICAgICAgICBvdXQgc3RyaW5nIHN0ZGVyciwKICAgICAgICAgICAgb3V0IGJvb2wgdGltZWRPdXQsCiAgICAgICAgICAgIG91dCBib29sIHRydW5jYXRlZCwKICAgICAgICAgICAgb3V0IGludCBleGl0Q29kZSkKICAgICAgICB7CiAgICAgICAgICAgIHRpbWVkT3V0ID0gZmFsc2U7CiAgICAgICAgICAgIHRydW5jYXRlZCA9IGZhbHNlOwogICAgICAgICAgICBleGl0Q29kZSA9IDE7CiAgICAgICAgICAgIHN0ZG91dCA9ICIiOwogICAgICAgICAgICBzdGRlcnIgPSAiIjsKICAgICAgICAgICAgdmFyIHBzaSA9IG5ldyBQcm9jZXNzU3RhcnRJbmZvKCk7CiAgICAgICAgICAgIHBzaS5GaWxlTmFtZSA9ICJjbWQuZXhlIjsKICAgICAgICAgICAgcHNpLkFyZ3VtZW50cyA9ICIvYyAiICsgYXJndW1lbnRzOwogICAgICAgICAgICBwc2kuUmVkaXJlY3RTdGFuZGFyZE91dHB1dCA9IHRydWU7CiAgICAgICAgICAgIHBzaS5SZWRpcmVjdFN0YW5kYXJkRXJyb3IgPSB0cnVlOwogICAgICAgICAgICBwc2kuVXNlU2hlbGxFeGVjdXRlID0gZmFsc2U7CiAgICAgICAgICAgIHBzaS5DcmVhdGVOb1dpbmRvdyA9IHRydWU7CiAgICAgICAgICAgIHVzaW5nICh2YXIgcCA9IFByb2Nlc3MuU3RhcnQocHNpKSkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgdmFyIHRPdXQgPSBUYXNrLlJ1bigoKSA9PiBSZWFkU3RyZWFtVG9NYXgocC5TdGFuZGFyZE91dHB1dCwgbWF4Q2hhcnNQZXJTdHJlYW0sIHApKTsKICAgICAgICAgICAgICAgIHZhciB0RXJyID0gVGFzay5SdW4oKCkgPT4gUmVhZFN0cmVhbVRvTWF4KHAuU3RhbmRhcmRFcnJvciwgbWF4Q2hhcnNQZXJTdHJlYW0sIHApKTsKICAgICAgICAgICAgICAgIGJvb2wgZmluaXNoZWQgPSBwLldhaXRGb3JFeGl0KHRpbWVvdXRNcyk7CiAgICAgICAgICAgICAgICBpZiAoIWZpbmlzaGVkKQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIHRpbWVkT3V0ID0gdHJ1ZTsKICAgICAgICAgICAgICAgICAgICB0cnkgeyBpZiAoIXAuSGFzRXhpdGVkKSBwLktpbGwoKTsgfSBjYXRjaCB7IH0KICAgICAgICAgICAgICAgICAgICB0cnkgeyBwLldhaXRGb3JFeGl0KDE1MDAwKTsgfSBjYXRjaCB7IH0KICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIHN0ZG91dCA9IHRPdXQuUmVzdWx0OwogICAgICAgICAgICAgICAgc3RkZXJyID0gdEVyci5SZXN1bHQ7CiAgICAgICAgICAgICAgICBpZiAoc3Rkb3V0Lkxlbmd0aCA+PSBtYXhDaGFyc1BlclN0cmVhbSB8fCBzdGRlcnIuTGVuZ3RoID49IG1heENoYXJzUGVyU3RyZWFtKQogICAgICAgICAgICAgICAgICAgIHRydW5jYXRlZCA9IHRydWU7CiAgICAgICAgICAgICAgICB0cnkKICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICBleGl0Q29kZSA9IHAuSGFzRXhpdGVkID8gcC5FeGl0Q29kZSA6IC0xOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgY2F0Y2gKICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICBleGl0Q29kZSA9IC0xOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgaWYgKHRpbWVkT3V0KQogICAgICAgICAgICAgICAgICAgIGV4aXRDb2RlID0gLTE7CiAgICAgICAgICAgIH0KICAgICAgICB9CiAgICB9Cn0K'
-    ))
+        'dXNpbmcgU3lzdGVtOwp1c2luZyBTeXN0ZW0uRGlhZ25vc3RpY3M7CnVzaW5nIFN5c3RlbS5JTzsKdXNpbmcgU3lzdGVtLlJ1bnRpbWUuSW50ZXJvcFNlcnZpY2VzOwp1c2luZyBTeXN0ZW0uVGV4dDsKdXNpbmcgU3lzdGVtLlRocmVhZGluZzsKdXNpbmcgU3lzdGVtLlRocmVhZGluZy5UYXNrczsKCm5hbWVzcGFjZSBXaW5kb1J1bm5lcgp7CiAgICBwdWJsaWMgc3RhdGljIGNsYXNzIENoaWxkRXhlYwogICAgewogICAgICAgIFtEbGxJbXBvcnQoImtlcm5lbDMyLmRsbCIsIENoYXJTZXQgPSBDaGFyU2V0LlVuaWNvZGUsIFNldExhc3RFcnJvciA9IHRydWUpXQogICAgICAgIHByaXZhdGUgc3RhdGljIGV4dGVybiBJbnRQdHIgQ3JlYXRlSm9iT2JqZWN0KEludFB0ciBqb2JBdHRyaWJ1dGVzLCBzdHJpbmcgbmFtZSk7CgogICAgICAgIFtEbGxJbXBvcnQoImtlcm5lbDMyLmRsbCIsIFNldExhc3RFcnJvciA9IHRydWUpXQogICAgICAgIFtyZXR1cm46IE1hcnNoYWxBcyhVbm1hbmFnZWRUeXBlLkJvb2wpXQogICAgICAgIHByaXZhdGUgc3RhdGljIGV4dGVybiBib29sIEFzc2lnblByb2Nlc3NUb0pvYk9iamVjdChJbnRQdHIgam9iLCBJbnRQdHIgcHJvY2Vzcyk7CgogICAgICAgIFtEbGxJbXBvcnQoImtlcm5lbDMyLmRsbCIsIFNldExhc3RFcnJvciA9IHRydWUpXQogICAgICAgIFtyZXR1cm46IE1hcnNoYWxBcyhVbm1hbmFnZWRUeXBlLkJvb2wpXQogICAgICAgIHByaXZhdGUgc3RhdGljIGV4dGVybiBib29sIFRlcm1pbmF0ZUpvYk9iamVjdChJbnRQdHIgam9iLCB1aW50IGV4aXRDb2RlKTsKCiAgICAgICAgW0RsbEltcG9ydCgia2VybmVsMzIuZGxsIiwgU2V0TGFzdEVycm9yID0gdHJ1ZSldCiAgICAgICAgW3JldHVybjogTWFyc2hhbEFzKFVubWFuYWdlZFR5cGUuQm9vbCldCiAgICAgICAgcHJpdmF0ZSBzdGF0aWMgZXh0ZXJuIGJvb2wgU2V0SW5mb3JtYXRpb25Kb2JPYmplY3QoCiAgICAgICAgICAgIEludFB0ciBqb2IsCiAgICAgICAgICAgIEpvYk9iamVjdEluZm9DbGFzcyBpbmZvQ2xhc3MsCiAgICAgICAgICAgIHJlZiBKb2JPYmplY3RFeHRlbmRlZExpbWl0SW5mb3JtYXRpb24gaW5mbywKICAgICAgICAgICAgdWludCBpbmZvTGVuZ3RoKTsKCiAgICAgICAgW0RsbEltcG9ydCgia2VybmVsMzIuZGxsIiwgU2V0TGFzdEVycm9yID0gdHJ1ZSldCiAgICAgICAgW3JldHVybjogTWFyc2hhbEFzKFVubWFuYWdlZFR5cGUuQm9vbCldCiAgICAgICAgcHJpdmF0ZSBzdGF0aWMgZXh0ZXJuIGJvb2wgQ2xvc2VIYW5kbGUoSW50UHRyIGhhbmRsZSk7CgogICAgICAgIHByaXZhdGUgY29uc3QgdWludCBKb2JPYmplY3RMaW1pdEtpbGxPbkpvYkNsb3NlID0gMHgwMDAwMjAwMDsKCiAgICAgICAgcHJpdmF0ZSBlbnVtIEpvYk9iamVjdEluZm9DbGFzcwogICAgICAgIHsKICAgICAgICAgICAgRXh0ZW5kZWRMaW1pdEluZm9ybWF0aW9uID0gOQogICAgICAgIH0KCiAgICAgICAgW1N0cnVjdExheW91dChMYXlvdXRLaW5kLlNlcXVlbnRpYWwpXQogICAgICAgIHByaXZhdGUgc3RydWN0IEpvYk9iamVjdEJhc2ljTGltaXRJbmZvcm1hdGlvbgogICAgICAgIHsKICAgICAgICAgICAgcHVibGljIGxvbmcgUGVyUHJvY2Vzc1VzZXJUaW1lTGltaXQ7CiAgICAgICAgICAgIHB1YmxpYyBsb25nIFBlckpvYlVzZXJUaW1lTGltaXQ7CiAgICAgICAgICAgIHB1YmxpYyB1aW50IExpbWl0RmxhZ3M7CiAgICAgICAgICAgIHB1YmxpYyBVSW50UHRyIE1pbmltdW1Xb3JraW5nU2V0U2l6ZTsKICAgICAgICAgICAgcHVibGljIFVJbnRQdHIgTWF4aW11bVdvcmtpbmdTZXRTaXplOwogICAgICAgICAgICBwdWJsaWMgdWludCBBY3RpdmVQcm9jZXNzTGltaXQ7CiAgICAgICAgICAgIHB1YmxpYyBVSW50UHRyIEFmZmluaXR5OwogICAgICAgICAgICBwdWJsaWMgdWludCBQcmlvcml0eUNsYXNzOwogICAgICAgICAgICBwdWJsaWMgdWludCBTY2hlZHVsaW5nQ2xhc3M7CiAgICAgICAgfQoKICAgICAgICBbU3RydWN0TGF5b3V0KExheW91dEtpbmQuU2VxdWVudGlhbCldCiAgICAgICAgcHJpdmF0ZSBzdHJ1Y3QgSW9Db3VudGVycwogICAgICAgIHsKICAgICAgICAgICAgcHVibGljIHVsb25nIFJlYWRPcGVyYXRpb25Db3VudDsKICAgICAgICAgICAgcHVibGljIHVsb25nIFdyaXRlT3BlcmF0aW9uQ291bnQ7CiAgICAgICAgICAgIHB1YmxpYyB1bG9uZyBPdGhlck9wZXJhdGlvbkNvdW50OwogICAgICAgICAgICBwdWJsaWMgdWxvbmcgUmVhZFRyYW5zZmVyQ291bnQ7CiAgICAgICAgICAgIHB1YmxpYyB1bG9uZyBXcml0ZVRyYW5zZmVyQ291bnQ7CiAgICAgICAgICAgIHB1YmxpYyB1bG9uZyBPdGhlclRyYW5zZmVyQ291bnQ7CiAgICAgICAgfQoKICAgICAgICBbU3RydWN0TGF5b3V0KExheW91dEtpbmQuU2VxdWVudGlhbCldCiAgICAgICAgcHJpdmF0ZSBzdHJ1Y3QgSm9iT2JqZWN0RXh0ZW5kZWRMaW1pdEluZm9ybWF0aW9uCiAgICAgICAgewogICAgICAgICAgICBwdWJsaWMgSm9iT2JqZWN0QmFzaWNMaW1pdEluZm9ybWF0aW9uIEJhc2ljTGltaXRJbmZvcm1hdGlvbjsKICAgICAgICAgICAgcHVibGljIElvQ291bnRlcnMgSW9JbmZvOwogICAgICAgICAgICBwdWJsaWMgVUludFB0ciBQcm9jZXNzTWVtb3J5TGltaXQ7CiAgICAgICAgICAgIHB1YmxpYyBVSW50UHRyIEpvYk1lbW9yeUxpbWl0OwogICAgICAgICAgICBwdWJsaWMgVUludFB0ciBQZWFrUHJvY2Vzc01lbW9yeVVzZWQ7CiAgICAgICAgICAgIHB1YmxpYyBVSW50UHRyIFBlYWtKb2JNZW1vcnlVc2VkOwogICAgICAgIH0KCiAgICAgICAgcHJpdmF0ZSBzdGF0aWMgYm9vbCBJc1dpbmRvd3MoKQogICAgICAgIHsKICAgICAgICAgICAgdmFyIHBsYXRmb3JtID0gRW52aXJvbm1lbnQuT1NWZXJzaW9uLlBsYXRmb3JtOwogICAgICAgICAgICByZXR1cm4gcGxhdGZvcm0gPT0gUGxhdGZvcm1JRC5XaW4zMk5UIHx8CiAgICAgICAgICAgICAgICAgICBwbGF0Zm9ybSA9PSBQbGF0Zm9ybUlELldpbjMyUyB8fAogICAgICAgICAgICAgICAgICAgcGxhdGZvcm0gPT0gUGxhdGZvcm1JRC5XaW4zMldpbmRvd3MgfHwKICAgICAgICAgICAgICAgICAgIHBsYXRmb3JtID09IFBsYXRmb3JtSUQuV2luQ0U7CiAgICAgICAgfQoKICAgICAgICBwcml2YXRlIHN0YXRpYyBJbnRQdHIgVHJ5QXNzaWduSm9iKFByb2Nlc3MgcHJvY2VzcykKICAgICAgICB7CiAgICAgICAgICAgIGlmICghSXNXaW5kb3dzKCkpIHJldHVybiBJbnRQdHIuWmVybzsKICAgICAgICAgICAgSW50UHRyIGpvYiA9IEludFB0ci5aZXJvOwogICAgICAgICAgICB0cnkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgam9iID0gQ3JlYXRlSm9iT2JqZWN0KEludFB0ci5aZXJvLCBudWxsKTsKICAgICAgICAgICAgICAgIGlmIChqb2IgPT0gSW50UHRyLlplcm8pCiAgICAgICAgICAgICAgICB7CiAgICAgICAgICAgICAgICAgICAgcmV0dXJuIEludFB0ci5aZXJvOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgdmFyIGxpbWl0cyA9IG5ldyBKb2JPYmplY3RFeHRlbmRlZExpbWl0SW5mb3JtYXRpb24oKTsKICAgICAgICAgICAgICAgIGxpbWl0cy5CYXNpY0xpbWl0SW5mb3JtYXRpb24uTGltaXRGbGFncyA9IEpvYk9iamVjdExpbWl0S2lsbE9uSm9iQ2xvc2U7CiAgICAgICAgICAgICAgICBpZiAoIVNldEluZm9ybWF0aW9uSm9iT2JqZWN0KAogICAgICAgICAgICAgICAgICAgICAgICBqb2IsCiAgICAgICAgICAgICAgICAgICAgICAgIEpvYk9iamVjdEluZm9DbGFzcy5FeHRlbmRlZExpbWl0SW5mb3JtYXRpb24sCiAgICAgICAgICAgICAgICAgICAgICAgIHJlZiBsaW1pdHMsCiAgICAgICAgICAgICAgICAgICAgICAgICh1aW50KU1hcnNoYWwuU2l6ZU9mKHR5cGVvZihKb2JPYmplY3RFeHRlbmRlZExpbWl0SW5mb3JtYXRpb24pKSkgfHwKICAgICAgICAgICAgICAgICAgICAhQXNzaWduUHJvY2Vzc1RvSm9iT2JqZWN0KGpvYiwgcHJvY2Vzcy5IYW5kbGUpKQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIENsb3NlSGFuZGxlKGpvYik7CiAgICAgICAgICAgICAgICAgICAgcmV0dXJuIEludFB0ci5aZXJvOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgcmV0dXJuIGpvYjsKICAgICAgICAgICAgfQogICAgICAgICAgICBjYXRjaAogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICBpZiAoam9iICE9IEludFB0ci5aZXJvKSBDbG9zZUhhbmRsZShqb2IpOwogICAgICAgICAgICAgICAgcmV0dXJuIEludFB0ci5aZXJvOwogICAgICAgICAgICB9CiAgICAgICAgfQoKICAgICAgICBwcml2YXRlIHN0YXRpYyB2b2lkIFRlcm1pbmF0ZVByb2Nlc3NUcmVlKFByb2Nlc3MgcHJvY2VzcywgSW50UHRyIGpvYikKICAgICAgICB7CiAgICAgICAgICAgIGJvb2wgam9iVGVybWluYXRlZCA9IGZhbHNlOwogICAgICAgICAgICBpZiAoam9iICE9IEludFB0ci5aZXJvKQogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICB0cnkgeyBqb2JUZXJtaW5hdGVkID0gVGVybWluYXRlSm9iT2JqZWN0KGpvYiwgMSk7IH0gY2F0Y2ggeyB9CiAgICAgICAgICAgIH0KCiAgICAgICAgICAgIC8vIFdpbmRvd3MgUG93ZXJTaGVsbCA1LjEgbGFja3MgUHJvY2Vzcy5LaWxsKGJvb2wpLiBJZiBhc3NpZ25tZW50CiAgICAgICAgICAgIC8vIHRvIGEgSm9iIE9iamVjdCB3YXMgYmxvY2tlZCBieSBhbiBleGlzdGluZyBqb2IgcG9saWN5LCB0YXNra2lsbAogICAgICAgICAgICAvLyBwcm92aWRlcyBhIGJvdW5kZWQgbmF0aXZlIHByb2Nlc3MtdHJlZSBmYWxsYmFjay4KICAgICAgICAgICAgaWYgKCFqb2JUZXJtaW5hdGVkICYmIElzV2luZG93cygpKQogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICB0cnkKICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICBpZiAoIXByb2Nlc3MuSGFzRXhpdGVkKQogICAgICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICAgICAgdmFyIHRhc2tLaWxsID0gbmV3IFByb2Nlc3NTdGFydEluZm8oKTsKICAgICAgICAgICAgICAgICAgICAgICAgdGFza0tpbGwuRmlsZU5hbWUgPSBQYXRoLkNvbWJpbmUoRW52aXJvbm1lbnQuR2V0Rm9sZGVyUGF0aChFbnZpcm9ubWVudC5TcGVjaWFsRm9sZGVyLlN5c3RlbSksICJ0YXNra2lsbC5leGUiKTsKICAgICAgICAgICAgICAgICAgICAgICAgdGFza0tpbGwuQXJndW1lbnRzID0gIi9QSUQgIiArIHByb2Nlc3MuSWQgKyAiIC9UIC9GIjsKICAgICAgICAgICAgICAgICAgICAgICAgdGFza0tpbGwuVXNlU2hlbGxFeGVjdXRlID0gZmFsc2U7CiAgICAgICAgICAgICAgICAgICAgICAgIHRhc2tLaWxsLkNyZWF0ZU5vV2luZG93ID0gdHJ1ZTsKICAgICAgICAgICAgICAgICAgICAgICAgdGFza0tpbGwuUmVkaXJlY3RTdGFuZGFyZE91dHB1dCA9IHRydWU7CiAgICAgICAgICAgICAgICAgICAgICAgIHRhc2tLaWxsLlJlZGlyZWN0U3RhbmRhcmRFcnJvciA9IHRydWU7CiAgICAgICAgICAgICAgICAgICAgICAgIHVzaW5nICh2YXIga2lsbGVyID0gUHJvY2Vzcy5TdGFydCh0YXNrS2lsbCkpCiAgICAgICAgICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICAgICAgICAgIGlmIChraWxsZXIgIT0gbnVsbCkga2lsbGVyLldhaXRGb3JFeGl0KDEwMDAwKTsKICAgICAgICAgICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIGNhdGNoIHsgfQogICAgICAgICAgICB9CgogICAgICAgICAgICB0cnkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgaWYgKCFwcm9jZXNzLkhhc0V4aXRlZCkKICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICB2YXIgdHJlZUtpbGwgPSB0eXBlb2YoUHJvY2VzcykuR2V0TWV0aG9kKCJLaWxsIiwgbmV3W10geyB0eXBlb2YoYm9vbCkgfSk7CiAgICAgICAgICAgICAgICAgICAgaWYgKHRyZWVLaWxsICE9IG51bGwpCiAgICAgICAgICAgICAgICAgICAgICAgIHRyZWVLaWxsLkludm9rZShwcm9jZXNzLCBuZXcgb2JqZWN0W10geyB0cnVlIH0pOwogICAgICAgICAgICAgICAgICAgIGVsc2UKICAgICAgICAgICAgICAgICAgICAgICAgcHJvY2Vzcy5LaWxsKCk7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KICAgICAgICAgICAgY2F0Y2gKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgdHJ5IHsgaWYgKCFwcm9jZXNzLkhhc0V4aXRlZCkgcHJvY2Vzcy5LaWxsKCk7IH0gY2F0Y2ggeyB9CiAgICAgICAgICAgIH0KICAgICAgICB9CgogICAgICAgIHByaXZhdGUgc3RhdGljIGJvb2wgV2FpdEZvclJlYWRlcnMoVGFzazxzdHJpbmc+IHN0ZG91dFRhc2ssIFRhc2s8c3RyaW5nPiBzdGRlcnJUYXNrLCBpbnQgdGltZW91dE1zKQogICAgICAgIHsKICAgICAgICAgICAgdHJ5IHsgcmV0dXJuIFRhc2suV2FpdEFsbChuZXcgVGFza1tdIHsgc3Rkb3V0VGFzaywgc3RkZXJyVGFzayB9LCB0aW1lb3V0TXMpOyB9CiAgICAgICAgICAgIGNhdGNoIHsgcmV0dXJuIHN0ZG91dFRhc2suSXNDb21wbGV0ZWQgJiYgc3RkZXJyVGFzay5Jc0NvbXBsZXRlZDsgfQogICAgICAgIH0KCiAgICAgICAgcHJpdmF0ZSBzZWFsZWQgY2xhc3MgQ2FwdHVyZVN0YXRlCiAgICAgICAgewogICAgICAgICAgICBwdWJsaWMgdm9sYXRpbGUgYm9vbCBMaW1pdFJlYWNoZWQ7CiAgICAgICAgfQoKICAgICAgICBwcml2YXRlIHN0YXRpYyBzdHJpbmcgQ29tcGxldGVkUmVhZGVyUmVzdWx0KFRhc2s8c3RyaW5nPiB0YXNrKQogICAgICAgIHsKICAgICAgICAgICAgaWYgKCF0YXNrLklzQ29tcGxldGVkIHx8IHRhc2suSXNDYW5jZWxlZCB8fCB0YXNrLklzRmF1bHRlZCkgcmV0dXJuICIiOwogICAgICAgICAgICB0cnkgeyByZXR1cm4gdGFzay5SZXN1bHQgPz8gIiI7IH0gY2F0Y2ggeyByZXR1cm4gIiI7IH0KICAgICAgICB9CgogICAgICAgIHByaXZhdGUgc3RhdGljIHN0cmluZyBSZXNvbHZlV29ya2luZ0RpcmVjdG9yeShzdHJpbmcgcmVxdWVzdGVkUGF0aCkKICAgICAgICB7CiAgICAgICAgICAgIHZhciBjYW5kaWRhdGVzID0gbmV3W10KICAgICAgICAgICAgewogICAgICAgICAgICAgICAgcmVxdWVzdGVkUGF0aCwKICAgICAgICAgICAgICAgIEVudmlyb25tZW50LkdldEZvbGRlclBhdGgoRW52aXJvbm1lbnQuU3BlY2lhbEZvbGRlci5Vc2VyUHJvZmlsZSksCiAgICAgICAgICAgICAgICBQYXRoLkdldFRlbXBQYXRoKCkKICAgICAgICAgICAgfTsKICAgICAgICAgICAgZm9yZWFjaCAodmFyIGNhbmRpZGF0ZSBpbiBjYW5kaWRhdGVzKQogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICBpZiAoc3RyaW5nLklzTnVsbE9yV2hpdGVTcGFjZShjYW5kaWRhdGUpIHx8ICFQYXRoLklzUGF0aFJvb3RlZChjYW5kaWRhdGUpKQogICAgICAgICAgICAgICAgICAgIGNvbnRpbnVlOwogICAgICAgICAgICAgICAgdHJ5CiAgICAgICAgICAgICAgICB7CiAgICAgICAgICAgICAgICAgICAgdmFyIGZ1bGxQYXRoID0gUGF0aC5HZXRGdWxsUGF0aChjYW5kaWRhdGUpOwogICAgICAgICAgICAgICAgICAgIGlmIChEaXJlY3RvcnkuRXhpc3RzKGZ1bGxQYXRoKSkKICAgICAgICAgICAgICAgICAgICAgICAgcmV0dXJuIGZ1bGxQYXRoOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgY2F0Y2ggeyB9CiAgICAgICAgICAgIH0KICAgICAgICAgICAgdGhyb3cgbmV3IERpcmVjdG9yeU5vdEZvdW5kRXhjZXB0aW9uKCJObyBzYWZlIGNoaWxkLXByb2Nlc3Mgd29ya2luZyBkaXJlY3RvcnkgaXMgYXZhaWxhYmxlLiIpOwogICAgICAgIH0KCiAgICAgICAgcHJpdmF0ZSBzdGF0aWMgc3RyaW5nIFJlYWRTdHJlYW1Ub01heChTdHJlYW1SZWFkZXIgciwgaW50IG1heENoYXJzLCBDYXB0dXJlU3RhdGUgc3RhdGUpCiAgICAgICAgewogICAgICAgICAgICB2YXIgc2IgPSBuZXcgU3RyaW5nQnVpbGRlcigpOwogICAgICAgICAgICB2YXIgYnVmID0gbmV3IGNoYXJbODE5Ml07CiAgICAgICAgICAgIGludCB0b3RhbCA9IDA7CiAgICAgICAgICAgIHRyeQogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICB3aGlsZSAodG90YWwgPCBtYXhDaGFycykKICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICBpbnQgbiA9IHIuUmVhZChidWYsIDAsIE1hdGguTWluKGJ1Zi5MZW5ndGgsIG1heENoYXJzIC0gdG90YWwpKTsKICAgICAgICAgICAgICAgICAgICBpZiAobiA8PSAwKSBicmVhazsKICAgICAgICAgICAgICAgICAgICBzYi5BcHBlbmQoYnVmLCAwLCBuKTsKICAgICAgICAgICAgICAgICAgICB0b3RhbCArPSBuOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICB9CiAgICAgICAgICAgIGNhdGNoIHsgfQogICAgICAgICAgICBpZiAodG90YWwgPj0gbWF4Q2hhcnMpCiAgICAgICAgICAgICAgICBzdGF0ZS5MaW1pdFJlYWNoZWQgPSB0cnVlOwogICAgICAgICAgICByZXR1cm4gc2IuVG9TdHJpbmcoKTsKICAgICAgICB9CgogICAgICAgIHByaXZhdGUgc3RhdGljIHN0cmluZyBCdWlsZEdhdGVkU2NyaXB0KHN0cmluZyBzY3JpcHRUZXh0LCBzdHJpbmcgZ2F0ZU5hbWUpCiAgICAgICAgewogICAgICAgICAgICB2YXIgc2FmZUdhdGVOYW1lID0gKGdhdGVOYW1lID8/ICIiKS5SZXBsYWNlKCInIiwgIicnIik7CiAgICAgICAgICAgIHJldHVybiAiJHdpbmRvR2F0ZT1bU3lzdGVtLlRocmVhZGluZy5FdmVudFdhaXRIYW5kbGVdOjpPcGVuRXhpc3RpbmcoJyIgKyBzYWZlR2F0ZU5hbWUgKyAiJyk7IiArCiAgICAgICAgICAgICAgICAgICAidHJ5e2lmKC1ub3QgJHdpbmRvR2F0ZS5XYWl0T25lKDMwMDAwKSl7ZXhpdCAxMjR9fWZpbmFsbHl7JHdpbmRvR2F0ZS5EaXNwb3NlKCl9OyIgKwogICAgICAgICAgICAgICAgICAgRW52aXJvbm1lbnQuTmV3TGluZSArIChzY3JpcHRUZXh0ID8/ICIiKTsKICAgICAgICB9CgogICAgICAgIHB1YmxpYyBzdGF0aWMgdm9pZCBSdW5Qb3dlclNoZWxsKAogICAgICAgICAgICBzdHJpbmcgZXhlY3V0YWJsZVBhdGgsCiAgICAgICAgICAgIHN0cmluZyBzY3JpcHRUZXh0LAogICAgICAgICAgICBzdHJpbmcgd29ya2luZ0RpcmVjdG9yeSwKICAgICAgICAgICAgaW50IHRpbWVvdXRNcywKICAgICAgICAgICAgaW50IG1heENoYXJzUGVyU3RyZWFtLAogICAgICAgICAgICBvdXQgc3RyaW5nIHN0ZG91dCwKICAgICAgICAgICAgb3V0IHN0cmluZyBzdGRlcnIsCiAgICAgICAgICAgIG91dCBib29sIHRpbWVkT3V0LAogICAgICAgICAgICBvdXQgYm9vbCB0cnVuY2F0ZWQsCiAgICAgICAgICAgIG91dCBpbnQgZXhpdENvZGUpCiAgICAgICAgewogICAgICAgICAgICB0aW1lZE91dCA9IGZhbHNlOwogICAgICAgICAgICB0cnVuY2F0ZWQgPSBmYWxzZTsKICAgICAgICAgICAgZXhpdENvZGUgPSAxOwogICAgICAgICAgICBzdGRvdXQgPSAiIjsKICAgICAgICAgICAgc3RkZXJyID0gIiI7CiAgICAgICAgICAgIGlmIChzdHJpbmcuSXNOdWxsT3JXaGl0ZVNwYWNlKGV4ZWN1dGFibGVQYXRoKSkKICAgICAgICAgICAgICAgIGV4ZWN1dGFibGVQYXRoID0gInBvd2Vyc2hlbGwuZXhlIjsKICAgICAgICAgICAgRXZlbnRXYWl0SGFuZGxlIHN0YXJ0R2F0ZSA9IG51bGw7CiAgICAgICAgICAgIHN0cmluZyBjb21tYW5kVGV4dCA9IHNjcmlwdFRleHQgPz8gIiI7CiAgICAgICAgICAgIGlmIChJc1dpbmRvd3MoKSkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgdmFyIGdhdGVOYW1lID0gIkxvY2FsXFxXaW5kb1J1bm5lci0iICsgR3VpZC5OZXdHdWlkKCkuVG9TdHJpbmcoIk4iKTsKICAgICAgICAgICAgICAgIGJvb2wgY3JlYXRlZE5ldzsKICAgICAgICAgICAgICAgIHN0YXJ0R2F0ZSA9IG5ldyBFdmVudFdhaXRIYW5kbGUoZmFsc2UsIEV2ZW50UmVzZXRNb2RlLk1hbnVhbFJlc2V0LCBnYXRlTmFtZSwgb3V0IGNyZWF0ZWROZXcpOwogICAgICAgICAgICAgICAgaWYgKCFjcmVhdGVkTmV3KQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIHN0YXJ0R2F0ZS5EaXNwb3NlKCk7CiAgICAgICAgICAgICAgICAgICAgdGhyb3cgbmV3IEludmFsaWRPcGVyYXRpb25FeGNlcHRpb24oIlVuYWJsZSB0byBjcmVhdGUgYSB1bmlxdWUgY2hpbGQtcHJvY2VzcyBzdGFydCBnYXRlLiIpOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgY29tbWFuZFRleHQgPSBCdWlsZEdhdGVkU2NyaXB0KGNvbW1hbmRUZXh0LCBnYXRlTmFtZSk7CiAgICAgICAgICAgIH0KICAgICAgICAgICAgdmFyIGVuY29kZWRDb21tYW5kID0gQ29udmVydC5Ub0Jhc2U2NFN0cmluZyhFbmNvZGluZy5Vbmljb2RlLkdldEJ5dGVzKGNvbW1hbmRUZXh0KSk7CiAgICAgICAgICAgIHZhciBwc2kgPSBuZXcgUHJvY2Vzc1N0YXJ0SW5mbygpOwogICAgICAgICAgICBwc2kuRmlsZU5hbWUgPSBleGVjdXRhYmxlUGF0aDsKICAgICAgICAgICAgcHNpLkFyZ3VtZW50cyA9ICItTm9Qcm9maWxlIC1Ob25JbnRlcmFjdGl2ZSAtTm9Mb2dvIC1FbmNvZGVkQ29tbWFuZCAiICsgZW5jb2RlZENvbW1hbmQ7CiAgICAgICAgICAgIGlmIChwc2kuQXJndW1lbnRzLkxlbmd0aCA+IDMyMDAwKQogICAgICAgICAgICAgICAgdGhyb3cgbmV3IEFyZ3VtZW50RXhjZXB0aW9uKCJUaGUgZ2F0ZWQgUG93ZXJTaGVsbCBjb21tYW5kIGV4Y2VlZHMgdGhlIFdpbmRvd3MgcHJvY2VzcyBjb21tYW5kLWxpbmUgbGltaXQuIiwgInNjcmlwdFRleHQiKTsKICAgICAgICAgICAgcHNpLldvcmtpbmdEaXJlY3RvcnkgPSBSZXNvbHZlV29ya2luZ0RpcmVjdG9yeSh3b3JraW5nRGlyZWN0b3J5KTsKICAgICAgICAgICAgcHNpLlJlZGlyZWN0U3RhbmRhcmRPdXRwdXQgPSB0cnVlOwogICAgICAgICAgICBwc2kuUmVkaXJlY3RTdGFuZGFyZEVycm9yID0gdHJ1ZTsKICAgICAgICAgICAgcHNpLlVzZVNoZWxsRXhlY3V0ZSA9IGZhbHNlOwogICAgICAgICAgICBwc2kuQ3JlYXRlTm9XaW5kb3cgPSB0cnVlOwogICAgICAgICAgICBQcm9jZXNzIHAgPSBudWxsOwogICAgICAgICAgICBJbnRQdHIgam9iID0gSW50UHRyLlplcm87CiAgICAgICAgICAgIGJvb2wgZGlzcG9zZVByb2Nlc3NTeW5jaHJvbm91c2x5ID0gdHJ1ZTsKICAgICAgICAgICAgdHJ5CiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIHAgPSBQcm9jZXNzLlN0YXJ0KHBzaSk7CiAgICAgICAgICAgICAgICBpZiAocCA9PSBudWxsKQogICAgICAgICAgICAgICAgICAgIHRocm93IG5ldyBJbnZhbGlkT3BlcmF0aW9uRXhjZXB0aW9uKCJUaGUgUG93ZXJTaGVsbCBjaGlsZCBwcm9jZXNzIGRpZCBub3Qgc3RhcnQuIik7CgogICAgICAgICAgICAgICAgaWYgKElzV2luZG93cygpKQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIGpvYiA9IFRyeUFzc2lnbkpvYihwKTsKICAgICAgICAgICAgICAgICAgICBpZiAoam9iID09IEludFB0ci5aZXJvKQogICAgICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICAgICAgdHJ5IHsgaWYgKCFwLkhhc0V4aXRlZCkgcC5LaWxsKCk7IH0gY2F0Y2ggeyB9CiAgICAgICAgICAgICAgICAgICAgICAgIHRocm93IG5ldyBJbnZhbGlkT3BlcmF0aW9uRXhjZXB0aW9uKCJVbmFibGUgdG8gZXN0YWJsaXNoIGNoaWxkLXByb2Nlc3Mgam9iIGNvbnRhaW5tZW50OyBjb21tYW5kIHdhcyBub3QgZXhlY3V0ZWQuIik7CiAgICAgICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgICAgIHN0YXJ0R2F0ZS5TZXQoKTsKICAgICAgICAgICAgICAgICAgICBzdGFydEdhdGUuRGlzcG9zZSgpOwogICAgICAgICAgICAgICAgICAgIHN0YXJ0R2F0ZSA9IG51bGw7CiAgICAgICAgICAgICAgICB9CgogICAgICAgICAgICAgICAgdHJ5CiAgICAgICAgICAgICAgICB7CiAgICAgICAgICAgICAgICAgICAgdmFyIGNhcHR1cmVTdGF0ZSA9IG5ldyBDYXB0dXJlU3RhdGUoKTsKICAgICAgICAgICAgICAgICAgICB2YXIgdE91dCA9IFRhc2suUnVuKCgpID0+IFJlYWRTdHJlYW1Ub01heChwLlN0YW5kYXJkT3V0cHV0LCBtYXhDaGFyc1BlclN0cmVhbSwgY2FwdHVyZVN0YXRlKSk7CiAgICAgICAgICAgICAgICAgICAgdmFyIHRFcnIgPSBUYXNrLlJ1bigoKSA9PiBSZWFkU3RyZWFtVG9NYXgocC5TdGFuZGFyZEVycm9yLCBtYXhDaGFyc1BlclN0cmVhbSwgY2FwdHVyZVN0YXRlKSk7CiAgICAgICAgICAgICAgICAgICAgdmFyIHdhaXQgPSBTdG9wd2F0Y2guU3RhcnROZXcoKTsKICAgICAgICAgICAgICAgICAgICBib29sIGZpbmlzaGVkID0gZmFsc2U7CiAgICAgICAgICAgICAgICAgICAgd2hpbGUgKCFmaW5pc2hlZCAmJiB3YWl0LkVsYXBzZWRNaWxsaXNlY29uZHMgPCB0aW1lb3V0TXMgJiYgIWNhcHR1cmVTdGF0ZS5MaW1pdFJlYWNoZWQpCiAgICAgICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgICAgICBpbnQgcmVtYWluaW5nID0gdGltZW91dE1zIC0gKGludClNYXRoLk1pbih0aW1lb3V0TXMsIHdhaXQuRWxhcHNlZE1pbGxpc2Vjb25kcyk7CiAgICAgICAgICAgICAgICAgICAgICAgIGZpbmlzaGVkID0gcC5XYWl0Rm9yRXhpdChNYXRoLk1heCgxLCBNYXRoLk1pbihyZW1haW5pbmcsIDEwMCkpKTsKICAgICAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICAgICAgaWYgKGNhcHR1cmVTdGF0ZS5MaW1pdFJlYWNoZWQgJiYgIWZpbmlzaGVkKQogICAgICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICAgICAgdHJ1bmNhdGVkID0gdHJ1ZTsKICAgICAgICAgICAgICAgICAgICAgICAgVGVybWluYXRlUHJvY2Vzc1RyZWUocCwgam9iKTsKICAgICAgICAgICAgICAgICAgICAgICAgdHJ5IHsgcC5XYWl0Rm9yRXhpdCgxNTAwMCk7IH0gY2F0Y2ggeyB9CiAgICAgICAgICAgICAgICAgICAgICAgIGZpbmlzaGVkID0gdHJ1ZTsKICAgICAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICAgICAgaWYgKCFmaW5pc2hlZCkKICAgICAgICAgICAgICAgICAgICB7CiAgICAgICAgICAgICAgICAgICAgICAgIHRpbWVkT3V0ID0gdHJ1ZTsKICAgICAgICAgICAgICAgICAgICAgICAgVGVybWluYXRlUHJvY2Vzc1RyZWUocCwgam9iKTsKICAgICAgICAgICAgICAgICAgICAgICAgdHJ5IHsgcC5XYWl0Rm9yRXhpdCgxNTAwMCk7IH0gY2F0Y2ggeyB9CiAgICAgICAgICAgICAgICAgICAgfQoKICAgICAgICAgICAgICAgICAgICAvLyBBIGRlc2NlbmRhbnQgY2FuIGluaGVyaXQgcmVkaXJlY3RlZCBoYW5kbGVzIGFmdGVyIHRoZQogICAgICAgICAgICAgICAgICAgIC8vIGRpcmVjdCBjaGlsZCBleGl0cy4gTmV2ZXIgYmxvY2sgaW5kZWZpbml0ZWx5IHdhaXRpbmcgZm9yCiAgICAgICAgICAgICAgICAgICAgLy8gdGhvc2UgaGFuZGxlczogdGVybWluYXRlIHRoZSBhc3NpZ25lZCBqb2IvdHJlZSwgY2xvc2UKICAgICAgICAgICAgICAgICAgICAvLyB0aGUgcmVhZGVycywgYW5kIGFsbG93IG9ubHkgYSBib3VuZGVkIGZpbmFsIGRyYWluLgogICAgICAgICAgICAgICAgICAgIGlmICghV2FpdEZvclJlYWRlcnModE91dCwgdEVyciwgNTAwMCkpCiAgICAgICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgICAgICB0aW1lZE91dCA9IHRydWU7CiAgICAgICAgICAgICAgICAgICAgICAgIFRlcm1pbmF0ZVByb2Nlc3NUcmVlKHAsIGpvYik7CiAgICAgICAgICAgICAgICAgICAgICAgIC8vIENsb3NpbmcgYSBTdHJlYW1SZWFkZXIgY29uY3VycmVudGx5IHdpdGggYSBibG9ja2VkCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIHN5bmNocm9ub3VzIFJlYWQgY2FuIGl0c2VsZiBibG9jay4gS2lsbC1vbi1jbG9zZSBpcwogICAgICAgICAgICAgICAgICAgICAgICAvLyB0aGUgYm91bmRlZCBXaW5kb3dzIHByaW1pdGl2ZSwgc28gcmVsZWFzZSB0aGUgam9iCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIGJlZm9yZSB0aGUgZmluYWwgZHJhaW4gYW5kIG5ldmVyIGNsb3NlIHJlYWRlcnMgaGVyZS4KICAgICAgICAgICAgICAgICAgICAgICAgaWYgKGpvYiAhPSBJbnRQdHIuWmVybykKICAgICAgICAgICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgICAgICAgICAgQ2xvc2VIYW5kbGUoam9iKTsKICAgICAgICAgICAgICAgICAgICAgICAgICAgIGpvYiA9IEludFB0ci5aZXJvOwogICAgICAgICAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICAgICAgICAgIGlmICghV2FpdEZvclJlYWRlcnModE91dCwgdEVyciwgMjAwMCkpCiAgICAgICAgICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICAgICAgICAgIGRpc3Bvc2VQcm9jZXNzU3luY2hyb25vdXNseSA9IGZhbHNlOwogICAgICAgICAgICAgICAgICAgICAgICAgICAgdmFyIHByb2Nlc3NUb0Rpc3Bvc2UgPSBwOwogICAgICAgICAgICAgICAgICAgICAgICAgICAgVGFzay5XaGVuQWxsKHRPdXQsIHRFcnIpLkNvbnRpbnVlV2l0aCgKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBpZ25vcmVkID0+IHsgdHJ5IHsgcHJvY2Vzc1RvRGlzcG9zZS5EaXNwb3NlKCk7IH0gY2F0Y2ggeyB9IH0sCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgVGFza1NjaGVkdWxlci5EZWZhdWx0KTsKICAgICAgICAgICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgICAgICBzdGRvdXQgPSBDb21wbGV0ZWRSZWFkZXJSZXN1bHQodE91dCk7CiAgICAgICAgICAgICAgICAgICAgc3RkZXJyID0gQ29tcGxldGVkUmVhZGVyUmVzdWx0KHRFcnIpOwogICAgICAgICAgICAgICAgICAgIGlmIChzdGRvdXQuTGVuZ3RoID49IG1heENoYXJzUGVyU3RyZWFtIHx8IHN0ZGVyci5MZW5ndGggPj0gbWF4Q2hhcnNQZXJTdHJlYW0pCiAgICAgICAgICAgICAgICAgICAgICAgIHRydW5jYXRlZCA9IHRydWU7CiAgICAgICAgICAgICAgICAgICAgdHJ5CiAgICAgICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgICAgICBleGl0Q29kZSA9IHAuSGFzRXhpdGVkID8gcC5FeGl0Q29kZSA6IC0xOwogICAgICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgICAgICBjYXRjaAogICAgICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICAgICAgZXhpdENvZGUgPSAtMTsKICAgICAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICAgICAgaWYgKHRpbWVkT3V0KQogICAgICAgICAgICAgICAgICAgICAgICBleGl0Q29kZSA9IC0xOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgZmluYWxseQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIGlmIChqb2IgIT0gSW50UHRyLlplcm8pIENsb3NlSGFuZGxlKGpvYik7CiAgICAgICAgICAgICAgICAgICAgam9iID0gSW50UHRyLlplcm87CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KICAgICAgICAgICAgZmluYWxseQogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICBpZiAoc3RhcnRHYXRlICE9IG51bGwpIHN0YXJ0R2F0ZS5EaXNwb3NlKCk7CiAgICAgICAgICAgICAgICBpZiAoam9iICE9IEludFB0ci5aZXJvKSBDbG9zZUhhbmRsZShqb2IpOwogICAgICAgICAgICAgICAgaWYgKHAgIT0gbnVsbCAmJiBkaXNwb3NlUHJvY2Vzc1N5bmNocm9ub3VzbHkpIHAuRGlzcG9zZSgpOwogICAgICAgICAgICB9CiAgICAgICAgfQoKICAgICAgICAvLyBCYWNrd2FyZC1jb21wYXRpYmxlIG92ZXJsb2FkIGZvciBjYWxsZXJzIGNyZWF0ZWQgYmVmb3JlIHdvcmtpbmcKICAgICAgICAvLyBkaXJlY3RvcnkgcHJvcGFnYXRpb24gd2FzIGFkZGVkLgogICAgICAgIHB1YmxpYyBzdGF0aWMgdm9pZCBSdW5Qb3dlclNoZWxsKAogICAgICAgICAgICBzdHJpbmcgZXhlY3V0YWJsZVBhdGgsCiAgICAgICAgICAgIHN0cmluZyBzY3JpcHRUZXh0LAogICAgICAgICAgICBpbnQgdGltZW91dE1zLAogICAgICAgICAgICBpbnQgbWF4Q2hhcnNQZXJTdHJlYW0sCiAgICAgICAgICAgIG91dCBzdHJpbmcgc3Rkb3V0LAogICAgICAgICAgICBvdXQgc3RyaW5nIHN0ZGVyciwKICAgICAgICAgICAgb3V0IGJvb2wgdGltZWRPdXQsCiAgICAgICAgICAgIG91dCBib29sIHRydW5jYXRlZCwKICAgICAgICAgICAgb3V0IGludCBleGl0Q29kZSkKICAgICAgICB7CiAgICAgICAgICAgIFJ1blBvd2VyU2hlbGwoCiAgICAgICAgICAgICAgICBleGVjdXRhYmxlUGF0aCwKICAgICAgICAgICAgICAgIHNjcmlwdFRleHQsCiAgICAgICAgICAgICAgICBFbnZpcm9ubWVudC5DdXJyZW50RGlyZWN0b3J5LAogICAgICAgICAgICAgICAgdGltZW91dE1zLAogICAgICAgICAgICAgICAgbWF4Q2hhcnNQZXJTdHJlYW0sCiAgICAgICAgICAgICAgICBvdXQgc3Rkb3V0LAogICAgICAgICAgICAgICAgb3V0IHN0ZGVyciwKICAgICAgICAgICAgICAgIG91dCB0aW1lZE91dCwKICAgICAgICAgICAgICAgIG91dCB0cnVuY2F0ZWQsCiAgICAgICAgICAgICAgICBvdXQgZXhpdENvZGUpOwogICAgICAgIH0KCiAgICAgICAgLy8gQmFja3dhcmQtY29tcGF0aWJsZSBlbnRyeSBwb2ludCBmb3IgYWxyZWFkeS1pbnN0YWxsZWQgcnVubmVyIGhlbHBlcnMuCiAgICAgICAgcHVibGljIHN0YXRpYyB2b2lkIFJ1bkNtZCgKICAgICAgICAgICAgc3RyaW5nIHNjcmlwdFRleHQsCiAgICAgICAgICAgIGludCB0aW1lb3V0TXMsCiAgICAgICAgICAgIGludCBtYXhDaGFyc1BlclN0cmVhbSwKICAgICAgICAgICAgb3V0IHN0cmluZyBzdGRvdXQsCiAgICAgICAgICAgIG91dCBzdHJpbmcgc3RkZXJyLAogICAgICAgICAgICBvdXQgYm9vbCB0aW1lZE91dCwKICAgICAgICAgICAgb3V0IGJvb2wgdHJ1bmNhdGVkLAogICAgICAgICAgICBvdXQgaW50IGV4aXRDb2RlKQogICAgICAgIHsKICAgICAgICAgICAgUnVuUG93ZXJTaGVsbCgKICAgICAgICAgICAgICAgICJwb3dlcnNoZWxsLmV4ZSIsCiAgICAgICAgICAgICAgICBzY3JpcHRUZXh0LAogICAgICAgICAgICAgICAgRW52aXJvbm1lbnQuQ3VycmVudERpcmVjdG9yeSwKICAgICAgICAgICAgICAgIHRpbWVvdXRNcywKICAgICAgICAgICAgICAgIG1heENoYXJzUGVyU3RyZWFtLAogICAgICAgICAgICAgICAgb3V0IHN0ZG91dCwKICAgICAgICAgICAgICAgIG91dCBzdGRlcnIsCiAgICAgICAgICAgICAgICBvdXQgdGltZWRPdXQsCiAgICAgICAgICAgICAgICBvdXQgdHJ1bmNhdGVkLAogICAgICAgICAgICAgICAgb3V0IGV4aXRDb2RlKTsKICAgICAgICB9CiAgICB9Cn0K'    ))
     Add-Type -TypeDefinition $cs -Language CSharp
 }
 
 function Get-WindoRunnerTimeoutMs {
+    param([object]$OverrideMs = $null)
     $d = 7200000
+    if ($null -ne $OverrideMs -and -not [string]::IsNullOrWhiteSpace([string]$OverrideMs)) {
+        try {
+            $v = [long]$OverrideMs
+            if ($v -lt 1) { return $d }
+            if ($v -gt 86400000) { return 86400000 }
+            return [int]$v
+        } catch { return $d }
+    }
     $raw = $env:WINDO_RUNNER_TIMEOUT_MS
     if ([string]::IsNullOrWhiteSpace($raw)) { return $d }
     try {
@@ -1187,39 +1415,61 @@ function Get-WindoMaxCommandChars {
     } catch { return $d }
 }
 
-function Test-WindoCommandLine([string]$cmdLine) {
-    $max = Get-WindoMaxCommandChars
-    if ($null -eq $cmdLine) { return "Command is missing." }
-    if ($cmdLine.Length -gt $max) { return "Command exceeds max length ($max)." }
-    foreach ($ch in $cmdLine.ToCharArray()) {
-        $c = [int][char]$ch
-        if ($c -eq 9) { continue }
-        if ($c -lt 32) { return "Command contains disallowed control characters." }
+function Resolve-WindoRunnerPowerShellPath {
+    param([object]$RequestedPath = $null)
+
+    $currentPath = $null
+    try { $currentPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { }
+    foreach ($candidate in @($RequestedPath, $currentPath, "powershell.exe")) {
+        if ([string]::IsNullOrWhiteSpace([string]$candidate)) { continue }
+        $value = [string]$candidate
+        $name = [System.IO.Path]::GetFileName($value)
+        if ($name -notin @("powershell.exe", "pwsh.exe", "pwshw.exe")) { continue }
+        if ($value -ieq "powershell.exe") { return $value }
+        try {
+            $full = [System.IO.Path]::GetFullPath($value)
+            if (Test-Path -LiteralPath $full -PathType Leaf) { return $full }
+        } catch { }
     }
-    return $null
+    return "powershell.exe"
 }
 
-function Test-WindoResultPath([string]$outPath, [string]$secureDir) {
-    if ([string]::IsNullOrWhiteSpace($outPath)) { return "OutPath is missing." }
+function Resolve-WindoRunnerWorkingDirectory {
+    param(
+        [object]$RequestedPath = $null,
+        [Parameter(Mandatory = $true)][string]$SecureDirectory
+    )
+
+    $userProfile = $null
+    try { $userProfile = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile) } catch { }
+    foreach ($candidate in @($RequestedPath, $userProfile, $HOME, $SecureDirectory, [System.IO.Path]::GetTempPath())) {
+        if ([string]::IsNullOrWhiteSpace([string]$candidate)) { continue }
+        try {
+            $value = [string]$candidate
+            if (-not [System.IO.Path]::IsPathRooted($value)) { continue }
+            $full = [System.IO.Path]::GetFullPath($value)
+            if (Test-Path -LiteralPath $full -PathType Container) { return $full }
+        } catch { }
+    }
+    throw "No safe working directory is available for the elevated child process."
+}
+
+function Get-WindoTextSha256([string]$Value) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
-        $full = [System.IO.Path]::GetFullPath($outPath)
-        $root = [System.IO.Path]::GetFullPath($secureDir)
-        $normalizedRoot = $root.TrimEnd('\')
-        $normalizedRoot = $normalizedRoot.TrimEnd('/')
-        $matchPrefix = $normalizedRoot + [System.IO.Path]::DirectorySeparatorChar
-        if (-not ($full.StartsWith($matchPrefix, [StringComparison]::OrdinalIgnoreCase) -or ($full -eq $normalizedRoot)) ) {
-            return "OutPath must be under SecureDir."
-        }
-        $name = [System.IO.Path]::GetFileName($full)
-        if ($name -notmatch '^windo_res\.[a-f0-9]+\.json$') { return "OutPath file name is invalid." }
-    } catch { return "OutPath is invalid." }
-    return $null
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Value)
+        return (-join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("X2") }))
+    } finally {
+        $sha.Dispose()
+    }
 }
 
 function Invoke-WindoPreserveEnvironment {
     param([object]$Snapshot)
     $restored = @{}
     if ($null -eq $Snapshot) { return $restored }
+    $maxEntries = 256
+    $maxValueLength = 8192
 
     $items = @()
     if ($Snapshot -is [System.Collections.IDictionary]) {
@@ -1229,6 +1479,7 @@ function Invoke-WindoPreserveEnvironment {
     } else {
         return $restored
     }
+    if ($items.Count -gt $maxEntries) { return $restored }
 
     foreach ($entry in $items) {
         if ($Snapshot -is [System.Collections.IDictionary]) {
@@ -1239,6 +1490,7 @@ function Invoke-WindoPreserveEnvironment {
             $value = $entry.Value
         }
         if ($name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { continue }
+        if ($null -ne $value -and ([string]$value).Length -gt $maxValueLength) { continue }
         try { $restored[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') } catch { $restored[$name] = $null }
         try {
             if ($null -eq $value) {
@@ -1261,6 +1513,60 @@ function Restore-WindoPreserveEnvironment {
     }
 }
 
+function _windo_next_request {
+    param([string]$SecureDir)
+
+    try {
+        return Get-ChildItem -Path $SecureDir -Filter "windo_req.*.json" -ErrorAction SilentlyContinue |
+            Sort-Object @{Expression = { $_.LastWriteTime }}, @{Expression = { $_.Name }} |
+            Select-Object -First 1
+    } catch {
+        return $null
+    }
+}
+
+function Test-WindoCommandLine([string]$cmdLine) {
+    $max = Get-WindoMaxCommandChars
+    if ($null -eq $cmdLine) { return "Command is missing." }
+    if ([string]::IsNullOrWhiteSpace([string]$cmdLine)) { return "Command is missing." }
+    if ($cmdLine.Length -gt $max) { return "Command exceeds max length ($max)." }
+    foreach ($ch in $cmdLine.ToCharArray()) {
+        $c = [int][char]$ch
+        if ($c -eq 9) { continue }
+        if ($c -lt 32) { return "Command contains disallowed control characters." }
+    }
+    return $null
+}
+
+function Test-WindoExecutionCommand([string]$cmdLine) {
+    if ([string]::IsNullOrWhiteSpace([string]$cmdLine)) { return "Execution command is missing." }
+    foreach ($ch in $cmdLine.ToCharArray()) {
+        $c = [int][char]$ch
+        if ($c -eq 9) { continue }
+        if ($c -lt 32) { return "Execution command contains disallowed control characters." }
+    }
+    # CreateProcess limits a Windows command line to 32,767 characters. Leave
+    # headroom for the executable path and PowerShell switches.
+    $encodedLength = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($cmdLine)).Length
+    if ($encodedLength -gt 30000) { return "Execution command exceeds the Windows process command-line limit." }
+    return $null
+}
+
+function Test-WindoResultPath([string]$outPath, [string]$secureDir) {
+    if ([string]::IsNullOrWhiteSpace($outPath)) { return "OutPath is missing." }
+    try {
+        $full = [System.IO.Path]::GetFullPath($outPath)
+        $root = [System.IO.Path]::GetFullPath($secureDir)
+        $normalizedRoot = $root.TrimEnd('\')
+        $normalizedRoot = $normalizedRoot.TrimEnd('/')
+        $matchPrefix = $normalizedRoot + [System.IO.Path]::DirectorySeparatorChar
+        if (-not ($full.StartsWith($matchPrefix, [StringComparison]::OrdinalIgnoreCase) -or ($full -eq $normalizedRoot)) ) { return "OutPath must be under SecureDir." }
+        $name = [System.IO.Path]::GetFileName($full)
+    if ($name -cnotmatch '^windo_res\.[a-f0-9]+\.json$') { return "OutPath file name is invalid." }
+    } catch { return "OutPath is invalid." }
+    return $null
+}
+
 function _windo_get_member_value([object]$Object, [string]$Name) {
     if ($null -eq $Object) { return $null }
 
@@ -1277,40 +1583,77 @@ function _windo_get_member_value([object]$Object, [string]$Name) {
     return $null
 }
 
-function _windo_unprotect_text([string]$EncryptedText) {
-    if ([string]::IsNullOrWhiteSpace($EncryptedText)) { return $null }
-    try {
-        $enc = [Convert]::FromBase64String($EncryptedText)
-        $protectedDataType = [type]::GetType("System.Security.Cryptography.ProtectedData")
-        if ($null -eq $protectedDataType) {
-            return [System.Text.Encoding]::UTF8.GetString($enc)
-        }
+function Get-WindoProtectedDataType {
+    $typeName = "System.Security.Cryptography.ProtectedData"
+    foreach ($qualifiedName in @(
+        "$typeName, System.Security.Cryptography.ProtectedData",
+        "$typeName, System.Security"
+    )) {
         try {
-            $bytes = $protectedDataType::Unprotect(
-                $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
-            )
-            [System.Text.Encoding]::UTF8.GetString($bytes)
-        } catch {
-            [System.Text.Encoding]::UTF8.GetString($enc)
-        }
+            $resolved = [type]::GetType($qualifiedName, $false)
+            if ($null -ne $resolved) { return $resolved }
+        } catch { }
+    }
+    return $null
+}
+
+function Get-WindoCurrentUserProtectionScope([type]$ProtectedDataType) {
+    if ($null -eq $ProtectedDataType) { return $null }
+    try {
+        $scopeType = $ProtectedDataType.Assembly.GetType("System.Security.Cryptography.DataProtectionScope", $false, $false)
+        if ($null -eq $scopeType) { return $null }
+        return [Enum]::Parse($scopeType, "CurrentUser")
+    } catch { return $null }
+}
+
+function _dpapi_unprotect([string]$Base64Input) {
+    if ([string]::IsNullOrWhiteSpace($Base64Input) -or $Base64Input.Length -gt 100663296) { return $null }
+    $protectedDataType = Get-WindoProtectedDataType
+    $scope = Get-WindoCurrentUserProtectionScope $protectedDataType
+    if ($null -eq $protectedDataType -or $null -eq $scope) { return $null }
+    try {
+        $enc = [Convert]::FromBase64String($Base64Input)
+        $bytes = $protectedDataType::Unprotect($enc, $null, $scope)
+        (New-Object System.Text.UTF8Encoding($false, $true)).GetString($bytes)
     } catch {
         return $null
     }
 }
 
-function _windo_build_artifact_payload {
-    param([object]$Payload)
-    if ($null -eq $Payload) { return $null }
+function _windo_unprotect_text([string]$EncryptedText) {
+    if ([string]::IsNullOrWhiteSpace($EncryptedText)) { return $null }
+    if ($EncryptedText.Length -gt 100663296) { return $null }
+    return _dpapi_unprotect $EncryptedText
+}
+
+function _dpapi_protect([string]$Text) {
+    $protectedDataType = Get-WindoProtectedDataType
+    $scope = Get-WindoCurrentUserProtectionScope $protectedDataType
+    if ($null -eq $protectedDataType -or $null -eq $scope) { return $null }
     try {
-        $json = $Payload | ConvertTo-Json -Depth 20 -Compress
-        return [ordered]@{
-            Version = 1
-            Type    = "dpapi-json"
-            Data    = _dpapi_protect $json
-        }
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+        $enc = $protectedDataType::Protect($bytes, $null, $scope)
+        return [Convert]::ToBase64String($enc)
     } catch {
         return $null
     }
+}
+
+function _windo_build_artifact_payload([object]$Payload) {
+    if ($null -eq $Payload) { return $null }
+    try {
+        $json = $Payload | ConvertTo-Json -Depth 20 -Compress
+        $protected = _dpapi_protect $json
+        if ([string]::IsNullOrWhiteSpace($protected)) { return $null }
+        return [ordered]@{ Version = 1; Type = "dpapi-json"; Data = $protected }
+    } catch {
+        return $null
+    }
+}
+
+function _windo_resolve_preserve_environment([object]$Payload) {
+    if ($null -eq $Payload) { return $null }
+    return (_windo_resolve_artifact_payload $Payload)
 }
 
 function _windo_resolve_artifact_payload {
@@ -1319,153 +1662,180 @@ function _windo_resolve_artifact_payload {
 
     if ($Payload -is [string]) {
         if ([string]::IsNullOrWhiteSpace([string]$Payload)) { return $null }
+        if (([string]$Payload).Length -gt 100663296) { return $null }
         if ([string]$Payload -match '^[\r\n\s\t]*\{') {
-            if ([string]$Payload.Length -gt 262144) { return $null }
             try { return (_windo_resolve_artifact_payload ($Payload | ConvertFrom-Json -ErrorAction Stop)) } catch { return $null }
         }
         return $null
     }
 
+    $payloadVersion = $null
     $payloadType = $null
     $payloadData = $null
     if ($Payload -is [System.Collections.IDictionary]) {
+        if ($Payload.Contains("Version")) { $payloadVersion = $Payload["Version"] }
         if ($Payload.Contains("Type")) { $payloadType = $Payload["Type"] }
         if ($Payload.Contains("Data")) { $payloadData = $Payload["Data"] }
     } else {
-        if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Type")) { $payloadType = $Payload.Type }
-        if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Data")) { $payloadData = $Payload.Data }
+        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Version") { $payloadVersion = $Payload.Version }
+        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Type") { $payloadType = $Payload.Type }
+        if ($Payload.PSObject -and $Payload.PSObject.Properties.Name -contains "Data") { $payloadData = $Payload.Data }
     }
-
-    if (([string]::IsNullOrWhiteSpace([string]$payloadType) -eq $false) -and ([string]$payloadType -ieq "dpapi-json") -and ([string]::IsNullOrWhiteSpace([string]$payloadData) -eq $false)) {
+    $version = 0
+    try { $version = [int]$payloadVersion } catch { return $null }
+    if ($version -eq 1 -and ([string]$payloadType -ceq "dpapi-json") -and -not [string]::IsNullOrWhiteSpace([string]$payloadData) -and ([string]$payloadData).Length -le 100663296) {
         $json = _windo_unprotect_text ([string]$payloadData)
         if ($null -ne $json) {
-            try { return ($json | ConvertFrom-Json -ErrorAction Stop) } catch { return $null }
+            try { return $json | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
         }
         return $null
     }
 
-    return $Payload
+    return $null
 }
 
-function _windo_resolve_preserve_environment([object]$Payload) {
-    if ($null -eq $Payload) { return $null }
-
-    if ($Payload -is [string]) {
-        try { return $Payload | ConvertFrom-Json } catch { return $null }
-    }
-
-    $payloadType = $null
-    $payloadData = $null
-    if ($Payload -is [System.Collections.IDictionary]) {
-        if ($Payload.Contains("Type")) { $payloadType = $Payload["Type"] }
-        if ($Payload.Contains("Data")) { $payloadData = $Payload["Data"] }
-    } else {
-        if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Type")) { $payloadType = $Payload.Type }
-        if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Data")) { $payloadData = $Payload.Data }
-    }
-    if (-not [string]::IsNullOrWhiteSpace([string]$payloadType) -and -not [string]::IsNullOrWhiteSpace([string]$payloadData)) {
-        if ([string]$payloadType -ieq "dpapi-json") {
-            $json = _windo_unprotect_text ([string]$payloadData)
-            if ($null -ne $json) {
-                try { return $json | ConvertFrom-Json } catch { return $null }
-            }
-            return $null
-        }
-    }
-
-    return $Payload
+function _windo_join_output_streams([string]$StdOut, [string]$StdErr) {
+    $out = if ($null -eq $StdOut) { "" } else { $StdOut }
+    $err = if ($null -eq $StdErr) { "" } else { $StdErr }
+    if ([string]::IsNullOrWhiteSpace($out)) { return $err.TrimEnd() }
+    if ([string]::IsNullOrWhiteSpace($err)) { return $out.TrimEnd() }
+    return ($out + "`n" + $err).TrimEnd()
 }
 
-function _sha256_hex([string]$s) {
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($s))
-        return ([BitConverter]::ToString($hashBytes) -replace '-','')
-    } finally {
-        $sha.Dispose()
-    }
-}
-
-function _windo_next_request([string]$SecureDir) {
-    try {
-        return Get-ChildItem -Path $SecureDir -Filter "windo_req.*.json" -ErrorAction SilentlyContinue |
-            Sort-Object @{Expression = { $_.LastWriteTime }}, @{Expression = { $_.Name }} |
-            Select-Object -First 1
-    } catch {
-        return $null
-    }
-}
-
-"RUNNER START: $([DateTime]::Now.ToString('s'))" | Write-TextFileAtomic -Path $RunnerLast -Encoding ([System.Text.UTF8Encoding]::new($false))
+Write-RunnerTrace -Overwrite "RUNNER START: $([DateTime]::Now.ToString('s'))"
 
 $createdNew = $false
-$m = New-Object System.Threading.Mutex($false, $MutexName, [ref]$createdNew)
+$m = New-WindoRunnerMutex -Name $MutexName -CreatedNew ([ref]$createdNew)
 
 try {
     if (-not $m.WaitOne(30000)) {
-        "EXIT 9: mutex wait timeout" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace "EXIT 9: mutex wait timeout"
         exit 9
     }
 
+    # A scheduled task can ignore a second Start request while an instance is
+    # already running. Drain all queued requests under the same mutex so every
+    # concurrent `windo` caller is eventually serviced.
+    while ($true) {
     $req = _windo_next_request $SecureDir
 
     if (-not $req) {
-        "NO WORK: no pending request files" | Add-Content -Path $RunnerLast -Encoding UTF8
-        exit 0
+        Write-RunnerTrace "NO WORK: no pending request files"
+        break
     }
 
-    # Claim the queued item before reading or executing it. This keeps a
-    # timed-out client or a second UAC launch from replaying the same command.
-    # Rename is atomic because both paths live under SecureDir.
+    # Claim the queue item before reading or executing it. A timed-out client,
+    # a second UAC launch, or a runner restart must never see the same command
+    # as a fresh queued request. Rename is atomic within SecureDir.
     $claimedPath = Join-Path $SecureDir ($req.Name -replace '^windo_req\.', 'windo_run.')
     try {
         Move-Item -LiteralPath $req.FullName -Destination $claimedPath -ErrorAction Stop
         $req = Get-Item -LiteralPath $claimedPath -ErrorAction Stop
-        "CLAIMED: $($req.Name)" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace "CLAIMED: $($req.Name)"
     } catch {
-        "CLAIM FAILED: $($_.Exception.Message)" | Add-Content -Path $RunnerLast -Encoding UTF8
-        exit 0
+        Write-RunnerTrace ("CLAIM FAILED: " + $_.Exception.Message)
+        # Cancellation can win between queue selection and the atomic claim.
+        # If the selected path is gone, continue draining later requests. A
+        # still-present unclaimable file is a real queue/storage fault; stop to
+        # avoid a tight retry loop on the same oldest item.
+        if (-not (Test-Path -LiteralPath $req.FullName)) {
+            $req = $null
+            continue
+        }
+        break
     }
 
     try {
-        $pending = _windo_resolve_artifact_payload (Get-Content -Raw -Path $req.FullName)
+        $pendingRaw = Get-Content -Raw -Path $req.FullName
+        $pending = _windo_resolve_artifact_payload $pendingRaw
     } catch {
-        "BAD REQUEST FILE: unable to read request payload." | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace ("BAD REQUEST JSON: $($req.FullName) :: $($_.Exception.Message)")
         try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".bad") -ErrorAction SilentlyContinue } catch {}
-        exit 3
+        $req = $null
+        continue
     }
 
-    $cmdLine = [string]$pending.Command
-    $outPath = [string]$pending.OutPath
-    $reqId   = [string]$pending.RequestId
+    if ($null -eq $pending -or (-not ($pending.PSObject -or $pending -is [System.Collections.IDictionary])) ) {
+        Write-RunnerTrace ("BAD REQUEST JSON: $($req.FullName) :: malformed request payload")
+        try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".bad") -ErrorAction SilentlyContinue } catch {}
+        $req = $null
+        continue
+    }
+
+    $cmdLine = _windo_get_member_value $pending "Command"
+    $executionCommand = _windo_get_member_value $pending "ExecutionCommand"
+    $requestedPowerShellPath = _windo_get_member_value $pending "PowerShellPath"
+    $requestedWorkingDirectory = _windo_get_member_value $pending "WorkingDirectory"
+    $requestUserSid = _windo_get_member_value $pending "UserSid"
+    $outPath = _windo_get_member_value $pending "OutPath"
+    $reqId   = _windo_get_member_value $pending "RequestId"
+
+    $currentUserSid = Get-WindoRunnerCurrentIdentitySid
+    if ([string]::IsNullOrWhiteSpace([string]$currentUserSid) -or [string]::IsNullOrWhiteSpace([string]$requestUserSid) -or [string]$requestUserSid -ine [string]$currentUserSid) {
+        Write-RunnerTrace ("BAD REQUEST IDENTITY: $($req.FullName)")
+        try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".bad") -ErrorAction SilentlyContinue } catch {}
+        $req = $null
+        continue
+    }
+
+    if ($null -eq $cmdLine -or $null -eq $outPath) {
+        Write-RunnerTrace ("BAD REQUEST JSON: $($req.FullName) :: malformed request payload (missing Command or OutPath)")
+        try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".bad") -ErrorAction SilentlyContinue } catch {}
+        $req = $null
+        continue
+    }
+
+    $cmdLine = [string]$cmdLine
+    if ($null -eq $executionCommand) { $executionCommand = $cmdLine }
+    $executionCommand = [string]$executionCommand
+    $childPowerShellPath = Resolve-WindoRunnerPowerShellPath $requestedPowerShellPath
+    $childWorkingDirectory = Resolve-WindoRunnerWorkingDirectory -RequestedPath $requestedWorkingDirectory -SecureDirectory $SecureDir
+    $outPath = [string]$outPath
+    $reqId   = [string]$reqId
     $timeoutMsOverride = $null
     if ($pending.PSObject.Properties.Name -contains "TimeoutOverrideMs") { $timeoutMsOverride = $pending.TimeoutOverrideMs }
     $preserveEnvironment = $null
+    $preserveEnvironmentInvalid = $false
+    $preserveEnvironmentMode = _windo_get_member_value $pending "PreserveEnvironmentMode"
+    $preserveEnvironmentRequested = -not [string]::IsNullOrWhiteSpace([string]$preserveEnvironmentMode)
     if ($pending.PSObject.Properties.Name -contains "PreserveEnvironment") {
-        $preserveEnvironment = _windo_resolve_preserve_environment $pending.PreserveEnvironment
+        if ($null -ne $pending.PreserveEnvironment) {
+            $preserveEnvironment = _windo_resolve_preserve_environment $pending.PreserveEnvironment
+            if ($null -eq $preserveEnvironment) { $preserveEnvironmentInvalid = $true }
+        } elseif ($preserveEnvironmentRequested) {
+            $preserveEnvironmentInvalid = $true
+        }
+    } elseif ($preserveEnvironmentRequested) {
+        $preserveEnvironmentInvalid = $true
     }
 
-    "PROCESS: RequestId=$reqId  OutPath=$outPath" | Add-Content -Path $RunnerLast -Encoding UTF8
-    "CMD_HASH=$(_sha256_hex $cmdLine)" | Add-Content -Path $RunnerLast -Encoding UTF8
+    Write-RunnerTrace "PROCESS: RequestId=$reqId  OutPath=$outPath"
+    Write-RunnerTrace "CMD_HASH: $(Get-WindoTextSha256 $cmdLine)  CWD_HASH: $(Get-WindoTextSha256 $childWorkingDirectory)  SHELL: $([System.IO.Path]::GetFileName($childPowerShellPath))"
 
     $badOut = Test-WindoResultPath $outPath $SecureDir
     if ($badOut) {
-        "VALIDATION FAILED (OutPath): $badOut" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace ("VALIDATION FAILED (OutPath): $badOut")
         try { Remove-Item -Path $req.FullName -Force -ErrorAction SilentlyContinue } catch {}
-        "RUNNER END: $([DateTime]::Now.ToString('s'))" | Add-Content -Path $RunnerLast -Encoding UTF8
-        exit 5
+        Write-RunnerTrace "REQUEST END: invalid result path"
+        $req = $null
+        continue
     }
 
     $badCmd = Test-WindoCommandLine $cmdLine
+    if (-not $badCmd) { $badCmd = Test-WindoExecutionCommand $executionCommand }
+    if (-not $badCmd -and $preserveEnvironmentInvalid) { $badCmd = "PreserveEnvironment protection or validation failed." }
     if ($badCmd) {
-        "VALIDATION FAILED (Command): $badCmd" | Add-Content -Path $RunnerLast -Encoding UTF8
+        Write-RunnerTrace ("VALIDATION FAILED (Command): $badCmd")
+        $message = "<WINDO VALIDATION FAILED: $badCmd>"
+        $stdout = $message
+        $stderr = ""
         $end = Get-Date
         $result = @{
             Timestamp  = $end.ToString("yyyy-MM-dd HH:mm:ss")
             Command    = $cmdLine
-            Output     = "<WINDO VALIDATION FAILED: $badCmd>"
-            StdOut     = "<WINDO VALIDATION FAILED: $badCmd>"
-            StdErr     = ""
+            Output     = $message
+            StdOut     = $stdout
+            StdErr     = $stderr
             ExitCode   = -3
             DurationMs = 0
             RequestId  = $reqId
@@ -1475,14 +1845,18 @@ try {
         try {
             $sealedResult = _windo_build_artifact_payload $result
             if ($null -eq $sealedResult) { throw "Unable to secure validation result." }
-            $sealedResult | ConvertTo-Json -Compress | Write-TextFileAtomic -Path $outPath -Encoding ([System.Text.UTF8Encoding]::new($false))
+            $sealedResultJson = $sealedResult | ConvertTo-Json -Compress
+            Write-TextFileAtomic -Path $outPath -Content $sealedResultJson -Encoding (New-Object System.Text.UTF8Encoding($false))
         } catch {
-            "EXIT 4: failed to write validation result." | Add-Content -Path $RunnerLast -Encoding UTF8
-            exit 4
+            Write-RunnerTrace ("EXIT 4: failed to write validation result: $($_.Exception.Message)")
+            try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".failed") -ErrorAction SilentlyContinue } catch {}
+            $req = $null
+            continue
         }
         try { Remove-Item -Path $req.FullName -Force -ErrorAction SilentlyContinue } catch {}
-        "RUNNER END: $([DateTime]::Now.ToString('s'))" | Add-Content -Path $RunnerLast -Encoding UTF8
-        exit 0
+        Write-RunnerTrace "REQUEST END: $reqId"
+        $req = $null
+        continue
     }
 
     $start = Get-Date
@@ -1498,16 +1872,7 @@ try {
     try {
         $envState = Invoke-WindoPreserveEnvironment -Snapshot $preserveEnvironment
         try {
-            [WindoRunner.ChildExec]::RunCmd(
-                $cmdLine,
-                $timeoutMs,
-                $maxPer,
-                [ref]$stdout,
-                [ref]$stderr,
-                [ref]$timedOut,
-                [ref]$truncated,
-                [ref]$exitCode
-            )
+            Invoke-WindoRunnerChildExec -PowerShellPath $childPowerShellPath -CommandLine $executionCommand -WorkingDirectory $childWorkingDirectory -TimeoutMs $timeoutMs -MaxCharsPerStream $maxPer -StdOut ([ref]$stdout) -StdErr ([ref]$stderr) -TimedOut ([ref]$timedOut) -Truncated ([ref]$truncated) -ExitCode ([ref]$exitCode)
         } catch {
             $stdout = ""
             $stderr = ($_ | Out-String).TrimEnd()
@@ -1549,51 +1914,169 @@ try {
     try {
         $sealedResult = _windo_build_artifact_payload $result
         if ($null -eq $sealedResult) { throw "Unable to secure result." }
-        $sealedResult | ConvertTo-Json -Compress | Write-TextFileAtomic -Path $outPath -Encoding ([System.Text.UTF8Encoding]::new($false))
-        "WROTE RESULT: ExitCode=$exitCode DurationMs=$durationMs TimedOut=$timedOut Truncated=$truncated" | Add-Content -Path $RunnerLast -Encoding UTF8
+        $sealedResultJson = $sealedResult | ConvertTo-Json -Compress
+        Write-TextFileAtomic -Path $outPath -Content $sealedResultJson -Encoding (New-Object System.Text.UTF8Encoding($false))
+        Write-RunnerTrace "WROTE RESULT: ExitCode=$exitCode DurationMs=$durationMs TimedOut=$timedOut Truncated=$truncated"
     } catch {
-        "EXIT 4: failed to write result JSON." | Add-Content -Path $RunnerLast -Encoding UTF8
-        exit 4
+        Write-RunnerTrace ("EXIT 4: failed to write result JSON: $($_.Exception.Message)")
+        try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".failed") -ErrorAction SilentlyContinue } catch {}
+        $req = $null
+        continue
     }
 
     try { Remove-Item -Path $req.FullName -Force -ErrorAction SilentlyContinue } catch {}
 
-    "RUNNER END: $([DateTime]::Now.ToString('s'))" | Add-Content -Path $RunnerLast -Encoding UTF8
+    Write-RunnerTrace "REQUEST END: $reqId"
+    $req = $null
+    }
+
+    Write-RunnerTrace "RUNNER END: $([DateTime]::Now.ToString('s'))"
     exit 0
 }
-finally {
-    try { $m.ReleaseMutex() } catch {}
-    try { $m.Dispose() } catch {}
+catch {
+    Write-RunnerTrace ("UNHANDLED: " + $_.Exception.Message)
+    if ($req) {
+        try { Rename-Item -Path $req.FullName -NewName ($req.Name + ".failed") -ErrorAction SilentlyContinue } catch {}
+    }
+    Write-RunnerTrace ("RUNNER END: $([DateTime]::Now.ToString('s'))")
+    exit 1
 }
+finally {
+    if ($m) {
+        Release-WindoRunnerMutex -Mutex $m
+        Close-WindoRunnerMutex -Mutex $m
+    }
+}
+
+
+
 
 '@
 Write-Utf8NoBomFile -Path $RunnerPath -Content $RunnerContent
 
-$UserId = "$env:USERDOMAIN\$env:USERNAME"
+$UserId = Get-WindoCurrentIdentitySid
+if ([string]::IsNullOrWhiteSpace($UserId)) {
+    throw "Unable to resolve the current Windows user SID; refusing to register a cross-user elevation broker."
+}
 
 $SelfUpdateContent = @'
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
 
-$RunnerPath = "__RUNNER_PATH__"
-$StampFile  = "__STAMP_FILE__"
-$TaskName   = "WindoElevatedRunner"
+$RunnerPath = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("__RUNNER_PATH_B64__"))
+$StampFile  = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("__STAMP_FILE_B64__"))
+$TaskName   = "__TASK_MAIN__"
 $UserId     = "__USER_ID__"
+
+function Write-TextFileAtomic {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Content,
+        [Parameter()][System.Text.Encoding]$Encoding = (New-Object System.Text.UTF8Encoding($false))
+    )
+    $dir = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($dir) -and !(Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $tmp = Join-Path $dir (".windo_tmp_" + [Guid]::NewGuid().ToString("n") + ".tmp")
+    try {
+        [System.IO.File]::WriteAllText($tmp, $Content, $Encoding)
+        Move-Item -LiteralPath $tmp -Destination $Path -Force
+    } finally {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    }
+}
 
 function Write-Trace {
     param([string]$Message)
     "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $Message" | Add-Content -Path $StampFile -Encoding UTF8
 }
 
-"SELF-UPDATE START" | Write-TextFileAtomic -Path $StampFile -Encoding ([System.Text.UTF8Encoding]::new($false))
+function Get-WindoScheduledTask {
+    param([Parameter(Mandatory=$true)][string]$TaskName)
+    Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+}
+
+function Set-WindoScheduledTask {
+    param([Parameter(Mandatory=$true)][string]$TaskName, [Parameter(Mandatory=$true)]$Action)
+    Set-ScheduledTask -TaskName $TaskName -Action $Action | Out-Null
+}
+
+function Register-WindoScheduledTask {
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskName,
+        [Parameter(Mandatory=$true)]$Action,
+        [Parameter(Mandatory=$true)]$Principal,
+        [Parameter(Mandatory=$true)]$Settings
+    )
+    Register-ScheduledTask -TaskName $TaskName -Action $Action -Principal $Principal -Settings $Settings -Force | Out-Null
+}
+
+function New-WindoScheduledTaskAction {
+    param([Parameter(Mandatory=$true)][string]$Execute, [Parameter(Mandatory=$true)][string]$Argument)
+    New-ScheduledTaskAction -Execute $Execute -Argument $Argument
+}
+
+function New-WindoScheduledTaskPrincipal {
+    param([Parameter(Mandatory=$true)][string]$UserId, [Parameter(Mandatory=$true)][string]$LogonType)
+    New-ScheduledTaskPrincipal -UserId $UserId -LogonType $LogonType -RunLevel Highest
+}
+
+function New-WindoScheduledTaskSettingsSet {
+    param(
+        [switch]$StartWhenAvailable,
+        [switch]$AllowStartIfOnBatteries,
+        [switch]$DontStopIfGoingOnBatteries,
+        [string]$MultipleInstances = "IgnoreNew"
+    )
+    New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances $MultipleInstances
+}
+
+function Test-WindoSelfUpdateTaskHealth {
+    param(
+        [Parameter(Mandatory=$true)]$Task,
+        [Parameter(Mandatory=$true)][string]$ExpectedExecute,
+        [Parameter(Mandatory=$true)][string]$ExpectedArgument,
+        [Parameter(Mandatory=$true)][string]$ExpectedUserId
+    )
+    if ($null -eq $Task -or $null -eq $Task.Principal -or $null -eq $Task.Settings) { return $false }
+    $actions = @($Task.Actions)
+    if ($actions.Count -ne 1) { return $false }
+    if ([string]$actions[0].Execute -ine $ExpectedExecute -or [string]$actions[0].Arguments -ine $ExpectedArgument) { return $false }
+    if (
+        [string]$Task.Principal.UserId -ine $ExpectedUserId -or
+        [string]$Task.Principal.RunLevel -ne "Highest" -or
+        [string]$Task.Principal.LogonType -ne "Interactive"
+    ) { return $false }
+
+    $settingsProperties = @($Task.Settings.PSObject.Properties.Name)
+    $allowOnBatteries = if ($settingsProperties -contains "AllowStartIfOnBatteries") {
+        [bool]$Task.Settings.AllowStartIfOnBatteries
+    } elseif ($settingsProperties -contains "DisallowStartIfOnBatteries") {
+        -not [bool]$Task.Settings.DisallowStartIfOnBatteries
+    } else { $false }
+    $dontStopOnBatteries = if ($settingsProperties -contains "DontStopIfGoingOnBatteries") {
+        [bool]$Task.Settings.DontStopIfGoingOnBatteries
+    } elseif ($settingsProperties -contains "StopIfGoingOnBatteries") {
+        -not [bool]$Task.Settings.StopIfGoingOnBatteries
+    } else { $false }
+    return (
+        [bool]$Task.Settings.StartWhenAvailable -and
+        $allowOnBatteries -and
+        $dontStopOnBatteries -and
+        [string]$Task.Settings.MultipleInstances -eq "IgnoreNew"
+    )
+}
+
+"SELF-UPDATE START" | Write-TextFileAtomic -Path $StampFile -Encoding (New-Object System.Text.UTF8Encoding($false))
 
 try {
     try {
         Import-Module ScheduledTasks -ErrorAction Stop
+        Write-Trace "Imported ScheduledTasks"
     } catch {
-        Write-Trace "ScheduledTasks module not available; task maintenance is not possible in this context."
-        return
+        Write-Trace "ScheduledTasks module unavailable; task maintenance is not possible in this context."
+        Write-Trace "SELF-UPDATE END (FAILED)"
+        exit 1
     }
-    Write-Trace "Imported ScheduledTasks"
 
     $PwshwCmd = Get-Command "pwshw.exe" -ErrorAction SilentlyContinue
     $quotedRunnerPath = [char]34 + ([System.IO.Path]::GetFullPath($RunnerPath)) + [char]34
@@ -1607,47 +2090,26 @@ try {
         Write-Trace "Using powershell.exe hidden fallback"
     }
 
-    $Action = New-ScheduledTaskAction -Execute $Exe -Argument $Arg
+    $Action = New-WindoScheduledTaskAction -Execute $Exe -Argument $Arg
 
     try {
-        $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-        Set-ScheduledTask -TaskName $TaskName -Action $Action | Out-Null
-        $updated = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-        $updatedAction = @($updated.Actions | Select-Object -First 1)
-        $actualUser = if ($null -ne $updated.Principal) { [string]$updated.Principal.UserId } else { "" }
-        $actualUserLeaf = if ($actualUser -match '\\') { ($actualUser -split '\\')[-1] } else { $actualUser }
-        $expectedUserLeaf = if ([string]$UserId -match '\\') { ([string]$UserId -split '\\')[-1] } else { [string]$UserId }
-        $settingsProps = if ($null -ne $updated.Settings) { @($updated.Settings.PSObject.Properties.Name) } else { @() }
-        $allowOnBatteries = if ($settingsProps -contains "AllowStartIfOnBatteries") { [bool]$updated.Settings.AllowStartIfOnBatteries } elseif ($settingsProps -contains "DisallowStartIfOnBatteries") { -not [bool]$updated.Settings.DisallowStartIfOnBatteries } else { $false }
-        $dontStopOnBatteries = if ($settingsProps -contains "DontStopIfGoingOnBatteries") { [bool]$updated.Settings.DontStopIfGoingOnBatteries } elseif ($settingsProps -contains "StopIfGoingOnBatteries") { -not [bool]$updated.Settings.StopIfGoingOnBatteries } else { $false }
-        if (
-            $null -eq $updatedAction -or
-            $updatedAction.Count -eq 0 -or
-            ([string]$updatedAction[0].Execute -ine $Exe) -or
-            ([string]$updatedAction[0].Arguments -ine $Arg) -or
-            ($null -eq $updated.Principal) -or
-            ($actualUserLeaf -ine $expectedUserLeaf) -or
-            ([string]$updated.Principal.RunLevel -ne "Highest") -or
-            ($null -eq $updated.Settings) -or
-            (-not $updated.Settings.StartWhenAvailable) -or
-            (-not $allowOnBatteries) -or
-            (-not $dontStopOnBatteries)
-        ) {
-            Write-Trace ("VERIFY failed for " + $TaskName + " after update/repair")
+        Get-WindoScheduledTask -TaskName $TaskName | Out-Null
+        Set-WindoScheduledTask -TaskName $TaskName -Action $Action | Out-Null
+        $updated = Get-WindoScheduledTask -TaskName $TaskName
+        if (-not (Test-WindoSelfUpdateTaskHealth -Task $updated -ExpectedExecute $Exe -ExpectedArgument $Arg -ExpectedUserId $UserId)) {
+            Write-Trace ("VERIFY failed for " + $TaskName + " after update")
             Write-Trace ("EXPECTED: " + $Exe + " " + $Arg)
-            if ($null -ne $updatedAction -and $updatedAction.Count -gt 0) {
-                Write-Trace ("ACTUAL: " + [string]$updatedAction[0].Execute + " " + [string]$updatedAction[0].Arguments)
-            }
-            exit 1
+            throw "Updated task health verification failed; recreating the owned scoped task."
         }
         Write-Trace ("Updated main task action -> " + $Exe + " " + $Arg)
     } catch {
-        $Principal = New-ScheduledTaskPrincipal -UserId $UserId -LogonType Interactive -RunLevel Highest
-        $Settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-        Register-ScheduledTask -TaskName $TaskName -Action $Action -Principal $Principal -Settings $Settings -Force | Out-Null
-        $updated = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-        if ([string]$updated.Principal.RunLevel -ne "Highest") {
+        $Principal = New-WindoScheduledTaskPrincipal -UserId $UserId -LogonType Interactive
+        $Settings  = New-WindoScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+        Register-WindoScheduledTask -TaskName $TaskName -Action $Action -Principal $Principal -Settings $Settings | Out-Null
+        $updated = Get-WindoScheduledTask -TaskName $TaskName
+        if (-not (Test-WindoSelfUpdateTaskHealth -Task $updated -ExpectedExecute $Exe -ExpectedArgument $Arg -ExpectedUserId $UserId)) {
             Write-Trace ("VERIFY failed for recreated " + $TaskName + " after registration")
+            Write-Trace ("EXPECTED: " + $Exe + " " + $Arg)
             exit 1
         }
         Write-Trace ("Recreated main task -> " + $Exe + " " + $Arg)
@@ -1661,16 +2123,18 @@ catch {
     try { Write-Trace ("TYPE: " + $_.Exception.GetType().FullName) } catch {}
     exit 1
 }
-
 '@
-$SelfUpdateContent = $SelfUpdateContent.Replace("__RUNNER_PATH__", $RunnerPath)
-$SelfUpdateContent = $SelfUpdateContent.Replace("__STAMP_FILE__", $UpdateLast)
+$SelfUpdateRunnerPathB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([string]$RunnerPath))
+$SelfUpdateStampFileB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([string]$UpdateLast))
+$SelfUpdateContent = $SelfUpdateContent.Replace("__RUNNER_PATH_B64__", $SelfUpdateRunnerPathB64)
+$SelfUpdateContent = $SelfUpdateContent.Replace("__STAMP_FILE_B64__", $SelfUpdateStampFileB64)
+$SelfUpdateContent = $SelfUpdateContent.Replace("__TASK_MAIN__", $TaskMain)
 $SelfUpdateContent = $SelfUpdateContent.Replace("__USER_ID__", $UserId)
 Write-Utf8NoBomFile -Path $UpdateScript -Content $SelfUpdateContent
 
 $UninstallContent = @'
 <# =====================================================================
-WINDO uninstall - removes scheduled tasks, profile block, and WINDO data.
+WINDO uninstall — removes scheduled tasks, profile block, and WINDO data.
 
 Run elevated (recommended) so scheduled tasks unregister reliably:
   powershell.exe -ExecutionPolicy Bypass -File .\windo_uninstall.ps1 -Confirm
@@ -1683,25 +2147,149 @@ Removes WINDO marker blocks from known current-user PowerShell profiles
 ===================================================================== #>
 
 param(
+    [Alias("Force")]
     [switch]$Confirm,
     [switch]$KeepSnapshots
 )
 
 $ErrorActionPreference = "Stop"
 
+$WindoLegacyBeginMarker = "# >>> WINDO-BEGIN >>>"
+$WindoLegacyEndMarker   = "# <<< WINDO-END <<<"
 $BeginMarker = "# [[ WINDO-BEGIN ]]"
 $EndMarker   = "# [[ WINDO-END ]]"
-$WindoLegacyBeginMarker = "# >>> WINDO-BEGIN >>>"
-$WindoLegacyEndMarker = "# <<< WINDO-END <<<"
+function Get-WindoUninstallCurrentSid {
+    try {
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        if ($identity -and $identity.User) { return [string]$identity.User.Value }
+    } catch { }
+    return $null
+}
+
 $TaskMain    = "WindoElevatedRunner"
 $TaskUpdate  = "WindoSelfUpdate"
+$LegacyTaskMain = $TaskMain
+$LegacyTaskUpdate = $TaskUpdate
+$UninstallUserSid = Get-WindoUninstallCurrentSid
+$HasScopedTaskNames = $false
+if (-not [string]::IsNullOrWhiteSpace($UninstallUserSid)) {
+    $scopeToken = $UninstallUserSid -replace '[^A-Za-z0-9_-]', '_'
+    $TaskMain = "$TaskMain-$scopeToken"
+    $TaskUpdate = "$TaskUpdate-$scopeToken"
+    $HasScopedTaskNames = $true
+}
 $SecureDir   = Join-Path $HOME ".pwsh_secure"
 $SnapshotDir = Join-Path (Join-Path $HOME "Documents") "windo"
+$TempRoot = if ([string]::IsNullOrWhiteSpace($env:TEMP)) { [System.IO.Path]::GetTempPath() } else { $env:TEMP }
+$BackupRoot = Join-Path $TempRoot ("windo-uninstall-backup-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+$CleanupSummary = [ordered]@{
+    TaskRemoved            = 0
+    TaskMissing            = 0
+    TaskFailed             = 0
+    ProfileScanned         = 0
+    ProfileBlocksRemoved   = 0
+    ProfileBlocksMissing    = 0
+    ProfileBackupFailures   = 0
+    SecureFilesFound       = 0
+    SecureFilesRemoved     = 0
+    SecureFilesBackupFails = 0
+    SecureDirRemoved       = $false
+    SnapshotKept           = $false
+    SnapshotBackupCreated  = $false
+    SnapshotRemoved        = $false
+    SnapshotFailed         = $false
+    FailureCount           = 0
+    FailureItems           = [System.Collections.Generic.List[string]]::new()
+}
 
 function Write-Utf8NoBomFile {
     param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Content)
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     Write-TextFileAtomic -Path $Path -Content $Content -Encoding $utf8NoBom
+}
+
+function Write-TextFileAtomic {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Content,
+        [Parameter()][System.Text.Encoding]$Encoding = (New-Object System.Text.UTF8Encoding($false))
+    )
+    $dir = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($dir) -and !(Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $tmp = Join-Path $dir (".windo_tmp_" + [Guid]::NewGuid().ToString("n") + ".tmp")
+    try {
+        [System.IO.File]::WriteAllText($tmp, $Content, $Encoding)
+        Move-Item -LiteralPath $tmp -Destination $Path -Force
+    } finally {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Register-Failure {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    $script:CleanupSummary.FailureCount++
+    $script:CleanupSummary.FailureItems.Add($Message)
+    Write-Warning $Message
+}
+
+function Unregister-WindoScheduledTask {
+    param([Parameter(Mandatory=$true)][string]$TaskName)
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop | Out-Null
+}
+
+function Test-WindoLegacyTaskOwnedByCurrentUser {
+    param(
+        [Parameter(Mandatory=$true)]$Task,
+        [Parameter(Mandatory=$true)][string]$ExpectedScriptPath
+    )
+    if ([string]::IsNullOrWhiteSpace($script:UninstallUserSid) -or $null -eq $Task.Principal) { return $false }
+    try {
+        $actual = [string]$Task.Principal.UserId
+        $actualSid = if ($actual -match '^[sS]-\d-(?:\d+-)+\d+$') {
+            ([System.Security.Principal.SecurityIdentifier]::new($actual)).Value
+        } else {
+            ([System.Security.Principal.NTAccount]::new($actual)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+        }
+        if ([string]$actualSid -ine [string]$script:UninstallUserSid) { return $false }
+        $actions = @($Task.Actions)
+        if ($actions.Count -ne 1) { return $false }
+        $expectedFullPath = [System.IO.Path]::GetFullPath($ExpectedScriptPath)
+        return ([string]$actions[0].Arguments).IndexOf($expectedFullPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    } catch { return $false }
+}
+
+function Convert-ToBackupPath {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+    $safe = $SourcePath -replace ":", "" -replace "[\\/]", "__"
+    return (Join-Path $script:BackupRoot $safe)
+}
+
+function New-BackupParent {
+    if (-not (Test-Path -LiteralPath $script:BackupRoot)) {
+        New-Item -Path $script:BackupRoot -ItemType Directory -Force | Out-Null
+    }
+}
+
+function Backup-ForRollback {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    try {
+        if (-not (Test-Path -LiteralPath $SourcePath)) {
+            return $null
+        }
+
+        New-BackupParent
+        $target = Convert-ToBackupPath -SourcePath $SourcePath
+        $targetParent = Split-Path -Path $target -Parent
+        if (-not (Test-Path -LiteralPath $targetParent)) {
+            New-Item -ItemType Directory -Path $targetParent -Force | Out-Null
+        }
+
+        Copy-Item -LiteralPath $SourcePath -Destination $target -Recurse -Force -ErrorAction Stop
+        return $target
+    } catch {
+        return $null
+    }
 }
 
 function Get-WindoProfilePathList {
@@ -1739,24 +2327,31 @@ function Get-WindoProfilePathList {
 function Remove-WindoProfileBlockFromPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
+    # Keep this function self-contained so it remains safe when embedded or
+    # unit-tested outside the script's top-level variable scope.
+    $markerPairs = @(
+        @{ Begin = if ([string]::IsNullOrWhiteSpace([string]$BeginMarker)) { '# [[ WINDO-BEGIN ]]' } else { [string]$BeginMarker }; End = if ([string]::IsNullOrWhiteSpace([string]$EndMarker)) { '# [[ WINDO-END ]]' } else { [string]$EndMarker } },
+        @{ Begin = if ([string]::IsNullOrWhiteSpace([string]$WindoLegacyBeginMarker)) { '# >>> WINDO-BEGIN >>>' } else { [string]$WindoLegacyBeginMarker }; End = if ([string]::IsNullOrWhiteSpace([string]$WindoLegacyEndMarker)) { '# <<< WINDO-END <<<' } else { [string]$WindoLegacyEndMarker } }
+    )
+
     if (!(Test-Path -LiteralPath $Path)) {
         Write-Host "[windo uninstall] Profile not present: $Path" -ForegroundColor DarkGray
+        if ($null -ne $script:CleanupSummary -and $script:CleanupSummary.PSObject.Properties.Name -contains "ProfileScanned") { $script:CleanupSummary.ProfileScanned++ }
         return $false
     }
+    if ($null -ne $script:CleanupSummary -and $script:CleanupSummary.PSObject.Properties.Name -contains "ProfileScanned") { $script:CleanupSummary.ProfileScanned++ }
 
     try {
         $text = Get-Content -Raw -LiteralPath $Path -ErrorAction Stop
     } catch {
         Write-Warning ("Could not read profile " + $Path + ": " + $_.Exception.Message)
+        Register-Failure ("Could not read profile for cleanup: " + $Path)
         return $false
     }
 
     $removedAny = $false
     $updated = $text
-    foreach ($pair in @(
-            @{ Begin = $BeginMarker; End = $EndMarker },
-            @{ Begin = $WindoLegacyBeginMarker; End = $WindoLegacyEndMarker }
-        )) {
+    foreach ($pair in $markerPairs) {
         $pattern = "(?ms)" + [regex]::Escape($pair.Begin) + ".*?" + [regex]::Escape($pair.End) + "\r?\n?"
         if ($updated -match $pattern) {
             $updated = [regex]::Replace($updated, $pattern, "")
@@ -1765,16 +2360,43 @@ function Remove-WindoProfileBlockFromPath {
     }
     if (-not $removedAny) {
         Write-Host "[windo uninstall] No WINDO block found in profile: $Path" -ForegroundColor DarkYellow
+        if ($null -ne $script:CleanupSummary -and $script:CleanupSummary.PSObject.Properties.Name -contains "ProfileBlocksMissing") { $script:CleanupSummary.ProfileBlocksMissing++ }
         return $false
     }
 
-    $updated = $updated -replace "(\r?\n){3,}", "`r`n`r`n"
+    $hasRollback = $false
+    $backupPath = $null
+    try {
+        $hasRollback = [bool](Get-Command Backup-ForRollback -CommandType Function -ErrorAction Stop)
+    } catch { $hasRollback = $false }
+
+    if ($hasRollback) {
+        $backupPath = Backup-ForRollback -SourcePath $Path
+        if (-not $backupPath) {
+            if ($null -ne $script:CleanupSummary -and $script:CleanupSummary.PSObject.Properties.Name -contains "ProfileBackupFailures") { $script:CleanupSummary.ProfileBackupFailures++ }
+            Register-Failure ("Could not back up profile before cleanup: " + $Path)
+            return $false
+        }
+    }
+
     if ([string]::IsNullOrWhiteSpace($updated)) {
-        Write-Utf8NoBomFile -Path $Path -Content ""
+        if (Get-Command Write-Utf8NoBomFile -CommandType Function -ErrorAction SilentlyContinue) {
+            Write-Utf8NoBomFile -Path $Path -Content ""
+        } else {
+            [System.IO.File]::WriteAllText($Path, "", [Text.UTF8Encoding]::new($false))
+        }
     } else {
-        Write-Utf8NoBomFile -Path $Path -Content ($updated.TrimEnd() + "`r`n")
+        if (Get-Command Write-Utf8NoBomFile -CommandType Function -ErrorAction SilentlyContinue) {
+            Write-Utf8NoBomFile -Path $Path -Content $updated
+        } else {
+            [System.IO.File]::WriteAllText($Path, $updated, [Text.UTF8Encoding]::new($false))
+        }
     }
     Write-Host "[windo uninstall] Removed WINDO block from profile: $Path" -ForegroundColor Green
+    if ($hasRollback) {
+        Write-Host "[windo uninstall] Backed up profile to: $backupPath" -ForegroundColor DarkGray
+    }
+    if ($null -ne $script:CleanupSummary -and $script:CleanupSummary.PSObject.Properties.Name -contains "ProfileBlocksRemoved") { $script:CleanupSummary.ProfileBlocksRemoved++ }
     return $true
 }
 
@@ -1784,6 +2406,30 @@ function Remove-WindoProfileBlocks {
         if (Remove-WindoProfileBlockFromPath -Path $path) { $removed++ }
     }
     return $removed
+}
+
+function Write-CleanupSummary {
+    Write-Host ""
+    Write-Host "Cleanup summary:" -ForegroundColor Cyan
+    Write-Host "  Tasks: removed $($script:CleanupSummary.TaskRemoved), missing $($script:CleanupSummary.TaskMissing), failed $($script:CleanupSummary.TaskFailed)"
+    Write-Host "  Profiles: scanned $($script:CleanupSummary.ProfileScanned), blocks removed $($script:CleanupSummary.ProfileBlocksRemoved), blocks missing $($script:CleanupSummary.ProfileBlocksMissing)"
+    Write-Host "  Secure files: found $($script:CleanupSummary.SecureFilesFound), removed $($script:CleanupSummary.SecureFilesRemoved), backup failures $($script:CleanupSummary.SecureFilesBackupFails)"
+    Write-Host "  Secure directory removed: $($script:CleanupSummary.SecureDirRemoved)"
+    Write-Host "  Snapshot folder removed: $($script:CleanupSummary.SnapshotRemoved), kept: $($script:CleanupSummary.SnapshotKept), backup created: $($script:CleanupSummary.SnapshotBackupCreated)"
+
+    if (Test-Path -LiteralPath $script:BackupRoot) {
+        Write-Host ("  Rollback backup location: " + $script:BackupRoot) -ForegroundColor DarkGray
+    } else {
+        Write-Host "  Rollback backup location: not created (nothing removed)"
+    }
+
+    if ($script:CleanupSummary.FailureCount -gt 0) {
+        Write-Host ""
+        Write-Host ("Cleanup had " + $script:CleanupSummary.FailureCount + " failure(s):") -ForegroundColor Yellow
+        foreach ($failure in $script:CleanupSummary.FailureItems) {
+            Write-Host ("  - " + $failure) -ForegroundColor Yellow
+        }
+    }
 }
 
 Write-Host ""
@@ -1798,9 +2444,17 @@ Write-Host "  Documents snapshot: $SnapshotDir $(if ($KeepSnapshots) { '(keeping
 Write-Host ""
 
 if (-not $Confirm) {
+    Write-Host ""
+    Write-Host "Planned changes:" -ForegroundColor Cyan
+    Write-Host "  - Remove user scheduled tasks: $TaskMain, $TaskUpdate"
+    Write-Host "  - Remove WINDO profile blocks from current-user profiles"
+    Write-Host "  - Remove WINDO files from: $SecureDir"
+    Write-Host "  - Remove snapshot directory: $SnapshotDir $(if ($KeepSnapshots) { '(kept)' } else { '(removed)' })"
+    Write-Host "  - Create rollback backup copies in temp before each deletion"
+    Write-Host ""
     $choice = $Host.UI.PromptForChoice(
         "",
-        "Remove WINDO tasks, profile blocks, and data from this user?",
+        "Remove WINDO artifacts for current user?",
         @("&Yes", "&No"),
         1
     )
@@ -1810,12 +2464,42 @@ if (-not $Confirm) {
     }
 }
 
-foreach ($tn in @($TaskMain, $TaskUpdate)) {
+$taskTargets = [System.Collections.Generic.List[string]]::new()
+if ($HasScopedTaskNames) {
+    [void]$taskTargets.Add($TaskMain)
+    [void]$taskTargets.Add($TaskUpdate)
+} else {
+    Write-Warning "Could not resolve the current user SID; preserving scheduled tasks and continuing with profile/file cleanup."
+}
+foreach ($legacySpec in @(
+    [pscustomobject]@{ Name = $LegacyTaskMain; Script = (Join-Path $SecureDir "windo_runner.ps1") },
+    [pscustomobject]@{ Name = $LegacyTaskUpdate; Script = (Join-Path $SecureDir "windo_self_update.ps1") }
+)) {
+    if ($HasScopedTaskNames -and ($legacySpec.Name -ieq $TaskMain -or $legacySpec.Name -ieq $TaskUpdate)) { continue }
     try {
-        Unregister-ScheduledTask -TaskName $tn -Confirm:$false -ErrorAction Stop | Out-Null
+        $legacyTask = Get-ScheduledTask -TaskName $legacySpec.Name -ErrorAction Stop
+        if (Test-WindoLegacyTaskOwnedByCurrentUser -Task $legacyTask -ExpectedScriptPath $legacySpec.Script) {
+            [void]$taskTargets.Add([string]$legacySpec.Name)
+        } else {
+            Write-Warning "Preserving foreign or mismatched legacy task '$($legacySpec.Name)'."
+        }
+    } catch { }
+}
+
+foreach ($tn in @($taskTargets | Select-Object -Unique)) {
+    try {
+        Unregister-WindoScheduledTask -TaskName $tn
         Write-Host "[windo uninstall] Unregistered task: $tn" -ForegroundColor Green
+        $CleanupSummary.TaskRemoved++
     } catch {
-        Write-Host "[windo uninstall] Task not present or could not remove: $tn" -ForegroundColor DarkYellow
+        if ($_.Exception.Message -match "Cannot find" -or $_.CategoryInfo.Reason -eq "Microsoft.Management.Infrastructure.CimException") {
+            Write-Host "[windo uninstall] Task not present: $tn" -ForegroundColor DarkYellow
+            $CleanupSummary.TaskMissing++
+        } else {
+            Register-Failure ("Could not unregister task '" + $tn + "': " + $_.Exception.Message)
+            $CleanupSummary.TaskFailed++
+            Write-Host "[windo uninstall] Task removal failed: $tn" -ForegroundColor Red
+        }
     }
 }
 
@@ -1824,11 +2508,22 @@ Write-Host "[windo uninstall] Profile cleanup complete. Removed WINDO blocks fro
 
 if (Test-Path $SecureDir) {
     Get-ChildItem -Path $SecureDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "windo*" } | ForEach-Object {
+        $CleanupSummary.SecureFilesFound++
+        $source = $_.FullName
+        $backupPath = Backup-ForRollback -SourcePath $source
+        if (-not $backupPath) {
+            Register-Failure ("Could not back up secure file before cleanup: " + $source)
+            $CleanupSummary.SecureFilesBackupFails++
+            return
+        }
         try {
-            Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop
-            Write-Host "[windo uninstall] Removed: $($_.Name)" -ForegroundColor DarkGray
+            Remove-Item -LiteralPath $source -Force -ErrorAction Stop
+            Write-Host "[windo uninstall] Removed secure file: $source" -ForegroundColor DarkGray
+            Write-Host "[windo uninstall] Backed up secure file to: $backupPath" -ForegroundColor DarkGray
+            $CleanupSummary.SecureFilesRemoved++
         } catch {
-            Write-Warning "Could not remove $($_.FullName): $($_.Exception.Message)"
+            Register-Failure ("Could not remove secure file '" + $source + "': " + $_.Exception.Message)
+            Write-Warning ("Could not remove " + $source + ": " + $_.Exception.Message)
         }
     }
     $remaining = @(Get-ChildItem -Path $SecureDir -Force -ErrorAction SilentlyContinue)
@@ -1836,7 +2531,9 @@ if (Test-Path $SecureDir) {
         try {
             Remove-Item -Path $SecureDir -Force -ErrorAction Stop
             Write-Host "[windo uninstall] Removed empty directory: $SecureDir" -ForegroundColor Green
+            $CleanupSummary.SecureDirRemoved = $true
         } catch {
+            Register-Failure ("Could not remove secure directory '" + $SecureDir + "': " + $_.Exception.Message)
             Write-Warning "Could not remove directory $SecureDir : $($_.Exception.Message)"
         }
     } else {
@@ -1849,18 +2546,37 @@ if (Test-Path $SecureDir) {
 
 if (-not $KeepSnapshots -and (Test-Path $SnapshotDir)) {
     try {
+        $snapshotBackup = Backup-ForRollback -SourcePath $SnapshotDir
+        if (-not $snapshotBackup) {
+            Register-Failure ("Could not back up snapshot folder before cleanup: " + $SnapshotDir)
+            $CleanupSummary.SnapshotFailed = $true
+            throw "Snapshot backup failed"
+        }
+        $CleanupSummary.SnapshotBackupCreated = $true
         Remove-Item -Path $SnapshotDir -Recurse -Force -ErrorAction Stop
         Write-Host "[windo uninstall] Removed: $SnapshotDir" -ForegroundColor Green
+        Write-Host "[windo uninstall] Backed up snapshots to: $snapshotBackup" -ForegroundColor DarkGray
+        $CleanupSummary.SnapshotRemoved = $true
     } catch {
+        $CleanupSummary.SnapshotFailed = $true
+        Register-Failure ("Could not remove snapshot directory '" + $SnapshotDir + "': " + $_.Exception.Message)
         Write-Warning "Could not remove snapshot dir: $($_.Exception.Message)"
     }
 } elseif ($KeepSnapshots) {
     Write-Host "[windo uninstall] Kept Documents snapshot folder (--KeepSnapshots)." -ForegroundColor DarkGray
+    $CleanupSummary.SnapshotKept = $true
 }
 
 Write-Host ""
-Write-Host "WINDO uninstall finished. Open a new shell; 'windo' should be undefined until reinstalled." -ForegroundColor Cyan
-exit 0
+Write-CleanupSummary
+
+if ($CleanupSummary.FailureCount -eq 0) {
+    Write-Host "WINDO uninstall finished. Open a new shell; 'windo' should be undefined until reinstalled." -ForegroundColor Cyan
+    exit 0
+}
+
+Write-Host "WINDO uninstall finished with partial failure. Review above items before continuing." -ForegroundColor Yellow
+exit 1
 '@
 Write-Utf8NoBomFile -Path $UninstallPath -Content $UninstallContent
 
@@ -1904,49 +2620,68 @@ Write-Host "Done. New shell + . `$PROFILE + windo preflight" -ForegroundColor Ye
 $MainActionArgs   = Get-NoWindowActionArgs -ScriptPath $RunnerPath
 $UpdateActionArgs = Get-NoWindowActionArgs -ScriptPath $UpdateScript
 
-$taskRegistrationSucceeded = $true
+$taskRegistrationSucceeded = $false
 function Write-WindoInstallTaskMismatch {
     param([Parameter(Mandatory=$true)][psobject]$Health)
     Write-Host ("  * " + $Health.taskName + ": " + $Health.details) -ForegroundColor DarkYellow
 }
 $mainTaskHealth = $null
 $updateTaskHealth = $null
+$mainTaskExistedBefore = $false
+$updateTaskExistedBefore = $false
+try { $null = Get-WindoScheduledTask -TaskName $TaskMain; $mainTaskExistedBefore = $true } catch { }
+try { $null = Get-WindoScheduledTask -TaskName $TaskUpdate; $updateTaskExistedBefore = $true } catch { }
 Write-WindoInstallStep -Status run -Label "Registering elevated scheduled tasks" -Detail "$TaskMain / $TaskUpdate"
 try {
-    try { Unregister-WindoScheduledTask -TaskName $TaskMain | Out-Null } catch {}
-    try { Unregister-WindoScheduledTask -TaskName $TaskUpdate | Out-Null } catch {}
-
     $Principal = New-WindoScheduledTaskPrincipal -UserId $UserId -LogonType Interactive
     $Settings  = New-WindoScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+
+    # Replace the auxiliary task first and the core elevation task last. The
+    # -Force registration is an in-place replacement; do not unregister a
+    # working installation before its replacement is known to be registerable.
+    Register-WindoScheduledTask -TaskName $TaskUpdate `
+        -Action (New-WindoScheduledTaskAction -Execute $UpdateActionArgs.Execute -Argument $UpdateActionArgs.Argument) `
+        -Principal $Principal -Settings $Settings
+    $updateTaskHealth = Test-WindoScheduledTaskHealth -TaskName $TaskUpdate -ExpectedExecute $UpdateActionArgs.Execute -ExpectedArgument $UpdateActionArgs.Argument -ExpectedUserId $UserId
+    if (-not $updateTaskHealth.healthy) {
+        Write-WindoInstallTaskMismatch -Health $updateTaskHealth
+        throw "Self-update task verification failed: $($updateTaskHealth.details)"
+    }
 
     Register-WindoScheduledTask -TaskName $TaskMain `
         -Action (New-WindoScheduledTaskAction -Execute $MainActionArgs.Execute -Argument $MainActionArgs.Argument) `
         -Principal $Principal -Settings $Settings
-
-    Register-WindoScheduledTask -TaskName $TaskUpdate `
-        -Action (New-WindoScheduledTaskAction -Execute $UpdateActionArgs.Execute -Argument $UpdateActionArgs.Argument) `
-        -Principal $Principal -Settings $Settings
     $mainTaskHealth = Test-WindoScheduledTaskHealth -TaskName $TaskMain -ExpectedExecute $MainActionArgs.Execute -ExpectedArgument $MainActionArgs.Argument -ExpectedUserId $UserId
-    $updateTaskHealth = Test-WindoScheduledTaskHealth -TaskName $TaskUpdate -ExpectedExecute $UpdateActionArgs.Execute -ExpectedArgument $UpdateActionArgs.Argument -ExpectedUserId $UserId
-    $taskRegistrationSucceeded = [bool]($mainTaskHealth.healthy -and $updateTaskHealth.healthy)
-    if ($taskRegistrationSucceeded) {
-        Write-WindoInstallStep -Status ok -Label "Scheduled tasks registered and verified" -Color Green
-    } else {
-        Write-WindoInstallStep -Status warn -Label "Scheduled task verification mismatch" -Color Yellow
+    if (-not $mainTaskHealth.healthy) {
         Write-WindoInstallTaskMismatch -Health $mainTaskHealth
-        Write-WindoInstallTaskMismatch -Health $updateTaskHealth
-        Write-Host "[windo install] Remediation: run '.\windo_install.ps1' from an elevated PowerShell session." -ForegroundColor Yellow
+        throw "Main elevated task verification failed: $($mainTaskHealth.details)"
     }
+
+    $taskRegistrationSucceeded = $true
+    [void](Remove-WindoOwnedLegacyScheduledTask -LegacyTaskName $LegacyTaskMain -ScopedTaskName $TaskMain -ExpectedUserId $UserId -ExpectedExecute $MainActionArgs.Execute -ExpectedArgument $MainActionArgs.Argument)
+    [void](Remove-WindoOwnedLegacyScheduledTask -LegacyTaskName $LegacyTaskUpdate -ScopedTaskName $TaskUpdate -ExpectedUserId $UserId -ExpectedExecute $UpdateActionArgs.Execute -ExpectedArgument $UpdateActionArgs.Argument)
+    Write-WindoInstallStep -Status ok -Label "Scheduled tasks registered and verified" -Color Green
 } catch {
     $taskRegistrationSucceeded = $false
-    Write-WindoInstallStep -Status warn -Label "Scheduled task registration deferred" -Detail "re-run elevated to restore task automation" -Color Yellow
-    Write-Warning ("WINDO: Could not register scheduled tasks; continuing with profile and snapshot refresh. Re-run installer elevated once to restore task automation. " + $_.Exception.Message)
+    $taskFailure = $_
+    # Clean up only tasks created by this failed clean install. Existing tasks
+    # are left in place because deleting them would make an upgrade failure
+    # more destructive than the failed replacement itself.
+    if (-not $mainTaskExistedBefore) { try { Unregister-WindoScheduledTask -TaskName $TaskMain | Out-Null } catch { } }
+    if (-not $updateTaskExistedBefore) { try { Unregister-WindoScheduledTask -TaskName $TaskUpdate | Out-Null } catch { } }
+    Write-WindoInstallStep -Status warn -Label "Scheduled task registration failed" -Detail "profile activation was not attempted" -Color Yellow
+    throw "WINDO installation failed before profile activation because required elevated tasks could not be registered and verified. Approve the bootstrap UAC prompt or run the verified installer elevated. $($taskFailure.Exception.Message)"
 }
+
+$null = Assert-WindoInstallSuccessGate -RuntimeProfile $installerRuntimeProfile -ScheduledTasksReady $script:WindoScheduledTasksAvailable -MainTaskHealth $mainTaskHealth
+Write-WindoInstallStep -Status ok -Label "Installation success gate passed" -Detail "$TaskMain is healthy; profile activation may proceed" -Color Green
 
 Write-WindoInstallStep -Status run -Label "Writing integrity manifest" -Detail $ManifestFile
 $Manifest = [ordered]@{
     schemaVersion = "3"
     version = $WindoVersion
+    identityScopeVersion = 1
+    userSid = $UserId
     taskRegistrationSucceeded = [bool]$taskRegistrationSucceeded
     runnerLifecycle = [ordered]@{
         secureDir = $SecureDir
@@ -2076,6 +2811,44 @@ function Get-WindoFileHash {
     (Get-FileHash -Path $Path -Algorithm SHA256).Hash
 }
 
+function _windo_current_identity_sid {
+    try {
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        if ($identity -and $identity.User -and -not [string]::IsNullOrWhiteSpace([string]$identity.User.Value)) {
+            return [string]$identity.User.Value
+        }
+    } catch { }
+    return $null
+}
+
+function _windo_identity_scope_token {
+    $sid = _windo_current_identity_sid
+    if (-not [string]::IsNullOrWhiteSpace($sid)) { return ($sid -replace '[^A-Za-z0-9_-]', '_') }
+    $account = "$env:USERDOMAIN\$env:USERNAME"
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($account.ToLowerInvariant())
+        $hex = -join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("X2") })
+        return "ACCOUNT-$($hex.Substring(0, 16))"
+    } finally { $sha.Dispose() }
+}
+
+function Test-WindoTaskPrincipalIsCurrentUser([object]$PrincipalUserId) {
+    if ([string]::IsNullOrWhiteSpace([string]$PrincipalUserId)) { return $false }
+    $currentSid = _windo_current_identity_sid
+    if (-not [string]::IsNullOrWhiteSpace($currentSid)) {
+        try {
+            $actualSid = if ([string]$PrincipalUserId -match '^[sS]-\d-(?:\d+-)+\d+$') {
+                ([System.Security.Principal.SecurityIdentifier]::new([string]$PrincipalUserId)).Value
+            } else {
+                ([System.Security.Principal.NTAccount]::new([string]$PrincipalUserId)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+            }
+            return ([string]$actualSid -ieq [string]$currentSid)
+        } catch { return $false }
+    }
+    return ([string]$PrincipalUserId -ieq "$env:USERDOMAIN\$env:USERNAME")
+}
+
 function Write-TextFileAtomic {
     [CmdletBinding()]
     param(
@@ -2100,22 +2873,55 @@ function Write-TextFileAtomic {
     }
 }
 
+function _windo_get_member_value([object]$Object, [string]$Name) {
+    if ($null -eq $Object) { return $null }
+
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) { return $Object[$Name] }
+        $matched = @($Object.Keys | Where-Object { $_ -ieq $Name } | Select-Object -First 1)
+        if ($matched.Count -gt 0) { return $Object[$matched[0]] }
+        return $null
+    }
+
+    if (-not $Object.PSObject -or -not $Object.PSObject.Properties) { return $null }
+    $prop = $Object.PSObject.Properties | Where-Object { $_.Name -ieq $Name } | Select-Object -First 1
+    if ($prop) { return $prop.Value }
+    return $null
+}
+
+function Get-WindoProtectedDataType {
+    $typeName = "System.Security.Cryptography.ProtectedData"
+    foreach ($qualifiedName in @(
+        "$typeName, System.Security.Cryptography.ProtectedData",
+        "$typeName, System.Security"
+    )) {
+        try {
+            $resolved = [type]::GetType($qualifiedName, $false)
+            if ($null -ne $resolved) { return $resolved }
+        } catch { }
+    }
+    return $null
+}
+
+function Get-WindoCurrentUserProtectionScope([type]$ProtectedDataType) {
+    if ($null -eq $ProtectedDataType) { return $null }
+    try {
+        $scopeType = $ProtectedDataType.Assembly.GetType("System.Security.Cryptography.DataProtectionScope", $false, $false)
+        if ($null -eq $scopeType) { return $null }
+        return [Enum]::Parse($scopeType, "CurrentUser")
+    } catch { return $null }
+}
+
 function _windo_unprotect_text([string]$EncryptedText) {
     if ([string]::IsNullOrWhiteSpace($EncryptedText)) { return $null }
+    if ($EncryptedText.Length -gt 100663296) { return $null }
     try {
         $enc = [Convert]::FromBase64String($EncryptedText)
-        $protectedDataType = [type]::GetType("System.Security.Cryptography.ProtectedData")
-        if ($null -eq $protectedDataType) {
-            return [System.Text.Encoding]::UTF8.GetString($enc)
-        }
-        try {
-            $bytes = $protectedDataType::Unprotect(
-                $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
-            )
-            [System.Text.Encoding]::UTF8.GetString($bytes)
-        } catch {
-            [System.Text.Encoding]::UTF8.GetString($enc)
-        }
+        $protectedDataType = Get-WindoProtectedDataType
+        $scope = Get-WindoCurrentUserProtectionScope $protectedDataType
+        if ($null -eq $protectedDataType -or $null -eq $scope) { return $null }
+        $bytes = $protectedDataType::Unprotect($enc, $null, $scope)
+        (New-Object System.Text.UTF8Encoding($false, $true)).GetString($bytes)
     } catch {
         return $null
     }
@@ -2126,10 +2932,12 @@ function _windo_build_artifact_payload {
     if ($null -eq $Payload) { return $null }
     try {
         $json = $Payload | ConvertTo-Json -Depth 20 -Compress
+        $protected = _dpapi_protect $json
+        if ([string]::IsNullOrWhiteSpace([string]$protected)) { return $null }
         return [ordered]@{
             Version = 1
             Type    = "dpapi-json"
-            Data    = _dpapi_protect $json
+            Data    = $protected
         }
     } catch {
         return $null
@@ -2143,23 +2951,28 @@ function _windo_resolve_artifact_payload {
     if ($Payload -is [string]) {
         if ([string]::IsNullOrWhiteSpace([string]$Payload)) { return $null }
         if ([string]$Payload -match '^[\r\n\s\t]*\{') {
-            if ([string]$Payload.Length -gt 262144) { return $null }
+            if (([string]$Payload).Length -gt 100663296) { return $null }
             try { return (_windo_resolve_artifact_payload ($Payload | ConvertFrom-Json -ErrorAction Stop)) } catch { return $null }
         }
         return $null
     }
 
+    $payloadVersion = $null
     $payloadType = $null
     $payloadData = $null
     if ($Payload -is [System.Collections.IDictionary]) {
+        if ($Payload.Contains("Version")) { $payloadVersion = $Payload["Version"] }
         if ($Payload.Contains("Type")) { $payloadType = $Payload["Type"] }
         if ($Payload.Contains("Data")) { $payloadData = $Payload["Data"] }
     } else {
+        if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Version")) { $payloadVersion = $Payload.Version }
         if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Type")) { $payloadType = $Payload.Type }
         if ($Payload.PSObject -and ($Payload.PSObject.Properties.Name -contains "Data")) { $payloadData = $Payload.Data }
     }
 
-    if (([string]::IsNullOrWhiteSpace([string]$payloadType) -eq $false) -and ([string]$payloadType -ieq "dpapi-json") -and ([string]::IsNullOrWhiteSpace([string]$payloadData) -eq $false)) {
+    $version = 0
+    try { $version = [int]$payloadVersion } catch { return $null }
+    if ($version -eq 1 -and ([string]$payloadType -ceq "dpapi-json") -and ([string]::IsNullOrWhiteSpace([string]$payloadData) -eq $false) -and ([string]$payloadData).Length -le 100663296) {
         $json = _windo_unprotect_text ([string]$payloadData)
         if ($null -ne $json) {
             try { return ($json | ConvertFrom-Json -ErrorAction Stop) } catch { return $null }
@@ -2167,7 +2980,7 @@ function _windo_resolve_artifact_payload {
         return $null
     }
 
-    return $Payload
+    return $null
 }
 
 function windo {
@@ -2197,9 +3010,162 @@ function windo {
         } catch { return $null }
     }
 
+    function _windo_parse_global_option_prefix {
+        param([string[]]$Tokens)
+
+        $parsed = [ordered]@{
+            Command          = [string[]]@()
+            ExactArgv        = $false
+            JsonOutput       = $false
+            DryRun           = $false
+            NonInteractive   = $false
+            PreserveEnvAll   = $false
+            PreserveEnvNames = [string[]]@()
+            TimeoutMs        = $null
+            HelpRequested    = $false
+            HelpTopic        = $null
+            Error            = $null
+        }
+        $raw = [System.Collections.ArrayList]@()
+        foreach ($token in @($Tokens)) { [void]$raw.Add([string]$token) }
+
+        $leading = 0
+        while ($leading -lt $raw.Count) {
+            $token = [string]$raw[$leading]
+
+            if ($token -eq '/?' -or $token -eq '?') {
+                $parsed.HelpRequested = $true
+                if (($leading + 1) -lt $raw.Count) {
+                    $next = [string]$raw[$leading + 1]
+                    if ($next -notlike '-*' -and $next -ne '/?' -and $next -ne '?') {
+                        $parsed.HelpTopic = $next
+                        $leading += 2
+                        continue
+                    }
+                }
+                $leading++
+                continue
+            }
+
+            # A leading separator is a hard transparency boundary: every
+            # following token belongs to the elevated target, even when it
+            # looks like a WINDO option or built-in command.
+            if ($token -eq '--') {
+                $parsed.ExactArgv = $true
+                $leading++
+                break
+            }
+            if ($token -notlike '-*' -or $token -eq '-') { break }
+
+            if ($token -eq '--json' -or $token -eq '-Json') {
+                $parsed.JsonOutput = $true
+                $leading++
+                continue
+            }
+            if ($token -eq '--dry-run' -or $token -eq '-DryRun') {
+                $parsed.DryRun = $true
+                $leading++
+                continue
+            }
+            if ($token -eq '--help' -or $token -eq '-h' -or $token -eq '-?') {
+                $parsed.HelpRequested = $true
+                if (($leading + 1) -lt $raw.Count) {
+                    $next = [string]$raw[$leading + 1]
+                    if ($next -notlike '-*' -and $next -ne '/?' -and $next -ne '?') {
+                        $parsed.HelpTopic = $next
+                        $leading += 2
+                        continue
+                    }
+                }
+                $leading++
+                continue
+            }
+            if ($token -eq '--non-interactive' -or $token -eq '-n') {
+                $parsed.NonInteractive = $true
+                $leading++
+                continue
+            }
+            if ($token -eq '--preserve-env' -or $token -eq '-E') {
+                if ($token -eq '-E') {
+                    $parsed.PreserveEnvAll = $true
+                    $leading++
+                    continue
+                }
+                if (($leading + 1) -ge $raw.Count) {
+                    $parsed.Error = '--preserve-env requires a value of env var names or use -E for all.'
+                    break
+                }
+                $envSpec = [string]$raw[$leading + 1]
+                if (-not [string]::IsNullOrWhiteSpace($envSpec)) {
+                    if ($envSpec -match '^(?i)all$') {
+                        $parsed.PreserveEnvAll = $true
+                        $parsed.PreserveEnvNames = [string[]]@()
+                    } else {
+                        $parsed.PreserveEnvNames = [string[]]@($envSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                    }
+                }
+                $leading += 2
+                continue
+            }
+            if ($token -like '--preserve-env=*') {
+                $envSpec = $token.Substring(16)
+                if (-not [string]::IsNullOrWhiteSpace($envSpec)) {
+                    if ($envSpec -match '^(?i)all$') {
+                        $parsed.PreserveEnvAll = $true
+                        $parsed.PreserveEnvNames = [string[]]@()
+                    } else {
+                        $parsed.PreserveEnvNames = [string[]]@($envSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                    }
+                }
+                $leading++
+                continue
+            }
+            if ($token -eq '--timeout' -or $token -eq '-t') {
+                if (($leading + 1) -ge $raw.Count) {
+                    $parsed.Error = "$token requires a numeric timeout value."
+                    break
+                }
+                $rawTimeout = [string]$raw[$leading + 1]
+                $timeoutMs = _windo_parse_timeout_override_ms $rawTimeout
+                if ($null -eq $timeoutMs -or $timeoutMs -lt 1) {
+                    $parsed.Error = "Invalid timeout value: $rawTimeout. Use seconds or ms (e.g. 10, 10s, 500ms)."
+                    break
+                }
+                if ($timeoutMs -gt 86400000) { $timeoutMs = 86400000 }
+                $parsed.TimeoutMs = [int]$timeoutMs
+                $leading += 2
+                continue
+            }
+            if ($token -like '--timeout=*' -or $token -like '-t=*') {
+                $rawTimeout = $token.Substring($token.IndexOf('=') + 1)
+                $timeoutMs = _windo_parse_timeout_override_ms $rawTimeout
+                if ($null -eq $timeoutMs -or $timeoutMs -lt 1) {
+                    $parsed.Error = "Invalid timeout value: $rawTimeout. Use seconds or ms (e.g. 10, 10s, 500ms)."
+                    break
+                }
+                if ($timeoutMs -gt 86400000) { $timeoutMs = 86400000 }
+                $parsed.TimeoutMs = [int]$timeoutMs
+                $leading++
+                continue
+            }
+
+            # Unknown option-looking tokens start the target command. WINDO
+            # never consumes non-global options from an external command.
+            break
+        }
+
+        if ($leading -lt $raw.Count) {
+            $parsed.Command = [string[]]@($raw[$leading..($raw.Count - 1)])
+        }
+        return [pscustomobject]$parsed
+    }
+
     $WindoVersion = "__VERSION__"
     $TaskName     = "WindoElevatedRunner"
     $TaskUpdate   = "WindoSelfUpdate"
+    $identityScopeToken = _windo_identity_scope_token
+    $TaskName = "$TaskName-$identityScopeToken"
+    $TaskUpdate = "$TaskUpdate-$identityScopeToken"
     $SecureDir    = Join-Path $HOME ".pwsh_secure"
     $LogFile      = Join-Path $SecureDir "windo_history.enc"
     $RunnerLast   = Join-Path $SecureDir "windo_runner_last.txt"
@@ -2218,145 +3184,32 @@ function windo {
     $WindoBuiltins = @(__WINDO_BUILTIN_ARRAY__)
 
     if (!(Test-Path $SecureDir)) { New-Item -ItemType Directory -Path $SecureDir | Out-Null }
-    $JsonOutput = $false
-    $DryRun = $false
-    $NonInteractive = $false
-    $PreserveEnvAll = $false
-    $PreserveEnvNames = @()
-    $CommandTimeoutOverrideMs = $null
-    $HelpRequested = $false
-    $HelpTopic = $null
-    if ($Command -and $Command.Count -gt 0) {
-        $rawCommand = [System.Collections.ArrayList]@($Command)
-        $leading = 0
-        while ($leading -lt $rawCommand.Count) {
-            $tx = [string]$rawCommand[$leading]
-        if ($tx -eq "/?" -or $tx -eq "?") {
-                $HelpRequested = $true
-                if (($leading + 1) -lt $rawCommand.Count) {
-                    $next = [string]$rawCommand[$leading + 1]
-                    if ($next -notlike '-*' -and $next -ne '/?' -and $next -ne "?") {
-                        $HelpTopic = $next
-                        $leading += 2
-                        continue
-                    }
-                }
-                $leading++
-                continue
-            }
-            if ($tx -eq '--') { $leading++; break }
-            if ($tx -notlike '-*' -or $tx -eq '-') { break }
+    $parsedGlobal = _windo_parse_global_option_prefix ([string[]]$Command)
+    if (-not [string]::IsNullOrWhiteSpace([string]$parsedGlobal.Error)) {
+        Write-Host ("[windo] " + [string]$parsedGlobal.Error) -ForegroundColor Yellow
+        _windo_set_exit 2
+        return
+    }
 
-            if ($tx -eq '--json' -or $tx -eq '-Json') {
-                $JsonOutput = $true
-                $leading++
-                continue
-            }
-            if ($tx -eq '--dry-run' -or $tx -eq '-DryRun') {
-                $DryRun = $true
-                $leading++
-                continue
-            }
-            if ($tx -eq '--help' -or $tx -eq '-h' -or $tx -eq '-?' -or $tx -eq '?') {
-                $HelpRequested = $true
-                if (($leading + 1) -lt $rawCommand.Count) {
-                    $next = [string]$rawCommand[$leading + 1]
-                    if ($next -notlike '-*' -and $next -ne '/?' -and $next -ne "?") {
-                        $HelpTopic = $next
-                        $leading += 2
-                        continue
-                    }
-                }
-                $leading++
-                continue
-            }
-            if ($tx -eq '--non-interactive' -or $tx -eq '-n') {
-                if ($tx -eq '-n' -and ($leading + 1) -lt $rawCommand.Count) {
-                    $lookahead = [string]$rawCommand[$leading + 1]
-                    if ($lookahead -in @('log', 'history')) {
-                        break
-                    }
-                }
-                $NonInteractive = $true
-                $leading++
-                continue
-            }
-            if ($tx -eq '--preserve-env' -or $tx -eq '-E') {
-                if ($tx -eq '-E') {
-                    $PreserveEnvAll = $true
-                    $leading++
-                    continue
-                }
-                if ($leading + 1 -ge $rawCommand.Count) {
-                    Write-Host "[windo] --preserve-env requires a value of env var names or use -E for all." -ForegroundColor Yellow
-                    _windo_set_exit 2
-                    return
-                }
-                $rawEnvSpec = [string]$rawCommand[$leading + 1]
-                if (-not [string]::IsNullOrWhiteSpace($rawEnvSpec)) {
-                    if ($rawEnvSpec -match '^(?i)all$') {
-                        $PreserveEnvAll = $true
-                        $PreserveEnvNames = @()
-                    } else {
-                        $PreserveEnvNames = @($rawEnvSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-                    }
-                }
-                $leading += 2
-                continue
-            }
-            if ($tx -like '--preserve-env=*') {
-                $rawEnvSpec = $tx.Substring(16)
-                if (-not [string]::IsNullOrWhiteSpace($rawEnvSpec)) {
-                    if ($rawEnvSpec -match '^(?i)all$') {
-                        $PreserveEnvAll = $true
-                        $PreserveEnvNames = @()
-                    } else {
-                        $PreserveEnvNames = @($rawEnvSpec -split '[,\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-                    }
-                }
-                $leading++
-                continue
-            }
-            if ($tx -eq '--timeout' -or $tx -eq '-t') {
-                if ($leading + 1 -ge $rawCommand.Count) {
-                    Write-Host "[windo] $tx requires a numeric timeout value." -ForegroundColor Yellow
-                    _windo_set_exit 2
-                    return
-                }
-                $rawTimeout = [string]$rawCommand[$leading + 1]
-                $parsedTimeout = _windo_parse_timeout_override_ms $rawTimeout
-                if ($null -eq $parsedTimeout -or $parsedTimeout -lt 1) {
-                    Write-Host "[windo] Invalid timeout value: $rawTimeout. Use seconds or ms (e.g. 10, 10s, 500ms)." -ForegroundColor Yellow
-                    _windo_set_exit 2
-                    return
-                }
-                if ($parsedTimeout -gt 86400000) { $parsedTimeout = 86400000 }
-                $CommandTimeoutOverrideMs = [int]$parsedTimeout
-                $leading += 2
-                continue
-            }
-            if ($tx -like '--timeout=*' -or $tx -like '-t=*') {
-                $idx = $tx.IndexOf('=')
-                $rawTimeout = $tx.Substring($idx + 1)
-                $parsedTimeout = _windo_parse_timeout_override_ms $rawTimeout
-                if ($null -eq $parsedTimeout -or $parsedTimeout -lt 1) {
-                    Write-Host "[windo] Invalid timeout value: $rawTimeout. Use seconds or ms (e.g. 10, 10s, 500ms)." -ForegroundColor Yellow
-                    _windo_set_exit 2
-                    return
-                }
-                if ($parsedTimeout -gt 86400000) { $parsedTimeout = 86400000 }
-                $CommandTimeoutOverrideMs = [int]$parsedTimeout
-                $leading++
-                continue
-            }
-            break
-        }
-        $Command = if ($leading -eq 0) { @($rawCommand) } elseif ($leading -ge $rawCommand.Count) { @() } else { @($rawCommand[$leading..($rawCommand.Count - 1)]) }
+    $JsonOutput = [bool]$parsedGlobal.JsonOutput
+    $DryRun = [bool]$parsedGlobal.DryRun
+    $NonInteractive = [bool]$parsedGlobal.NonInteractive
+    $PreserveEnvAll = [bool]$parsedGlobal.PreserveEnvAll
+    $PreserveEnvNames = [string[]]@($parsedGlobal.PreserveEnvNames)
+    $CommandTimeoutOverrideMs = $parsedGlobal.TimeoutMs
+    $HelpRequested = [bool]$parsedGlobal.HelpRequested
+    $HelpTopic = $parsedGlobal.HelpTopic
+    $ExactArgvMode = [bool]$parsedGlobal.ExactArgv
+    $Command = [string[]]@($parsedGlobal.Command)
+
+    if (-not $ExactArgvMode -and $Command -and $Command.Count -gt 0) {
         if ($Command.Count -ge 1 -and $Command[0] -eq "/?") { $HelpRequested = $true; if ($Command.Count -gt 1 -and $Command[1] -notlike '-*' -and $Command[1] -ne "?" -and $Command[1] -ne "/?" -and $Command[1] -ne "-?") { $HelpTopic = [string]$Command[1] }; $Command = if ($Command.Count -gt 1) { @($Command[1..($Command.Count - 1)]) } else { @() } }
         if ($Command.Count -ge 1 -and $Command[0] -eq "help" -and -not $HelpRequested) { if ($Command.Count -eq 1) { $HelpRequested = $true; $HelpTopic = "help" } }
         $normalized = if ($Command.Count -eq 1) { [string]$Command[0].ToLowerInvariant().Trim() } else { "" }
         if ($normalized -in @("?", "/?", "-?")) { $HelpRequested = $true; $HelpTopic = if ($HelpRequested) { "help" } else { "" }; $Command = @() }
-            if ($Command.Count -ge 1 -and (($Command[-1] -ieq "/?") -or ($Command[-1] -ieq "?") -or ($Command[-1] -ieq "-?"))) {
+        $initialRouteToken = if ($Command.Count -ge 1) { ([string]$Command[0]).ToLowerInvariant() } else { '' }
+        $builtinHelpTarget = ($WindoBuiltins -contains $initialRouteToken) -or $initialRouteToken -in @('!!', '-', 'up', 'latest', 'install', 'self')
+        if ($builtinHelpTarget -and $Command.Count -ge 1 -and (($Command[-1] -ieq "/?") -or ($Command[-1] -ieq "?") -or ($Command[-1] -ieq "-?"))) {
             $trimmed = @($Command[0..($Command.Count - 2)])
             $HelpRequested = $true
             if ([string]::IsNullOrWhiteSpace($HelpTopic)) {
@@ -2405,15 +3258,10 @@ function windo {
             }
         }
 
-        if ($null -eq $CommandTimeoutOverrideMs -and -not [string]::IsNullOrWhiteSpace($env:SUDO_TIMEOUT)) {
-            $sudoTimeout = _windo_parse_timeout_override_ms ([string]$env:SUDO_TIMEOUT)
-            if ($null -ne $sudoTimeout -and $sudoTimeout -ge 1) {
-                if ($sudoTimeout -gt 86400000) { $sudoTimeout = 86400000 }
-                $CommandTimeoutOverrideMs = [int]$sudoTimeout
-            }
-        }
-
-        if ($Command.Count -gt 0) {
+        # Built-ins keep their own post-command option compatibility. External
+        # commands never enter this pass, so their argv remains untouched.
+        $builtinOptionTarget = if ($Command.Count -gt 0) { ([string]$Command[0]).ToLowerInvariant() } else { '' }
+        if ($Command.Count -gt 0 -and (($WindoBuiltins -contains $builtinOptionTarget) -or $builtinOptionTarget -in @('!!', '-'))) {
             $cl = [System.Collections.ArrayList]@($Command)
             $hasCmd = $false
             $cmd = ""
@@ -2543,6 +3391,14 @@ function windo {
         }
     }
 
+    if ($null -eq $CommandTimeoutOverrideMs -and -not [string]::IsNullOrWhiteSpace($env:SUDO_TIMEOUT)) {
+        $sudoTimeout = _windo_parse_timeout_override_ms ([string]$env:SUDO_TIMEOUT)
+        if ($null -ne $sudoTimeout -and $sudoTimeout -ge 1) {
+            if ($sudoTimeout -gt 86400000) { $sudoTimeout = 86400000 }
+            $CommandTimeoutOverrideMs = [int]$sudoTimeout
+        }
+    }
+
 function _windo_to_int([object]$Value, [int]$Default) {
     if ($null -eq $Value) { return $Default }
     try {
@@ -2641,7 +3497,7 @@ function _windo_parse_runner_result([string]$OutPath, [string]$RequestId, [strin
     return [pscustomobject]@{
         Timestamp       = if ($null -ne $ts) { [string]$ts } else { $fallbackTimestamp }
         Command         = if ($null -ne $commandText) { [string]$commandText } else { [string]$Command }
-        Output          = if (-not [string]::IsNullOrWhiteSpace([string]$merged)) { [string]$merged } else { "<FAILED TO READ RESULT>" }
+        Output          = if ($null -eq $merged) { "" } else { [string]$merged }
         ExitCode        = [int]$exitCode
         DurationMs      = [int]$durationMs
         RequestId       = if ($null -ne $requestId) { [string]$requestId } else { [string]$RequestId }
@@ -2731,28 +3587,26 @@ function _windo_parse_runner_result([string]$OutPath, [string]$RequestId, [strin
     }
 
     function _dpapi_protect([string]$s) {
-    $protectedDataType = [type]::GetType("System.Security.Cryptography.ProtectedData")
-    if ($null -eq $protectedDataType) {
-        return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([string]$s))
-    }
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($s)
-    $enc = $protectedDataType::Protect(
-            $bytes, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
-        )
-        [Convert]::ToBase64String($enc)
+        $protectedDataType = Get-WindoProtectedDataType
+        $scope = Get-WindoCurrentUserProtectionScope $protectedDataType
+        if ($null -eq $protectedDataType -or $null -eq $scope) { return $null }
+        try {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$s)
+            $enc = $protectedDataType::Protect($bytes, $null, $scope)
+            return [Convert]::ToBase64String($enc)
+        } catch { return $null }
     }
 
     function _dpapi_unprotect([string]$b64) {
-    $protectedDataType = [type]::GetType("System.Security.Cryptography.ProtectedData")
-    if ($null -eq $protectedDataType) {
-        $rawBytes = [Convert]::FromBase64String($b64)
-        return [System.Text.Encoding]::UTF8.GetString($rawBytes)
-    }
-        $enc = [Convert]::FromBase64String($b64)
-    $bytes = $protectedDataType::Unprotect(
-            $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
-        )
-        [System.Text.Encoding]::UTF8.GetString($bytes)
+        if ([string]::IsNullOrWhiteSpace($b64) -or $b64.Length -gt 100663296) { return $null }
+        $protectedDataType = Get-WindoProtectedDataType
+        $scope = Get-WindoCurrentUserProtectionScope $protectedDataType
+        if ($null -eq $protectedDataType -or $null -eq $scope) { return $null }
+        try {
+            $enc = [Convert]::FromBase64String($b64)
+            $bytes = $protectedDataType::Unprotect($enc, $null, $scope)
+            return (New-Object System.Text.UTF8Encoding($false, $true)).GetString($bytes)
+        } catch { return $null }
     }
 
     function _sha256_hex([string]$s) {
@@ -4161,7 +5015,7 @@ function _windo_parse_runner_result([string]$OutPath, [string]$RequestId, [strin
                     }
                 }
                 if ($null -ne $protected) {
-                    $plain = _dpapi_unprotect [string]$protected
+                    $plain = _dpapi_unprotect ([string]$protected)
                 }
             } else {
                 return @{
@@ -5758,22 +6612,49 @@ Use: windo prompt --json   (machine-readable bundle)
         (_json_envelope $commandName $payload) | ConvertTo-Json -Depth 14 | Write-Host
     }
 
+    function _windo_installer_argument_line([string]$ScriptPath) {
+        if ([string]::IsNullOrWhiteSpace($ScriptPath)) { throw "Installer path is empty." }
+        $fullPath = [System.IO.Path]::GetFullPath($ScriptPath)
+        if ($fullPath.Contains('"')) { throw "Installer path contains an unsupported quote character." }
+        return '-NoProfile -ExecutionPolicy Bypass -File "' + $fullPath + '"'
+    }
+
+    function _windo_is_uac_cancellation {
+        param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+        if ($null -eq $ErrorRecord -or $null -eq $ErrorRecord.Exception) { return $false }
+        $exception = $ErrorRecord.Exception
+        for ($depth = 0; $depth -lt 8 -and $null -ne $exception; $depth++) {
+            try {
+                $nativeCode = $exception.PSObject.Properties['NativeErrorCode']
+                if ($null -ne $nativeCode -and [int]$nativeCode.Value -eq 1223) { return $true }
+            } catch { }
+            try { $exception = $exception.InnerException } catch { $exception = $null }
+        }
+        return ([string]$ErrorRecord.Exception.Message -match '(?i:operation|request).*(?:cancel(?:ed|led)|declined).*(?:user)?')
+    }
+
     function _windo_start_downloaded_installer([string]$ScriptPath) {
         $runnerExe = "powershell.exe"
         $pwshExe = Get-Command pwsh.exe -ErrorAction SilentlyContinue
         if ($pwshExe -and $pwshExe.Source) { $runnerExe = $pwshExe.Source }
-        $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath)
-        $shouldElevate = [Environment]::UserInteractive -and -not $env:CI
+        $nativeArgumentLine = _windo_installer_argument_line -ScriptPath $ScriptPath
+        # Automation flags skip only WINDO's confirmation prompt. An interactive
+        # install still requires the same UAC boundary, including when CI=1.
+        $shouldElevate = [Environment]::UserInteractive
         $script:WindoDownloadedInstallerExitCode = 0
 
         if ($shouldElevate) {
             Write-Host "[windo] Requesting elevation for installer..." -ForegroundColor Yellow
             try {
-                $installerProcess = Start-Process -FilePath $runnerExe -Verb RunAs -ArgumentList $argList -Wait -PassThru
-                if ($null -ne $installerProcess) { $script:WindoDownloadedInstallerExitCode = [int]$installerProcess.ExitCode }
+                # Start-Process joins ArgumentList elements before native parsing.
+                # One deliberately quoted argument line preserves a -File path
+                # containing spaces under both Windows PowerShell 5.1 and pwsh.
+                $installerProcess = Start-Process -FilePath $runnerExe -Verb RunAs -ArgumentList $nativeArgumentLine -Wait -PassThru -ErrorAction Stop
+                if ($null -eq $installerProcess) { throw "Installer launch did not return a process handle." }
+                $script:WindoDownloadedInstallerExitCode = [int]$installerProcess.ExitCode
                 return $true
-            } catch [System.ComponentModel.Win32Exception] {
-                if ($_.Exception.NativeErrorCode -eq 1223) {
+            } catch {
+                if (_windo_is_uac_cancellation $_) {
                     $script:WindoDownloadedInstallerExitCode = 1223
                     return $false
                 }
@@ -5781,14 +6662,7 @@ Use: windo prompt --json   (machine-readable bundle)
             }
         }
 
-        Write-Host "[windo] Running installer without elevation (non-interactive or CI session)." -ForegroundColor DarkYellow
-        & $runnerExe @argList
-        if ($LASTEXITCODE -is [int]) {
-            $script:WindoDownloadedInstallerExitCode = [int]$LASTEXITCODE
-        } else {
-            $script:WindoDownloadedInstallerExitCode = 0
-        }
-        return $true
+        throw "A complete unattended install requires an interactive UAC handoff. Run this command from a normal interactive PowerShell window, or run a previously verified local windo_install.ps1 from a controlled elevated automation stage."
     }
 
     function _windo_run_published_installer {
@@ -5863,7 +6737,7 @@ Use: windo prompt --json   (machine-readable bundle)
             $installerStarted = _windo_start_downloaded_installer -ScriptPath $TempInst
             if (-not $installerStarted) {
                 Write-Host "[windo] ${DisplayCommand} launch was declined. Update handoff was not applied." -ForegroundColor Yellow
-                Write-Host "  Approve UAC for this command to continue in an elevated session, or rerun this same command from an already-elevated shell." -ForegroundColor DarkGray
+                Write-Host "  Re-run this same command from a normal (non-elevated) PowerShell window and approve UAC." -ForegroundColor DarkGray
                 _windo_draw_ascii_startup_frame -Context "installer" -Label $installHandOffLabel -State "DECLINED" -Color Yellow
                 _windo_draw_ascii_startup_frame -Context "installer" -Label $installHandOffLabel -State "END" -Color Yellow
                 _windo_set_exit 2
@@ -5917,11 +6791,31 @@ Use: windo prompt --json   (machine-readable bundle)
     }
 
     function _append_log([hashtable]$entry) {
-        $entry.PreviousHash = _get_last_hash
-        $json = ($entry | ConvertTo-Json -Compress)
-        $entryHash = _sha256_hex $json
-        $encB64 = _dpapi_protect $json
-        [System.IO.File]::AppendAllText($LogFile, ($entryHash + ":" + $encB64 + "`r`n"))
+        $lockPath = Join-Path $SecureDir "windo_history.lock"
+        $lockStream = $null
+        $lockWait = [Diagnostics.Stopwatch]::StartNew()
+        while ($null -eq $lockStream -and $lockWait.ElapsedMilliseconds -lt 15000) {
+            try {
+                $lockStream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            } catch [System.IO.IOException] {
+                Start-Sleep -Milliseconds 25
+            }
+        }
+        if ($null -eq $lockStream) { throw "Timed out acquiring the WINDO audit-log lock." }
+        try {
+            # The previous-hash read, sealing, and append form one serialized
+            # transaction so concurrent callers cannot fork the audit chain.
+            $entry.PreviousHash = _get_last_hash
+            $json = ($entry | ConvertTo-Json -Compress)
+            $entryHash = _sha256_hex $json
+            $encB64 = _dpapi_protect $json
+            if ([string]::IsNullOrWhiteSpace([string]$encB64)) {
+                throw "DPAPI protection is unavailable; refusing to write a plaintext audit entry."
+            }
+            [System.IO.File]::AppendAllText($LogFile, ($entryHash + ":" + $encB64 + "`r`n"))
+        } finally {
+            try { $lockStream.Dispose() } catch { }
+        }
     }
 
     function _windo_is_task_access_denied {
@@ -6179,6 +7073,109 @@ Use: windo prompt --json   (machine-readable bundle)
         } catch { return $d }
     }
 
+    function _windo_quote_powershell_literal([AllowNull()][string]$Value) {
+        if ($null -eq $Value) { return "`$null" }
+        return "'" + $Value.Replace("'", "''") + "'"
+    }
+
+    function _windo_command_uses_script_mode([string[]]$Parts) {
+        if ($null -eq $Parts -or $Parts.Count -ne 1) { return $false }
+        $only = [string]$Parts[0]
+        if ([string]::IsNullOrWhiteSpace($only)) { return $false }
+        try {
+            if (Test-Path -LiteralPath $only -PathType Leaf) { return $false }
+        } catch { }
+        return ($only -match '[\s;|&{}()]')
+    }
+
+    function _windo_new_elevation_command_spec([string[]]$Parts, [switch]$ForceArgv) {
+        $items = @($Parts | ForEach-Object { [string]$_ })
+        if ($items.Count -eq 0) { return $null }
+
+        $scriptMode = (-not $ForceArgv) -and (_windo_command_uses_script_mode ([string[]]$items))
+        $displayCommand = if ($scriptMode) {
+            [string]$items[0]
+        } else {
+            ((@($items) | ForEach-Object { _windo_quote_argument ([string]$_) }) -join ' ')
+        }
+
+        $invocation = if ($scriptMode) {
+            "& ([ScriptBlock]::Create(" + (_windo_quote_powershell_literal ([string]$items[0])) + "))"
+        } else {
+            $commandLiteral = _windo_quote_powershell_literal ([string]$items[0])
+            $argumentLiterals = if ($items.Count -gt 1) {
+                ((@($items[1..($items.Count - 1)]) | ForEach-Object {
+                    $argument = [string]$_
+                    # Named PowerShell parameters must remain parser tokens;
+                    # quoted '-Name' strings bind positionally. This strict
+                    # shape excludes expression syntax while also working for
+                    # ordinary native options such as -n and --verbose.
+                    if (-not $ForceArgv -and $argument -match '^-{1,2}[A-Za-z?][A-Za-z0-9_?-]*$') { $argument }
+                    else { _windo_quote_powershell_literal $argument }
+                }) -join ' ')
+            } else { "" }
+            if ([string]::IsNullOrWhiteSpace($argumentLiterals)) { "& $commandLiteral" } else { "& $commandLiteral $argumentLiterals" }
+        }
+
+        # The elevated child is a fresh PowerShell process. Capture `$? and
+        # `$LASTEXITCODE immediately after the requested invocation so cmdlets,
+        # scripts, and native executables all return a deterministic status.
+        $executionCommand = "`$ErrorActionPreference='Stop'; try { $invocation; `$__windoSucceeded=`$?; `$__windoNativeExit=`$LASTEXITCODE; if (`$__windoNativeExit -is [int]) { exit [int]`$__windoNativeExit }; if (-not `$__windoSucceeded) { exit 1 }; exit 0 } catch { [Console]::Error.WriteLine((`$_ | Out-String).TrimEnd()); exit 1 }"
+        return [pscustomobject]@{
+            displayCommand   = [string]$displayCommand
+            executionCommand = [string]$executionCommand
+            replayCommand    = $(if ($scriptMode) { [string]$items[0] } else { [string]$invocation })
+            mode             = $(if ($scriptMode) { "script" } else { "argv" })
+            argumentCount    = [int]$items.Count
+        }
+    }
+
+    function _windo_current_powershell_path {
+        try {
+            $path = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+            $name = [System.IO.Path]::GetFileName([string]$path)
+            if ($name -in @("powershell.exe", "pwsh.exe", "pwshw.exe") -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+                return [System.IO.Path]::GetFullPath([string]$path)
+            }
+        } catch { }
+        return $null
+    }
+
+    function _windo_current_working_directory {
+        $currentPath = $null
+        try {
+            $location = Get-Location
+            if ($location.Provider -and [string]$location.Provider.Name -ieq "FileSystem") {
+                $currentPath = [string]$location.ProviderPath
+                if ([string]::IsNullOrWhiteSpace($currentPath)) { $currentPath = [string]$location.Path }
+            }
+        } catch { }
+        $userProfile = $null
+        try { $userProfile = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile) } catch { }
+        foreach ($candidate in @($currentPath, $userProfile, $HOME, $SecureDir, [System.IO.Path]::GetTempPath())) {
+            if ([string]::IsNullOrWhiteSpace([string]$candidate)) { continue }
+            try {
+                $value = [string]$candidate
+                if (-not [System.IO.Path]::IsPathRooted($value)) { continue }
+                $full = [System.IO.Path]::GetFullPath($value)
+                if (Test-Path -LiteralPath $full -PathType Container) { return $full }
+            } catch { }
+        }
+        throw "No safe working directory is available for the elevated command."
+    }
+
+    function _windo_result_wait_timeout_ms([object]$OverrideMs = $null) {
+        $childTimeout = $null
+        if ($null -ne $OverrideMs) {
+            try { $childTimeout = [long]$OverrideMs } catch { $childTimeout = $null }
+        }
+        if ($null -eq $childTimeout -or $childTimeout -lt 1) { $childTimeout = [long](_windo_effective_runner_timeout_ms) }
+        if ($childTimeout -gt 86400000) { $childTimeout = 86400000 }
+        # Allow task scheduling/UAC startup and atomic result publication after
+        # the child timeout without truncating legitimate long-running work.
+        return [long]($childTimeout + 30000)
+    }
+
     function _windo_collect_env_snapshot {
         param([string[]]$Names)
         $snapshot = [ordered]@{}
@@ -6213,10 +7210,12 @@ Use: windo prompt --json   (machine-readable bundle)
         if ($null -eq $Snapshot) { return $null }
         try {
             $json = $Snapshot | ConvertTo-Json -Depth 20 -Compress
+            $protected = _dpapi_protect $json
+            if ([string]::IsNullOrWhiteSpace([string]$protected)) { return $null }
             return [ordered]@{
                 Version = 1
                 Type    = "dpapi-json"
-                Data    = _dpapi_protect $json
+                Data    = $protected
             }
         } catch {
             return $null
@@ -6529,6 +7528,18 @@ function _windo_draw_ascii_startup_frame {
         return $null
     }
 
+    function _windo_validate_execution_command([string]$cmdLine) {
+        if ([string]::IsNullOrWhiteSpace($cmdLine)) { return "Execution command is empty." }
+        foreach ($ch in $cmdLine.ToCharArray()) {
+            $c = [int][char]$ch
+            if ($c -eq 9) { continue }
+            if ($c -lt 32) { return "Execution command contains disallowed control characters." }
+        }
+        $encodedLength = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($cmdLine)).Length
+        if ($encodedLength -gt 30000) { return "Execution command exceeds the Windows process command-line limit." }
+        return $null
+    }
+
     function _windo_spinner_enabled {
         $policy = _windo_resolve_motion_policy
         return ([bool]$policy.enabled -and [string]$policy.motionProfile -ne "off")
@@ -6760,8 +7771,15 @@ function _windo_draw_ascii_startup_frame {
     function _windo_runner_task_action_healthy {
         try {
             $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-            $action = @($task.Actions | Select-Object -First 1)
-            if ($action.Count -eq 0) { return $false }
+            if ($null -eq $task.Principal -or [string]$task.Principal.RunLevel -ine "Highest") { return $false }
+            if (-not (Test-WindoTaskPrincipalIsCurrentUser $task.Principal.UserId)) { return $false }
+            if ([string]$task.Principal.LogonType -ine "Interactive") { return $false }
+            if ($null -eq $task.Settings) { return $false }
+            $settingsProperties = @($task.Settings.PSObject.Properties.Name)
+            if ($settingsProperties -notcontains "Enabled" -or -not [bool]$task.Settings.Enabled) { return $false }
+            if ($settingsProperties -notcontains "MultipleInstances" -or [string]$task.Settings.MultipleInstances -ine "IgnoreNew") { return $false }
+            $action = @($task.Actions)
+            if ($action.Count -ne 1) { return $false }
             $runnerCmd = Get-Command "pwshw.exe" -ErrorAction SilentlyContinue
             $expectedExe = if ($runnerCmd) { [string]$runnerCmd.Source } else { "powershell.exe" }
             $expectedArg = if ($runnerCmd) {
@@ -6777,13 +7795,19 @@ function _windo_draw_ascii_startup_frame {
 
     function _windo_start_direct_elevated_runner {
         try {
-            $runnerCmd = Get-Command "pwshw.exe" -ErrorAction SilentlyContinue
-            $exe = if ($runnerCmd) { [string]$runnerCmd.Source } else { "powershell.exe" }
-            $args = @("-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", $RunnerPath)
+            $currentPowerShell = _windo_current_powershell_path
+            $runnerCmd = if ([string]::IsNullOrWhiteSpace($currentPowerShell)) { Get-Command "pwshw.exe" -ErrorAction SilentlyContinue } else { $null }
+            $exe = if (-not [string]::IsNullOrWhiteSpace($currentPowerShell)) { $currentPowerShell } elseif ($runnerCmd) { [string]$runnerCmd.Source } else { "powershell.exe" }
+            $quotedRunnerPath = '"' + ([System.IO.Path]::GetFullPath($RunnerPath)) + '"'
+            $windowArgument = if ([System.IO.Path]::GetFileName($exe) -ieq "powershell.exe") { " -WindowStyle Hidden" } else { "" }
+            # Start-Process joins ArgumentList elements before native parsing.
+            # Supplying one deliberately quoted string preserves a -File path
+            # containing spaces on both Windows PowerShell 5.1 and PowerShell 7.
+            $argumentLine = "-NoProfile -NonInteractive$windowArgument -ExecutionPolicy Bypass -File $quotedRunnerPath"
             # UAC consent is the launch boundary; the dispatcher owns result
             # waiting. Do not hold the interactive shell for the full child
             # timeout when the scheduled-task path is unavailable.
-            $process = Start-Process -FilePath $exe -Verb RunAs -ArgumentList $args -WindowStyle Hidden -PassThru -ErrorAction Stop
+            $process = Start-Process -FilePath $exe -Verb RunAs -ArgumentList $argumentLine -WindowStyle Hidden -PassThru -ErrorAction Stop
             return [pscustomobject]@{ started = $true; declined = $false; exitCode = $null; processId = [int]$process.Id }
         } catch [System.ComponentModel.Win32Exception] {
             if ($_.Exception.NativeErrorCode -eq 1223) {
@@ -6791,8 +7815,70 @@ function _windo_draw_ascii_startup_frame {
             }
             return [pscustomobject]@{ started = $false; declined = $false; exitCode = 1; error = $_.Exception.Message }
         } catch {
+            $exception = $_.Exception
+            for ($depth = 0; $depth -lt 8 -and $null -ne $exception; $depth++) {
+                try {
+                    $nativeCode = $exception.PSObject.Properties['NativeErrorCode']
+                    if ($null -ne $nativeCode -and [int]$nativeCode.Value -eq 1223) {
+                        return [pscustomobject]@{ started = $false; declined = $true; exitCode = 1223 }
+                    }
+                } catch { }
+                try { $exception = $exception.InnerException } catch { $exception = $null }
+            }
+            if ([string]$_.Exception.Message -match '(?i:operation|request).*(?:cancel(?:ed|led)|declined).*(?:user)?') {
+                return [pscustomobject]@{ started = $false; declined = $true; exitCode = 1223 }
+            }
             return [pscustomobject]@{ started = $false; declined = $false; exitCode = 1; error = $_.Exception.Message }
         }
+    }
+
+    function _windo_cancel_unclaimed_request {
+        param(
+            [Parameter(Mandatory=$true)][string]$RequestPath,
+            [Parameter(Mandatory=$true)][string]$ClaimedPath,
+            [Parameter(Mandatory=$true)][string]$ResultPath
+        )
+
+        $claimTerminalPaths = @($ClaimedPath, ($ClaimedPath + ".failed"), ($ClaimedPath + ".bad"))
+        $claimObserved = @($claimTerminalPaths | Where-Object { Test-Path -LiteralPath $_ }).Count -gt 0
+        if ($claimObserved -or (Test-Path -LiteralPath $ResultPath)) {
+            return [pscustomobject]@{ cancelled = $false; claimed = $true; pending = $false }
+        }
+
+        for ($attempt = 0; $attempt -lt 3; $attempt++) {
+            if (Test-Path -LiteralPath $RequestPath) {
+                $quarantinePath = $RequestPath + ".cancelled." + [Guid]::NewGuid().ToString("n")
+                try {
+                    # Rename first so the runner's windo_req.*.json scan cannot
+                    # discover this request after cancellation. The move is atomic
+                    # because both paths are in SecureDir.
+                    Move-Item -LiteralPath $RequestPath -Destination $quarantinePath -ErrorAction Stop
+                    Remove-Item -LiteralPath $quarantinePath -Force -ErrorAction SilentlyContinue
+                    return [pscustomobject]@{ cancelled = $true; claimed = $false; pending = $false }
+                } catch { }
+            }
+            $claimObserved = @($claimTerminalPaths | Where-Object { Test-Path -LiteralPath $_ }).Count -gt 0
+            if ($claimObserved -or (Test-Path -LiteralPath $ResultPath)) {
+                return [pscustomobject]@{ cancelled = $false; claimed = $true; pending = $false }
+            }
+            if ($attempt -lt 2) { Start-Sleep -Milliseconds 20 }
+        }
+
+        # A rename can be denied transiently by a scanner or file watcher even
+        # though the request is still unclaimed. A direct delete is also safe:
+        # the runner claims by atomically renaming RequestPath first, so this
+        # either removes the queued request or loses the race and leaves the
+        # claimed path/result intact.
+        if (Test-Path -LiteralPath $RequestPath) {
+            try {
+                Remove-Item -LiteralPath $RequestPath -Force -ErrorAction Stop
+                return [pscustomobject]@{ cancelled = $true; claimed = $false; pending = $false }
+            } catch { }
+        }
+
+        $claimed = (@($claimTerminalPaths | Where-Object { Test-Path -LiteralPath $_ }).Count -gt 0) -or (Test-Path -LiteralPath $ResultPath)
+        $pending = Test-Path -LiteralPath $RequestPath
+        return [pscustomobject]@{ cancelled = (-not $claimed -and -not $pending); claimed = [bool]$claimed; pending = [bool]$pending }
     }
 
     function _windo_get_published_blob_sha1 {
@@ -7104,19 +8190,28 @@ function _windo_draw_ascii_startup_frame {
         if ($sigPayload.status -ne "available") { return [pscustomobject]@{ ok = $false; error = "signature unavailable: $($sigPayload.error)" } }
         try {
             $sigMap = _windo_parse_name_value_map $sigPayload.text
+            if (-not $sigMap.ContainsKey("schemaVersion") -or ([string]$sigMap.schemaVersion -cne "1")) {
+                return [pscustomobject]@{ ok = $false; source = $sigPayload.source; error = "unsupported signature schemaVersion" }
+            }
+            if (-not $sigMap.ContainsKey("algorithm")) {
+                return [pscustomobject]@{ ok = $false; source = $sigPayload.source; error = "signature file missing algorithm" }
+            }
+            $algorithm = [string]$sigMap.algorithm
+            if ($algorithm -cne "RSA-PKCS1-SHA256" -and $algorithm -cne "RSA-PSS-SHA256") {
+                return [pscustomobject]@{ ok = $false; source = $sigPayload.source; error = "unsupported signature algorithm" }
+            }
             if (-not $sigMap.ContainsKey("signatureBase64")) { return [pscustomobject]@{ ok = $false; error = "signature file missing signatureBase64" } }
             $sigBytes = [Convert]::FromBase64String([string]$sigMap.signatureBase64)
             $manifestBytes = [System.Text.Encoding]::UTF8.GetBytes($ManifestText)
             $rsa = [System.Security.Cryptography.RSA]::Create()
             try {
                 $rsa.FromXmlString((_windo_release_public_key_xml).Trim())
-                $ok = $false
-                try {
-                    $ok = $rsa.VerifyData($manifestBytes, $sigBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pss)
-                } catch { }
-                if (-not $ok) {
-                    $ok = $rsa.VerifyData($manifestBytes, $sigBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+                $padding = if ($algorithm -ceq "RSA-PSS-SHA256") {
+                    [System.Security.Cryptography.RSASignaturePadding]::Pss
+                } else {
+                    [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
                 }
+                $ok = $rsa.VerifyData($manifestBytes, $sigBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256, $padding)
                 return [pscustomobject]@{ ok = [bool]$ok; source = $sigPayload.source; error = $(if ($ok) { $null } else { "invalid checksum manifest signature" }) }
             } finally {
                 $rsa.Dispose()
@@ -7312,82 +8407,65 @@ function _windo_draw_ascii_startup_frame {
             [object]$PublishedChecksum,
             [object]$PublishedInstaller
         )
-        if (_windo_parse_bool_value $env:WINDO_SKIP_INSTALLER_SHA256 -Default $false) { return }
-        if (!(Test-Path $Path)) { return }
+        if (_windo_parse_bool_value $env:WINDO_SKIP_INSTALLER_SHA256 -Default $false) {
+            Write-Host "[windo] Installer checksum verification explicitly skipped by WINDO_SKIP_INSTALLER_SHA256." -ForegroundColor Yellow
+            return
+        }
+        if (!(Test-Path -LiteralPath $Path -PathType Leaf)) {
+            throw "Installer SHA256 cannot be verified because the downloaded installer does not exist: $Path"
+        }
         $installerPayload = if ($null -ne $PublishedInstaller) { $PublishedInstaller } else { $null }
         $strictMode = _windo_parse_bool_value $env:WINDO_STRICT_INSTALLER_VERIFICATION -Default $false
         $attestedBySource = $false
 
-        # Primary trust: if we have a GitHub content API blobSha from the *download that produced this file*, attest it locally.
-        # This makes API downloads dependable even if the separate checksum manifest is unavailable or drifts.
-        $blobFromSource = if ($null -ne $installerPayload -and $installerPayload.blobSha) { [string]$installerPayload.blobSha } else { $null }
-        if (-not [string]::IsNullOrWhiteSpace($blobFromSource)) {
+        # A commit-pinned GitHub object id is an availability fallback only when
+        # the checksum source cannot be reached. It never overrides a published
+        # SHA256 mismatch.
+        $blobFromSource = if (
+            $null -ne $installerPayload -and
+            ($installerPayload.PSObject.Properties.Name -contains "blobSha")
+        ) { [string]$installerPayload.blobSha } else { $null }
+        if ($blobFromSource -match '^[A-Fa-f0-9]{40}$') {
             try {
                 $localBlob = _windo_get_file_blob_sha1_hex $Path
                 if ($localBlob -and $localBlob -ieq $blobFromSource.ToUpperInvariant()) {
-                    Write-Host "[windo] Installer attested via GitHub content API blob hash (no checksum dependency). Continuing." -ForegroundColor Green
-                    # still run checksum for advisory/drift warnings below, but do not fail on it
                     $attestedBySource = $true
                 }
             } catch { }
         }
 
         $published = if ($null -ne $PublishedChecksum) { $PublishedChecksum } else { _windo_get_published_installer_sha256 }
-        $expect = if ($null -ne $published) { $published.sha256 } else { $null }
-        if ($null -eq $expect -or [string]::IsNullOrWhiteSpace([string]$expect)) {
-            if ($strictMode -and -not $attestedBySource) {
-                throw "Installer SHA256 cannot be validated in strict mode because the published checksum source is unavailable or unparseable. Set WINDO_SKIP_INSTALLER_SHA256=1 to continue. Branch=$(_windo_release_branch)."
+        $publishedProperties = if ($null -ne $published) { @($published.PSObject.Properties.Name) } else { @() }
+        $expect = if ($publishedProperties -contains "sha256") { [string]$published.sha256 } else { $null }
+        $publishedStatus = if ($publishedProperties -contains "status") { [string]$published.status } else { $null }
+        if (-not (_is_sha256_hex $expect)) {
+            $sourceUnavailable = ($null -eq $published -or $publishedStatus -ieq "unavailable")
+            $resolvedRef = if ($attestedBySource) { [string](_windo_release_ref) } else { $null }
+            $sourceCommitPinned = $resolvedRef -match '^[A-Fa-f0-9]{40}$'
+            if ($sourceUnavailable -and $attestedBySource -and $sourceCommitPinned -and -not $strictMode) {
+                Write-Host "[windo] Published checksum source is unavailable; installer bytes match GitHub blob $blobFromSource at pinned commit $resolvedRef." -ForegroundColor Yellow
+                return
             }
-            return
+            $detail = if ($publishedProperties -contains "error" -and -not [string]::IsNullOrWhiteSpace([string]$published.error)) { " $([string]$published.error)" } else { "" }
+            throw "Installer SHA256 could not be verified. Retry from a trusted network. Explicit emergency override: WINDO_SKIP_INSTALLER_SHA256=1. Branch=$(_windo_release_branch).$detail"
         }
-        if ($published -and ($published.PSObject.Properties.Name -contains "signatureOk") -and -not [bool]$published.signatureOk -and -not $attestedBySource) {
-            if ($strictMode) {
-                throw "Published checksum manifest signature could not be verified in strict mode. $($published.signatureError)"
-            }
-            Write-Host "[windo] Published checksum manifest signature was not verified: $($published.signatureError)" -ForegroundColor Yellow
-        } elseif ($published -and ($published.PSObject.Properties.Name -contains "signatureOk") -and [bool]$published.signatureOk) {
+
+        $signatureDeclared = $publishedProperties -contains "signatureOk"
+        $signatureOk = $signatureDeclared -and [bool]$published.signatureOk
+        $signatureError = if ($publishedProperties -contains "signatureError") { [string]$published.signatureError } else { "no verified manifest signature was provided" }
+        if ($strictMode -and -not $signatureOk) {
+            throw "Published checksum manifest signature could not be verified in strict mode. $signatureError"
+        }
+        if ($signatureDeclared -and -not $signatureOk) {
+            Write-Host "[windo] Published checksum manifest signature was not verified: $signatureError" -ForegroundColor Yellow
+        } elseif ($signatureOk) {
             Write-Host "[windo] Published checksum manifest signature verified." -ForegroundColor Green
         }
 
         $got = _windo_get_file_sha256_hex -Path $Path
-        if ($got -cne $expect) {
-            $blobSha = if ($null -ne $installerPayload -and $installerPayload.blobSha) { [string]$installerPayload.blobSha } else { $null }
-            if (-not [string]::IsNullOrWhiteSpace($blobSha)) {
-                $gotBlob = _windo_get_file_blob_sha1_hex $Path
-                if ($gotBlob -ieq $blobSha.ToUpperInvariant()) {
-                    Write-Host "[windo] SHA256 mismatch vs checksum file accepted via GitHub object hash (blob=$blobSha) from branch $(_windo_release_branch). Continuing in compatibility mode." -ForegroundColor Yellow
-                    if (-not $strictMode) { return }
-                }
-            }
-            $version = if ($null -ne $installerPayload -and $installerPayload.version) { [string]$installerPayload.version } else { $null }
-            $snapshot = if ($version) { _windo_get_snapshot_installer_sha256 -Version $version } else { $null }
-            $compatibilityMode = $false
-            $compatibilityReason = $null
-            if ($null -ne $snapshot -and $got -ieq $snapshot) {
-                Write-Host "[windo] SHA256 mismatch vs checksums/installer.sha256 accepted via published snapshot checksums for v$version. Continuing in compatibility mode." -ForegroundColor Yellow
-                $compatibilityMode = $true
-                $compatibilityReason = "snapshot hash drift (v$version)"
-            }
-            $releaseCommit = if ($published -and $published.PSObject.Properties.Name -contains "releaseCommit") { [string]$published.releaseCommit } else { $null }
-            $releaseBranch = if ($published -and $published.PSObject.Properties.Name -contains "releaseBranch") { [string]$published.releaseBranch } else { $null }
-            $resolvedRef = _windo_release_ref
-            $releaseCommitRaw = if ($published -and $published.PSObject.Properties.Name -contains "releaseCommitRaw") { [string]$published.releaseCommitRaw } else { $null }
-            $metadataState = _windo_release_metadata_state -ResolvedRef $resolvedRef -ReleaseCommit $releaseCommit -ReleaseCommitRaw $releaseCommitRaw -ReleaseBranch $releaseBranch
-            if ($metadataState.CompatibilityMode) {
-                $compatibilityMode = $true
-                $compatibilityReason = $metadataState.Detail
-            }
-            if ($compatibilityMode) {
-                if ($strictMode -and -not $attestedBySource) {
-                    throw "Installer SHA256 does not match published checksum and release metadata drift is not accepted in strict mode. Set `$env:WINDO_SKIP_INSTALLER_SHA256=1 or WINDO_STRICT_INSTALLER_VERIFICATION=0 to continue. Expected=$expect Got=$got. Drift detail: $compatibilityReason"
-                }
-                Write-Host "[windo] Published checksum metadata drift detected: $compatibilityReason. Continuing in compatibility mode." -ForegroundColor Yellow
-                return
-            }
-            if ($strictMode -and -not $attestedBySource) {
-                throw "Installer SHA256 does not match published checksum for branch $(_windo_release_branch). Validate network trust and download source before continuing. Use WINDO_SKIP_INSTALLER_SHA256=1 only for temporary recovery."
-            }
-            Write-Host "[windo] SHA256 mismatch vs checksums/installer.sha256 while verifying branch $(_windo_release_branch). Continuing in compatibility mode for recovery only. Verify branch content with a trusted source and set WINDO_STRICT_INSTALLER_VERIFICATION=1 for enforcement." -ForegroundColor Yellow
+        $normalizedExpected = $expect.ToUpperInvariant()
+        if ($got -cne $normalizedExpected) {
+            throw "Installer SHA256 does not match the published checksum for branch $(_windo_release_branch). Expected=$normalizedExpected Got=$got. Use WINDO_SKIP_INSTALLER_SHA256=1 only for an explicit emergency recovery."
         }
     }
 
@@ -7501,6 +8579,9 @@ function _windo_draw_ascii_startup_frame {
             }
             try {
                 $json = _dpapi_unprotect $parts[1]
+                if ($null -eq $json) {
+                    throw "DPAPI payload could not be decoded for the current user."
+                }
             } catch {
                 $ok = $false
                 $err = "decrypt failed: $($_.Exception.Message)"
@@ -7632,7 +8713,7 @@ function _windo_draw_ascii_startup_frame {
             requested = @($wanted)
             actions = @($unique)
             actionCount = [int]$unique.Count
-            rescueCommand = "irm https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1 | iex"
+            rescueCommand = "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1')"
             exitCode = $(if ($unique.Count -gt 0) { 3 } elseif ($failed.Count -gt 0) { 2 } else { 0 })
         }
     }
@@ -10368,20 +11449,23 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
                 _emit_json "help" @{
                     topic = $null
                     available = @($topics | Select-Object Name,Category,Aliases,Summary,Syntax,Description,Notes)
-                    usage = "windo [--json] [--dry-run] [<global sudo flag>] <command>"
+                    usage = "windo [global options] [--] <command> [args...]"
+                    executionNote = "Elevated targets run non-interactively; redirected stdin and TTY prompts are not forwarded. Pass input through arguments or files."
                     exitCode = 0
                 }
                 return
             }
             Write-Host "[windo] WINDO help" -ForegroundColor Cyan
-            Write-Host "Usage: windo [--json] [--dry-run] [<global sudo flag>] <command>" -ForegroundColor DarkGray
-            Write-Host "Global flags:" -ForegroundColor Yellow
+            Write-Host "Usage: windo [global options] [--] <command> [args...]" -ForegroundColor DarkGray
+            Write-Host "Global flags (prefix-only; place before the command):" -ForegroundColor Yellow
             Write-Host "  --json, -Json     machine-readable payload" -ForegroundColor DarkGray
             Write-Host "  --dry-run         show command and paths only (no task + no log write)" -ForegroundColor DarkGray
             Write-Host "  --non-interactive, -n (before command)   skip install-latest confirmation in automation" -ForegroundColor DarkGray
             Write-Host "  --preserve-env [ALL|name1,name2], -E      pass env variables into elevated child" -ForegroundColor DarkGray
             Write-Host "  --timeout <seconds|ms>, -t              per-command runner timeout override" -ForegroundColor DarkGray
             Write-Host "  --help, -h, -?, /?                    command/topic help" -ForegroundColor DarkGray
+            Write-Host "  --                 bypass built-ins and preserve every following target argv token" -ForegroundColor DarkGray
+            Write-Host "Elevated targets run non-interactively; redirected stdin and TTY prompts are not forwarded. Pass input through arguments or files." -ForegroundColor Yellow
             Write-Host ""
             Write-Host "Available commands:" -ForegroundColor Cyan
             foreach ($group in ($topics | Group-Object -Property Category | Sort-Object Name)) {
@@ -10469,6 +11553,9 @@ Write-Host "[windo control] `$status exit=`$exitCode" -ForegroundColor `$(if (`$
         return
     }
 
+    # A leading `--` selects the raw elevated-command route even when the
+    # target executable name collides with a WINDO built-in.
+    if (-not $ExactArgvMode) {
     if ($Command.Count -ge 1 -and $Command[0] -eq "/?") {
         $topic = $null
         if ($Command.Count -ge 2) { $topic = [string]$Command[1] }
@@ -16892,42 +17979,58 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
         Write-Host "[windo] Re-running last command: $lastCmd" -ForegroundColor Cyan
         $Command = @($lastCmd)
     }
+    }
 
     if (-not $Command -or $Command.Count -eq 0) {
-        Write-Host "Usage: windo help | windo <command...> | windo install-latest | windo uninstall | windo !! | windo replay | ...  (see windo help)" -ForegroundColor Yellow
+        Write-Host "Usage: windo [global options] <builtin> [args...] | windo [global options] -- <elevated-command> [args...]  (see windo help)" -ForegroundColor Yellow
         _windo_set_exit 2
         return
     }
 
-    try { Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null } catch { Write-Host "[windo] Task missing: $TaskName (run installer elevated once)" -ForegroundColor Red; return }
-
     _warn_if_tampered
 
-    $cmdLine = ($Command -join " ").Trim()
+    $commandSpec = _windo_new_elevation_command_spec -Parts ([string[]]$Command) -ForceArgv:$ExactArgvMode
+    if ($null -eq $commandSpec) {
+        Write-Host "[windo] Command is empty." -ForegroundColor Red
+        _windo_set_exit 2
+        return
+    }
+    $cmdLine = [string]$commandSpec.displayCommand
+    $executionCommand = [string]$commandSpec.executionCommand
     $cmdErr = _windo_validate_elevated_command $cmdLine
+    if (-not $cmdErr) { $cmdErr = _windo_validate_execution_command $executionCommand }
     $motionPlan = _windo_new_command_plan $Command
     if ($cmdErr) {
         Write-Host "[windo] $cmdErr" -ForegroundColor Red
+        _windo_set_exit 2
         return
+    }
+    $stdinRedirected = $false
+    try { $stdinRedirected = [bool][Console]::IsInputRedirected } catch { }
+    if ($stdinRedirected) {
+        Write-Host "[windo] Redirected stdin is not forwarded to elevated targets. Use command arguments or a file; interactive/TTY prompts are unsupported." -ForegroundColor Yellow
     }
     if ($DryRun) {
         Write-Host "[windo] DRY-RUN (no scheduled task, no request files, no audit log write)" -ForegroundColor Yellow
         Write-Host "  Command line : $cmdLine"
+        Write-Host "  Mode         : $($commandSpec.mode)"
         Write-Host "  SecureDir    : $SecureDir"
         Write-Host "  Task         : $TaskName"
         Write-Host "  Runner       : $RunnerPath"
         Write-Host "  Would create : windo_req.<guid>.json and windo_res.<guid>.json under SecureDir"
+        _windo_set_exit 0
         return
     }
     if ($cmdLine) {
         $firstTok = ($cmdLine -split '\s+', 2)[0]
-        if ($firstTok -notin @(_windo_builtin_subcommands)) {
-            Write-TextFileAtomic -Path $LastCmdFile -Content $cmdLine -Encoding ([System.Text.UTF8Encoding]::new($false))
+        if ($ExactArgvMode -or $firstTok -notin @(_windo_builtin_subcommands)) {
+            Write-TextFileAtomic -Path $LastCmdFile -Content ([string]$commandSpec.replayCommand) -Encoding ([System.Text.UTF8Encoding]::new($false))
         }
     }
 
     $reqId   = [Guid]::NewGuid().ToString("n")
     $reqPath = Join-Path $SecureDir ("windo_req.$reqId.json")
+    $claimedRequestPath = Join-Path $SecureDir ("windo_run.$reqId.json")
     $outPath = Join-Path $SecureDir ("windo_res.$reqId.json")
     $preservedEnvSnapshot = $null
     $preservedEnvPayload = $null
@@ -16935,12 +18038,22 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
         if ($PreserveEnvAll) { $preservedEnvSnapshot = _windo_collect_env_snapshot $null }
         else { $preservedEnvSnapshot = _windo_collect_env_snapshot ([string[]]$PreserveEnvNames) }
         $preservedEnvPayload = _windo_build_preserve_environment_payload $preservedEnvSnapshot
+        if ($null -eq $preservedEnvPayload) {
+            Write-Host "[windo] Failed to secure the requested preserved environment; no elevated command was queued." -ForegroundColor Red
+            _windo_set_exit 1
+            return
+        }
     }
 
     $pending = @{
         Timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
         RequestId = $reqId
         Command   = $cmdLine
+        ExecutionCommand = $executionCommand
+        CommandMode = [string]$commandSpec.mode
+        PowerShellPath = (_windo_current_powershell_path)
+        WorkingDirectory = (_windo_current_working_directory)
+        UserSid = (_windo_current_identity_sid)
         OutPath   = $outPath
         Host      = $env:COMPUTERNAME
         User      = "$env:USERDOMAIN\$env:USERNAME"
@@ -16951,9 +18064,9 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
     $sealedPending = _windo_build_artifact_payload $pending
     if ($null -eq $sealedPending) {
         Write-Host "[windo] Failed to secure request payload." -ForegroundColor Red
+        _windo_set_exit 1
         return
     }
-    [void](_windo_prune_stale_runner_requests -OlderThanMinutes 2)
     Write-TextFileAtomic -Path $reqPath -Content ($sealedPending | ConvertTo-Json -Depth 20 -Compress) -Encoding ([System.Text.UTF8Encoding]::new($false))
 
     $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -16962,12 +18075,19 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
         Write-Host "[windo] Scheduled runner action is stale or malformed; using direct UAC runner fallback." -ForegroundColor Yellow
         $directLaunch = _windo_start_direct_elevated_runner
         if (-not $directLaunch.started) {
-            if ($directLaunch.declined) { Write-Host "[windo] UAC elevation was declined. No elevated command was run." -ForegroundColor Yellow }
-            else { Write-Host "[windo] Direct UAC runner could not start: $($directLaunch.error)" -ForegroundColor Red }
-            _windo_set_exit 1
-            return
+            $cancelState = _windo_cancel_unclaimed_request -RequestPath $reqPath -ClaimedPath $claimedRequestPath -ResultPath $outPath
+            if ($cancelState.claimed) {
+                Write-Host "[windo] Direct launch reported failure after the request was claimed; waiting for the correlated result." -ForegroundColor Yellow
+                $runnerLaunch = "concurrent-claim"
+            } else {
+                if ($directLaunch.declined -and $cancelState.cancelled) { Write-Host "[windo] UAC elevation was declined. The queued request was cancelled; no elevated command will run." -ForegroundColor Yellow }
+                elseif ($cancelState.pending) { Write-Host "[windo] Direct UAC runner failed and the unclaimed request could not be cancelled: $reqPath" -ForegroundColor Red }
+                else { Write-Host "[windo] Direct UAC runner could not start; the queued request was cancelled. $($directLaunch.error)" -ForegroundColor Red }
+                _windo_set_exit $(if ($directLaunch.exitCode -is [int]) { [int]$directLaunch.exitCode } else { 1 })
+                return
+            }
         }
-        $runnerLaunch = "direct-uac"
+        if ($directLaunch.started) { $runnerLaunch = "direct-uac" }
     } else {
         try {
             Start-ScheduledTask -TaskName $TaskName | Out-Null
@@ -16975,20 +18095,46 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
             Write-Host "[windo] Scheduled runner could not start; using direct UAC runner fallback." -ForegroundColor Yellow
             $directLaunch = _windo_start_direct_elevated_runner
             if (-not $directLaunch.started) {
-                if ($directLaunch.declined) { Write-Host "[windo] UAC elevation was declined. No elevated command was run." -ForegroundColor Yellow }
-                else { Write-Host "[windo] Direct UAC runner could not start: $($directLaunch.error)" -ForegroundColor Red }
-                _windo_set_exit 1
-                return
+                $cancelState = _windo_cancel_unclaimed_request -RequestPath $reqPath -ClaimedPath $claimedRequestPath -ResultPath $outPath
+                if ($cancelState.claimed) {
+                    Write-Host "[windo] Direct launch reported failure after the request was claimed; waiting for the correlated result." -ForegroundColor Yellow
+                    $runnerLaunch = "concurrent-claim"
+                } else {
+                    if ($directLaunch.declined -and $cancelState.cancelled) { Write-Host "[windo] UAC elevation was declined. The queued request was cancelled; no elevated command will run." -ForegroundColor Yellow }
+                    elseif ($cancelState.pending) { Write-Host "[windo] Direct UAC runner failed and the unclaimed request could not be cancelled: $reqPath" -ForegroundColor Red }
+                    else { Write-Host "[windo] Direct UAC runner could not start; the queued request was cancelled. $($directLaunch.error)" -ForegroundColor Red }
+                    _windo_set_exit $(if ($directLaunch.exitCode -is [int]) { [int]$directLaunch.exitCode } else { 1 })
+                    return
+                }
             }
-            $runnerLaunch = "direct-uac"
+            if ($directLaunch.started) { $runnerLaunch = "direct-uac" }
         }
     }
     $dispatchProfile = _windo_resolve_motion_profile_name -Plan $motionPlan -Context "dispatch" -RequestedProfile $motionPlan.motionProfileHint
-    $dispatchDelay = _windo_motion_interval_ms $dispatchProfile
+    $dispatchDelay = [Math]::Max(50, [int](_windo_motion_interval_ms $dispatchProfile))
+    $resultWaitTimeoutMs = _windo_result_wait_timeout_ms $CommandTimeoutOverrideMs
 
     $waitFrame = 0
     $waitLabel = "[windo] Waiting for elevated result..."
-    while (!(Test-Path $outPath) -and $sw.Elapsed.TotalSeconds -lt 20) {
+    $claimObservedAtMs = $null
+    $runnerFailed = $false
+    while (!(Test-Path -LiteralPath $outPath)) {
+        if ($null -eq $claimObservedAtMs -and (Test-Path -LiteralPath $claimedRequestPath)) {
+            $claimObservedAtMs = [long]$sw.ElapsedMilliseconds
+        }
+        if ((Test-Path -LiteralPath ($claimedRequestPath + ".failed")) -or (Test-Path -LiteralPath ($claimedRequestPath + ".bad"))) {
+            $runnerFailed = $true
+            break
+        }
+        if ($null -ne $claimObservedAtMs) {
+            if (($sw.ElapsedMilliseconds - [long]$claimObservedAtMs) -ge $resultWaitTimeoutMs) { break }
+        } elseif ($sw.ElapsedMilliseconds -ge 30000) {
+            # If another request is active, the draining runner will claim this
+            # one next. Otherwise the launch failed and waiting for the full
+            # child timeout would hide the actionable error for hours.
+            $otherActiveRequest = @(Get-ChildItem -Path $SecureDir -Filter "windo_run.*.json" -ErrorAction SilentlyContinue | Select-Object -First 1)
+            if ($otherActiveRequest.Count -eq 0) { break }
+        }
         _windo_spinner_line $waitLabel $waitFrame $dispatchProfile
         $waitFrame = ($waitFrame + 1) % 4
         Start-Sleep -Milliseconds $dispatchDelay
@@ -16998,23 +18144,30 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
     if (!(Test-Path $outPath)) {
         $hint = ""
         if (Test-Path $RunnerLast) { $hint = (Get-Content -Raw -Path $RunnerLast).TrimEnd() }
-        _append_log @{
+        $timeoutCancelState = _windo_cancel_unclaimed_request -RequestPath $reqPath -ClaimedPath $claimedRequestPath -ResultPath $outPath
+        if (!(Test-Path -LiteralPath $outPath)) {
+            $timeoutElevation = if ($timeoutCancelState.cancelled) { "CANCELLED" } else { "PENDING" }
+            _append_log @{
             Timestamp  = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
             User       = "$env:USERDOMAIN\$env:USERNAME"
             Host       = $env:COMPUTERNAME
             Command    = $cmdLine
             ExitCode   = -2
             Output     = "<TIMEOUT WAITING FOR RESULT>`n$hint"
-            Elevation  = "PENDING"
+            Elevation  = $timeoutElevation
             DurationMs = [int]$sw.Elapsed.TotalMilliseconds
             Version    = $WindoVersion
             RequestId  = $reqId
+            }
+            _write_last_meta $cmdLine $reqId
+            if ($runnerFailed) { Write-Host "[windo] Elevated runner failed before publishing a result." -ForegroundColor Red }
+            elseif ($timeoutCancelState.cancelled) { Write-Host "[windo] Runner launch timed out; the unclaimed request was cancelled and will not run later." -ForegroundColor Red }
+            else { Write-Host "[windo] Timed out waiting for an already-claimed elevated result." -ForegroundColor Red }
+            if ($hint) { Write-Host "[windo] Runner trace:" -ForegroundColor Yellow; Write-Host $hint }
+            _suggest_if_denied -2 $hint
+            _windo_set_exit -2
+            return
         }
-        _write_last_meta $cmdLine $reqId
-        Write-Host "[windo] Timed out waiting for elevated result." -ForegroundColor Red
-        if ($hint) { Write-Host "[windo] Runner trace:" -ForegroundColor Yellow; Write-Host $hint }
-        _suggest_if_denied -2 $hint
-        return
     }
 
     $res = _windo_parse_runner_result -OutPath $outPath -RequestId $reqId -Command $cmdLine -FallbackDurationMs ([int]$sw.Elapsed.TotalMilliseconds)
@@ -17048,6 +18201,7 @@ See the WINDO repository docs/modules-and-extras.md for the modules and extras t
     if ($res.PSObject.Properties.Name -contains 'OutputTruncated' -and [bool]$res.OutputTruncated) {
         Write-Host "[windo] Output was truncated (WINDO_RUNNER_MAX_OUTPUT_BYTES)." -ForegroundColor Yellow
     }
+    _windo_set_exit ([int]$res.ExitCode)
 }
 
 '@
@@ -17604,6 +18758,10 @@ if (-not [string]::IsNullOrWhiteSpace($installerSource) -and (Test-Path -Literal
     Write-Warning "WINDO: Could not snapshot windo_install.ps1 (pathless or in-memory execution). Other snapshot files were written to: $SnapshotDir"
 }
 Write-WindoInstallStep -Status ok -Label "Snapshot refreshed" -Color Green
+
+$finalMainTaskHealth = Test-WindoScheduledTaskHealth -TaskName $TaskMain -ExpectedExecute $MainActionArgs.Execute -ExpectedArgument $MainActionArgs.Argument -ExpectedUserId $UserId
+$null = Assert-WindoInstallSuccessGate -RuntimeProfile $installerRuntimeProfile -ScheduledTasksReady ([bool]($script:WindoScheduledTasksAvailable -and $taskRegistrationSucceeded)) -MainTaskHealth $finalMainTaskHealth
+Write-WindoInstallStep -Status ok -Label "Final installation verification passed" -Detail "$TaskMain remains healthy" -Color Green
 
 Write-Host ""
 Write-WindoInstallStep -Status ok -Label "WINDO v$WindoVersion installed" -Detail "snapshot: $SnapshotDir" -Color Green

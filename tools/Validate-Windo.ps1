@@ -1,26 +1,42 @@
 # Validate WINDO repo scripts (syntax). Run from repo root: ./tools/Validate-Windo.ps1
+[CmdletBinding()]
+param([switch]$RequireCurrentSnapshot)
+
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 
-function New-WindoSHA256 {
-    return [System.Security.Cryptography.SHA256]::Create()
+function New-WindoHashAlgorithm {
+    param([Parameter(Mandatory = $true)][ValidateSet("SHA256", "SHA384", "SHA512")][string]$Algorithm)
+    switch ($Algorithm) {
+        "SHA256" { return [System.Security.Cryptography.SHA256]::Create() }
+        "SHA384" { return [System.Security.Cryptography.SHA384]::Create() }
+        "SHA512" { return [System.Security.Cryptography.SHA512]::Create() }
+    }
 }
 
-function Get-WindoPublishedTextFileSha256([string]$Path) {
+function Get-WindoPublishedTextFileHash {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][ValidateSet("SHA256", "SHA384", "SHA512")][string]$Algorithm
+    )
     $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $sha = New-WindoSHA256
+    $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $text = $strictUtf8.GetString($bytes)
+    $publishedBytes = $utf8NoBom.GetBytes($text.Replace("`r`n", "`n"))
+    $sha = New-WindoHashAlgorithm -Algorithm $Algorithm
     try {
-        # Validate against the same raw SHA256 domain used by bootstrap/install hash checks.
-        $hashBytes = $sha.ComputeHash($bytes)
+        # Validate the LF bytes GitHub publishes, independent of local checkout
+        # autocrlf settings. Runtime checks still hash downloaded bytes exactly.
+        $hashBytes = $sha.ComputeHash($publishedBytes)
         -join ($hashBytes | ForEach-Object { $_.ToString("X2") })
     } finally {
         $sha.Dispose()
     }
 }
 
-function Test-WindoAsciiSource([string]$Path) {
-    $bytes = [System.IO.File]::ReadAllBytes($Path)
-    return (@($bytes | Where-Object { $_ -gt 0x7F }).Count -eq 0)
+function Get-WindoPublishedTextFileSha256([string]$Path) {
+    return Get-WindoPublishedTextFileHash -Path $Path -Algorithm SHA256
 }
 
 function Get-WindoChecksumManifest([string]$Content) {
@@ -44,6 +60,12 @@ function Get-WindoChecksumManifest([string]$Content) {
 
 function Test-WindoHex64([string]$Value) {
     return ($Value -match '^[A-Fa-f0-9]{64}$')
+}
+
+function Test-WindoHexDigest {
+    param([AllowNull()][string]$Value, [Parameter(Mandatory = $true)][int]$Length)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    return ([string]$Value -match ("^[A-Fa-f0-9]{$Length}$"))
 }
 
 function Get-WindoReleaseTargetMeta {
@@ -74,6 +96,7 @@ function Test-WindoChecksumManifestMetadata {
         [string]$ExpectedCommit
     )
 
+    $valid = $true
     $releaseBranch = if ($Manifest.ContainsKey("releaseBranch")) { [string]$Manifest.releaseBranch } else { $null }
     $releaseCommit = if ($Manifest.ContainsKey("releaseCommit")) { [string]$Manifest.releaseCommit } else { $null }
     $releaseBranchRaw = if ($Manifest.ContainsKey("releaseBranchRaw")) { [string]$Manifest.releaseBranchRaw } else { $null }
@@ -81,50 +104,144 @@ function Test-WindoChecksumManifestMetadata {
 
     if (-not [string]::IsNullOrWhiteSpace($ExpectedBranch)) {
         if (-not [string]::IsNullOrWhiteSpace($releaseBranch) -and $releaseBranch -ne $ExpectedBranch) {
-            Write-Host "WARN $Label" -ForegroundColor Yellow
+            Write-Host "FAIL $Label" -ForegroundColor Red
             Write-Host "Manifest releaseBranch does not match local target branch. expected=$ExpectedBranch manifest=$releaseBranch"
+            $valid = $false
         } elseif ([string]::IsNullOrWhiteSpace($releaseBranch)) {
-            Write-Host "WARN $Label" -ForegroundColor Yellow
+            Write-Host "FAIL $Label" -ForegroundColor Red
             Write-Host "Manifest releaseBranch is missing."
+            $valid = $false
         }
     }
 
     if (-not [string]::IsNullOrWhiteSpace($ExpectedCommit) -and -not [string]::IsNullOrWhiteSpace($releaseCommit)) {
         $normalizedReleaseCommit = $releaseCommit.ToLowerInvariant()
         if ($normalizedReleaseCommit -ne $ExpectedCommit) {
-            Write-Host "WARN $Label" -ForegroundColor Yellow
+            Write-Host "FAIL $Label" -ForegroundColor Red
             Write-Host "Manifest releaseCommit does not match local HEAD hash. expected=$ExpectedCommit manifest=$releaseCommit"
+            $valid = $false
         }
     }
 
     if (-not [string]::IsNullOrWhiteSpace($releaseBranchRaw) -and -not [string]::IsNullOrWhiteSpace($releaseBranch) -and $releaseBranchRaw -ne $releaseBranch) {
-        Write-Host "WARN $Label" -ForegroundColor Yellow
+        Write-Host "FAIL $Label" -ForegroundColor Red
         Write-Host "Manifest releaseBranchRaw does not match releaseBranch value. branch=$releaseBranch raw=$releaseBranchRaw"
+        $valid = $false
     }
 
-    if ([string]::IsNullOrWhiteSpace($releaseCommitRaw)) {
-        return
-    } elseif ($releaseCommitRaw -match '^[a-fA-F0-9]{40,64}$') {
+    if (-not [string]::IsNullOrWhiteSpace($releaseCommitRaw) -and $releaseCommitRaw -match '^[a-fA-F0-9]{40,64}$') {
         if (-not [string]::IsNullOrWhiteSpace($releaseCommit) -and ($releaseCommitRaw.ToLowerInvariant() -ne $releaseCommit.ToLowerInvariant())) {
-            Write-Host "WARN $Label" -ForegroundColor Yellow
+            Write-Host "FAIL $Label" -ForegroundColor Red
             Write-Host "Manifest releaseCommitRaw does not match releaseCommit value. commit=$releaseCommit raw=$releaseCommitRaw"
+            $valid = $false
         }
-    } else {
-        Write-Host "WARN $Label" -ForegroundColor Yellow
+    } elseif (-not [string]::IsNullOrWhiteSpace($releaseCommitRaw)) {
+        Write-Host "FAIL $Label" -ForegroundColor Red
         Write-Host "Manifest releaseCommitRaw is not a 40-character commit hash."
+        $valid = $false
     }
+    return $valid
+}
+
+function Test-WindoManifestArtifactHashes {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Manifest,
+        [Parameter(Mandatory = $true)][string]$InstallerPath,
+        [Parameter(Mandatory = $true)][string]$UninstallerPath,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    $valid = $true
+    if (-not $Manifest.ContainsKey("schemaVersion") -or [string]$Manifest.schemaVersion -cne "2") {
+        Write-Host "FAIL $Label" -ForegroundColor Red
+        Write-Host "Checksum manifest schemaVersion must be 2."
+        $valid = $false
+    }
+    foreach ($requiredPath in @($InstallerPath, $UninstallerPath)) {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            Write-Host "FAIL $Label" -ForegroundColor Red
+            Write-Host "Required release artifact is missing: $requiredPath"
+            $valid = $false
+        }
+    }
+    if (-not $valid) { return $false }
+
+    $specs = @(
+        @{ Key = "installerSha256"; Path = $InstallerPath; Algorithm = "SHA256"; Length = 64 }
+        @{ Key = "installerSha384"; Path = $InstallerPath; Algorithm = "SHA384"; Length = 96 }
+        @{ Key = "installerSha512"; Path = $InstallerPath; Algorithm = "SHA512"; Length = 128 }
+        @{ Key = "uninstallerSha256"; Path = $UninstallerPath; Algorithm = "SHA256"; Length = 64 }
+        @{ Key = "uninstallerSha384"; Path = $UninstallerPath; Algorithm = "SHA384"; Length = 96 }
+        @{ Key = "uninstallerSha512"; Path = $UninstallerPath; Algorithm = "SHA512"; Length = 128 }
+    )
+    foreach ($spec in $specs) {
+        $key = [string]$spec.Key
+        $expected = if ($Manifest.ContainsKey($key)) { [string]$Manifest[$key] } else { $null }
+        if (-not (Test-WindoHexDigest -Value $expected -Length ([int]$spec.Length))) {
+            Write-Host "FAIL $Label" -ForegroundColor Red
+            Write-Host "$key is missing or is not a valid $($spec.Algorithm) digest."
+            $valid = $false
+            continue
+        }
+        $actual = Get-WindoPublishedTextFileHash -Path ([string]$spec.Path) -Algorithm ([string]$spec.Algorithm)
+        if ($actual -cne $expected) {
+            Write-Host "FAIL $Label" -ForegroundColor Red
+            Write-Host "$key does not match $([System.IO.Path]::GetFileName([string]$spec.Path))."
+            Write-Host "Expected: $expected"
+            Write-Host "Found   : $actual"
+            $valid = $false
+        } else {
+            Write-Host "OK   $Label ($key)" -ForegroundColor Green
+        }
+    }
+    return $valid
+}
+
+function Test-WindoEmbeddedReleasePublicKey {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstallerPath,
+        [Parameter(Mandatory = $true)][string]$PublicKeyPath
+    )
+    if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf) -or -not (Test-Path -LiteralPath $PublicKeyPath -PathType Leaf)) {
+        Write-Host "FAIL embedded release public key" -ForegroundColor Red
+        Write-Host "Installer or committed public key is missing."
+        return $false
+    }
+    $installerText = [System.IO.File]::ReadAllText($InstallerPath)
+    $match = [regex]::Match($installerText, '(?m)^\$WindoReleasePublicKeyB64\s*=\s*"(?<b64>[A-Za-z0-9+/=]+)"\s*$')
+    if (-not $match.Success) {
+        Write-Host "FAIL embedded release public key" -ForegroundColor Red
+        Write-Host "Installer does not contain the generated WindoReleasePublicKeyB64 trust root."
+        return $false
+    }
+    try {
+        $embedded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($match.Groups['b64'].Value)).Trim()
+        $committed = [System.IO.File]::ReadAllText($PublicKeyPath).Trim()
+        if ($embedded -cne $committed) {
+            Write-Host "FAIL embedded release public key" -ForegroundColor Red
+            Write-Host "Installer trust root differs from keys/windo-release-public.rsa.xml."
+            return $false
+        }
+    } catch {
+        Write-Host "FAIL embedded release public key" -ForegroundColor Red
+        Write-Host "Installer trust root could not be decoded: $($_.Exception.Message)"
+        return $false
+    }
+    Write-Host "OK   embedded release public key" -ForegroundColor Green
+    return $true
 }
 
 $files = @(
-    @(Get-ChildItem -LiteralPath $root -File -Filter "*.ps1")
-    @(Get-ChildItem -LiteralPath (Join-Path $root "tools") -File -Filter "*.ps1")
-    @(Get-ChildItem -LiteralPath (Join-Path $root "src") -File -Recurse -Filter "*.ps1")
-    @(Get-ChildItem -LiteralPath (Join-Path $root "extras") -File -Recurse -Filter "*.ps1")
-) | Select-Object -ExpandProperty FullName -Unique | Sort-Object
+    Get-ChildItem -LiteralPath $root -Filter "*.ps1" -File | Where-Object { -not $_.Name.StartsWith(".tmp", [StringComparison]::OrdinalIgnoreCase) }
+    Get-ChildItem -LiteralPath (Join-Path $root "tools") -Filter "*.ps1" -File
+    Get-ChildItem -LiteralPath (Join-Path $root "src\windo\snippets") -Filter "*.ps1" -File -Recurse
+    Get-ChildItem -LiteralPath (Join-Path $root "extras") -Filter "*.ps1" -File -Recurse
+) | Sort-Object FullName -Unique
 $ok = $true
 $releaseTarget = Get-WindoReleaseTargetMeta
-foreach ($p in $files) {
-    $f = $p.Substring($root.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+foreach ($file in $files) {
+    $p = $file.FullName
+    $f = $p.Substring($root.Length).TrimStart([char[]]@('\', '/'))
     if (!(Test-Path $p)) { Write-Warning "Missing: $f"; $ok = $false; continue }
     $err = $null
     $null = [System.Management.Automation.Language.Parser]::ParseFile($p, [ref]$null, [ref]$err)
@@ -138,20 +255,6 @@ foreach ($p in $files) {
     }
 }
 try {
-    $installerEncodingPath = Join-Path $root "windo_install.ps1"
-    if (Test-WindoAsciiSource -Path $installerEncodingPath) {
-        Write-Host "OK   windo_install.ps1 ASCII source" -ForegroundColor Green
-    } else {
-        Write-Host "FAIL windo_install.ps1 ASCII source" -ForegroundColor Red
-        Write-Host "The installer must remain ASCII-only so Windows PowerShell 5.1 parses it correctly without relying on encoding metadata."
-        $ok = $false
-    }
-} catch {
-    Write-Host "FAIL windo_install.ps1 ASCII source" -ForegroundColor Red
-    Write-Host "Could not inspect installer encoding: $($_.Exception.Message)"
-    $ok = $false
-}
-try {
     $installerPath = Join-Path $root "windo_install.ps1"
     $checksumPath = Join-Path $root "checksums\installer.sha256"
     if (!(Test-Path $checksumPath)) {
@@ -161,66 +264,17 @@ try {
     } else {
         $checksumContent = [string](Get-Content $checksumPath -Raw)
         $checksumManifest = Get-WindoChecksumManifest -Content $checksumContent
-        $manifestHasSchema = $checksumManifest.ContainsKey("schemaVersion")
-        if ($manifestHasSchema) {
-            if (-not ($checksumManifest.ContainsKey("releaseBranch") -and $checksumManifest.ContainsKey("installerSha256"))) {
-                Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
-                Write-Host "Published checksum manifest missing required stable keys."
-                $ok = $false
-            }
-        }
-        Test-WindoChecksumManifestMetadata -Manifest $checksumManifest -Label "checksums/installer.sha256" -ExpectedBranch $releaseTarget.Branch -ExpectedCommit $releaseTarget.Commit
-        $expectedInstaller = $checksumManifest.installerSha256
-        $expectedUninstaller = $checksumManifest.uninstallerSha256
-
-        if (-not (Test-WindoHex64 $expectedInstaller)) {
-            Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
-            Write-Host "Published installer checksum is not a valid 64-char SHA256 value. Regenerate checksums/installer.sha256 from the checked-in installer source."
-            $ok = $false
-        } else {
-            $actual = Get-WindoPublishedTextFileSha256 -Path $installerPath
-            if ($actual -cne $expectedInstaller) {
-                Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
-                Write-Host "Published installer checksum does not match the installer payload."
-                Write-Host "Expected: $expectedInstaller"
-                Write-Host "Found   : $actual"
-                Write-Host "Remediation: run tools/Sync-InstallerChecksum.ps1 and commit the updated checksums file if release artifacts are correct."
-                $ok = $false
-            } else {
-                Write-Host "OK   checksums/installer.sha256 (installer)" -ForegroundColor Green
-            }
-        }
-
-        if ([string]::IsNullOrWhiteSpace($expectedUninstaller)) {
-            Write-Host "WARN checksums/installer.sha256" -ForegroundColor Yellow
-            Write-Host "Published uninstaller checksum entry is missing."
-            $ok = $false
-        } elseif (-not (Test-WindoHex64 $expectedUninstaller)) {
-            Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
-            Write-Host "Published uninstaller checksum is not a valid SHA256 value."
-            $ok = $false
-        } else {
-            $uninstallerPath = Join-Path $root "windo_uninstall.ps1"
-            if (Test-Path $uninstallerPath) {
-                $actualUninstaller = Get-WindoPublishedTextFileSha256 -Path $uninstallerPath
-                if ($actualUninstaller -cne $expectedUninstaller) {
-                    Write-Host "FAIL checksums/installer.sha256" -ForegroundColor Red
-                    Write-Host "Published uninstaller checksum does not match the uninstaller payload."
-                    Write-Host "Expected: $expectedUninstaller"
-                    Write-Host "Found   : $actualUninstaller"
-                    Write-Host "Remediation: re-run tools/Sync-InstallerChecksum.ps1 after rebuilding release artifacts."
-                    $ok = $false
-                } else {
-                    Write-Host "OK   checksums/installer.sha256 (uninstaller)" -ForegroundColor Green
-                }
-            } else {
-                Write-Host "WARN checksums/installer.sha256" -ForegroundColor Yellow
-                Write-Host "windo_uninstall.ps1 missing; skipping uninstaller checksum validation."
-            }
-        }
+        $uninstallerPath = Join-Path $root "windo_uninstall.ps1"
+        if (-not (Test-WindoChecksumManifestMetadata -Manifest $checksumManifest -Label "checksums/installer.sha256" -ExpectedBranch $releaseTarget.Branch -ExpectedCommit $releaseTarget.Commit)) { $ok = $false }
+        if (-not (Test-WindoManifestArtifactHashes -Manifest $checksumManifest -InstallerPath $installerPath -UninstallerPath $uninstallerPath -Label "checksums/installer.sha256")) { $ok = $false }
+        if (-not (Test-WindoEmbeddedReleasePublicKey -InstallerPath $installerPath -PublicKeyPath (Join-Path $root "keys\windo-release-public.rsa.xml"))) { $ok = $false }
 
         $signatureCheck = Join-Path $root "tools\Test-WindoChecksumSignature.ps1"
-        if (Test-Path -LiteralPath $signatureCheck) {
+        if (-not (Test-Path -LiteralPath $signatureCheck -PathType Leaf)) {
+            Write-Host "FAIL checksums/installer.sha256.sig" -ForegroundColor Red
+            Write-Host "Required signature verifier is missing: $signatureCheck"
+            $ok = $false
+        } else {
             try {
                 & $signatureCheck | Out-Null
                 Write-Host "OK   checksums/installer.sha256.sig" -ForegroundColor Green
@@ -239,75 +293,43 @@ try {
 }
 
 try {
-    $currentBranch = $null
-    try {
-        $candidateBranch = (git -C $root rev-parse --abbrev-ref HEAD).Trim()
-        if ($candidateBranch -and $candidateBranch -ne "HEAD") { $currentBranch = $candidateBranch }
-    } catch {}
-
     $versionMatch = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $root "windo_install.ps1")), '\$WindoVersion\s*=\s*"(?<v>\d+\.\d+\.\d+)"')
     if ($versionMatch.Success) {
         $version = $versionMatch.Groups['v'].Value
         $snapshotInstaller = Join-Path $root ("versions\v{0}\windo_install.ps1" -f $version)
         $snapshotUninstall = Join-Path $root ("versions\v{0}\windo_uninstall.ps1" -f $version)
         $snapshotChecksum = Join-Path $root ("versions\v{0}\checksums\installer.sha256" -f $version)
-        if ((Test-Path -LiteralPath $snapshotInstaller) -and (Test-Path -LiteralPath $snapshotChecksum)) {
+        $snapshotSignature = Join-Path $root ("versions\v{0}\checksums\installer.sha256.sig" -f $version)
+        $snapshotPublicKey = Join-Path $root ("versions\v{0}\keys\windo-release-public.rsa.xml" -f $version)
+        $snapshotComplete = (
+            (Test-Path -LiteralPath $snapshotInstaller -PathType Leaf) -and
+            (Test-Path -LiteralPath $snapshotUninstall -PathType Leaf) -and
+            (Test-Path -LiteralPath $snapshotChecksum -PathType Leaf) -and
+            (Test-Path -LiteralPath $snapshotSignature -PathType Leaf) -and
+            (Test-Path -LiteralPath $snapshotPublicKey -PathType Leaf)
+        )
+        if ($snapshotComplete) {
             $snapshotExpectedContent = [string](Get-Content -LiteralPath $snapshotChecksum -Raw)
             $snapshotManifest = Get-WindoChecksumManifest -Content $snapshotExpectedContent
-            $snapshotHasSchema = $snapshotManifest.ContainsKey("schemaVersion")
-            if ($snapshotHasSchema -and -not ($snapshotManifest.ContainsKey("releaseBranch") -and $snapshotManifest.ContainsKey("installerSha256"))) {
-                Write-Host "FAIL versions/v$version/checksums/installer.sha256" -ForegroundColor Red
-                Write-Host "Snapshot checksum manifest missing required stable keys."
+            $snapshotLabel = "versions/v$version/checksums/installer.sha256"
+            if (-not (Test-WindoChecksumManifestMetadata -Manifest $snapshotManifest -Label $snapshotLabel -ExpectedBranch $releaseTarget.Branch -ExpectedCommit $releaseTarget.Commit)) { $ok = $false }
+            if (-not (Test-WindoManifestArtifactHashes -Manifest $snapshotManifest -InstallerPath $snapshotInstaller -UninstallerPath $snapshotUninstall -Label $snapshotLabel)) { $ok = $false }
+            if (-not (Test-WindoEmbeddedReleasePublicKey -InstallerPath $snapshotInstaller -PublicKeyPath $snapshotPublicKey)) { $ok = $false }
+            try {
+                & (Join-Path $root "tools\Test-WindoChecksumSignature.ps1") -ManifestPath $snapshotChecksum -SignaturePath $snapshotSignature -PublicKeyPath $snapshotPublicKey | Out-Null
+                Write-Host "OK   versions/v$version/checksums/installer.sha256.sig" -ForegroundColor Green
+            } catch {
+                Write-Host "FAIL versions/v$version/checksums/installer.sha256.sig" -ForegroundColor Red
+                Write-Host "Snapshot checksum signature is invalid. $_"
                 $ok = $false
-            }
-            Test-WindoChecksumManifestMetadata -Manifest $snapshotManifest -Label "versions/v$version/checksums/installer.sha256" -ExpectedBranch $releaseTarget.Branch -ExpectedCommit $releaseTarget.Commit
-            $snapshotExpectedInstaller = $snapshotManifest.installerSha256
-            $snapshotExpectedUninstaller = $snapshotManifest.uninstallerSha256
-
-            if (-not (Test-WindoHex64 $snapshotExpectedInstaller)) {
-                Write-Host "FAIL versions/v$version/checksums/installer.sha256" -ForegroundColor Red
-                Write-Host "Snapshot installer checksum does not contain a valid SHA256."
-                $ok = $false
-            } else {
-                $snapshotActual = Get-WindoPublishedTextFileSha256 -Path $snapshotInstaller
-                if ($snapshotActual -cne $snapshotExpectedInstaller) {
-                    Write-Host "FAIL versions/v$version/checksums/installer.sha256" -ForegroundColor Red
-                    Write-Host "Snapshot installer checksum does not match expected content."
-                    Write-Host "Expected: $snapshotExpectedInstaller"
-                    Write-Host "Found   : $snapshotActual"
-                    Write-Host "Remediation: rebuild snapshot checksums with tools/Sync-InstallerChecksum.ps1 for the snapshot branch."
-                    $ok = $false
-                } else {
-                    Write-Host "OK   versions/v$version/checksums/installer.sha256" -ForegroundColor Green
-                }
-            }
-
-            if (-not (Test-WindoHex64 $snapshotExpectedUninstaller)) {
-                Write-Host "WARN versions/v$version/checksums/installer.sha256" -ForegroundColor Yellow
-                Write-Host "Snapshot uninstaller checksum does not contain a valid SHA256 or is missing."
-            } else {
-                if (Test-Path -LiteralPath $snapshotUninstall) {
-                    $snapshotActualUninstaller = Get-WindoPublishedTextFileSha256 -Path $snapshotUninstall
-                    if ($snapshotActualUninstaller -cne $snapshotExpectedUninstaller) {
-                        Write-Host "FAIL versions/v$version/checksums/installer.sha256" -ForegroundColor Red
-                        Write-Host "Snapshot uninstaller checksum does not match expected content."
-                        Write-Host "Expected: $snapshotExpectedUninstaller"
-                        Write-Host "Found   : $snapshotActualUninstaller"
-                        Write-Host "Remediation: rebuild snapshot checksums with tools/Sync-InstallerChecksum.ps1 for the snapshot branch."
-                        $ok = $false
-                    }
-                } else {
-                    Write-Host "WARN versions/v$version/checksums/installer.sha256" -ForegroundColor Yellow
-                    Write-Host "versions/v$version/windo_uninstall.ps1 missing; skipping snapshot uninstaller checksum validation."
-                }
             }
         } else {
-            $snapshotStatus = if ($currentBranch -eq "Exodus") { "FAIL" } else { "WARN" }
-            $snapshotColor = if ($snapshotStatus -eq "FAIL") { "Red" } else { "Yellow" }
-            Write-Host "$snapshotStatus versions/v$version/checksums/installer.sha256" -ForegroundColor $snapshotColor
-            Write-Host "No versions/v$version snapshot exists for this branch. Skipping snapshot checksum validation."
+            $snapshotStatus = if ($RequireCurrentSnapshot) { "FAIL" } else { "WARN" }
+            $snapshotColor = if ($RequireCurrentSnapshot) { "Red" } else { "Yellow" }
+            Write-Host "$snapshotStatus versions/v$version release snapshot" -ForegroundColor $snapshotColor
+            Write-Host "Current snapshot is missing installer, uninstaller, manifest, signature, or public key."
             Write-Host "Create it with ./tools/Sync-VersionSnapshot.ps1 -Version $version so future releases can validate installer payload parity."
-            if ($snapshotStatus -eq "FAIL") { $ok = $false }
+            if ($RequireCurrentSnapshot) { $ok = $false }
         }
     }
 } catch {

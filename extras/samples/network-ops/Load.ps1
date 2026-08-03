@@ -38,7 +38,7 @@ if (-not (Get-Command -Name wincmd -ErrorAction SilentlyContinue)) {
             return
         }
         Set-Item -Path ("Function:\global:" + $Name) -Value $ScriptBlock
-        Write-Verbose ("wincmd registered " + $Name + ($(if ($Description) { " - " + $Description } else { "" } )))
+        Write-Verbose ("wincmd registered " + $Name + $(if ($Description) { " - " + $Description } else { "" }))
     }
 }
 

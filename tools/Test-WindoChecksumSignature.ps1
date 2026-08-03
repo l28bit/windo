@@ -24,6 +24,8 @@ if (!(Test-Path -LiteralPath $PublicKeyPath)) { throw "Missing public key: $Publ
 
 $sigMap = Get-NameValueMap $SignaturePath
 if (-not $sigMap.ContainsKey("signatureBase64")) { throw "Signature file missing signatureBase64." }
+if (-not $sigMap.ContainsKey("schemaVersion") -or [string]$sigMap.schemaVersion -ne "1") { throw "Signature file schemaVersion must be 1." }
+if (-not $sigMap.ContainsKey("algorithm") -or [string]$sigMap.algorithm -notin @("RSA-PSS-SHA256", "RSA-PKCS1-SHA256")) { throw "Signature file algorithm is missing or unsupported." }
 
 $bytes = [System.IO.File]::ReadAllBytes($ManifestPath)
 $sig = [Convert]::FromBase64String([string]$sigMap.signatureBase64)
@@ -31,16 +33,15 @@ $pubXml = [System.IO.File]::ReadAllText($PublicKeyPath)
 $rsa = [System.Security.Cryptography.RSA]::Create()
 try {
     $rsa.FromXmlString($pubXml)
-    $ok = $false
-    try {
+    $algorithm = [string]$sigMap.algorithm
+    if ($algorithm -eq "RSA-PSS-SHA256") {
         $ok = $rsa.VerifyData(
             $bytes,
             $sig,
             [System.Security.Cryptography.HashAlgorithmName]::SHA256,
             [System.Security.Cryptography.RSASignaturePadding]::Pss
         )
-    } catch { }
-    if (-not $ok) {
+    } else {
         $ok = $rsa.VerifyData(
             $bytes,
             $sig,

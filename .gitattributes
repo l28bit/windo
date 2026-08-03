@@ -1,0 +1,24 @@
+# Release artifacts are fetched from GitHub as repository bytes and hashed
+# byte-for-byte. Pin LF so Windows checkout settings cannot change release
+# checksums or invalidate the signed manifest.
+/bootstrap.ps1 text eol=lf
+/windo_install.ps1 text eol=lf
+/windo_runner.ps1 text eol=lf
+/windo_self_update.ps1 text eol=lf
+/windo_uninstall.ps1 text eol=lf
+/windo_heal.ps1 text eol=lf
+/checksums/installer.sha256 text eol=lf
+/checksums/installer.sha256.sig text eol=lf
+/keys/windo-release-public.rsa.xml text eol=lf
+/tools/*.ps1 text eol=lf
+/src/windo/snippets/*.cs text eol=lf
+/extras/**/*.ps1 text eol=lf
+/versions/v*/bootstrap.ps1 text eol=lf
+/versions/v*/windo_install.ps1 text eol=lf
+/versions/v*/windo_runner.ps1 text eol=lf
+/versions/v*/windo_self_update.ps1 text eol=lf
+/versions/v*/windo_uninstall.ps1 text eol=lf
+/versions/v*/windo_heal.ps1 text eol=lf
+/versions/v*/checksums/installer.sha256 text eol=lf
+/versions/v*/checksums/installer.sha256.sig text eol=lf
+/versions/v*/keys/windo-release-public.rsa.xml text eol=lf

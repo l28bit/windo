@@ -23,8 +23,26 @@ $WindoLegacyBeginMarker = "# >>> WINDO-BEGIN >>>"
 $WindoLegacyEndMarker   = "# <<< WINDO-END <<<"
 $BeginMarker = "# [[ WINDO-BEGIN ]]"
 $EndMarker   = "# [[ WINDO-END ]]"
+function Get-WindoUninstallCurrentSid {
+    try {
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        if ($identity -and $identity.User) { return [string]$identity.User.Value }
+    } catch { }
+    return $null
+}
+
 $TaskMain    = "WindoElevatedRunner"
 $TaskUpdate  = "WindoSelfUpdate"
+$LegacyTaskMain = $TaskMain
+$LegacyTaskUpdate = $TaskUpdate
+$UninstallUserSid = Get-WindoUninstallCurrentSid
+$HasScopedTaskNames = $false
+if (-not [string]::IsNullOrWhiteSpace($UninstallUserSid)) {
+    $scopeToken = $UninstallUserSid -replace '[^A-Za-z0-9_-]', '_'
+    $TaskMain = "$TaskMain-$scopeToken"
+    $TaskUpdate = "$TaskUpdate-$scopeToken"
+    $HasScopedTaskNames = $true
+}
 $SecureDir   = Join-Path $HOME ".pwsh_secure"
 $SnapshotDir = Join-Path (Join-Path $HOME "Documents") "windo"
 $TempRoot = if ([string]::IsNullOrWhiteSpace($env:TEMP)) { [System.IO.Path]::GetTempPath() } else { $env:TEMP }
@@ -82,6 +100,27 @@ function Register-Failure {
 function Unregister-WindoScheduledTask {
     param([Parameter(Mandatory=$true)][string]$TaskName)
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop | Out-Null
+}
+
+function Test-WindoLegacyTaskOwnedByCurrentUser {
+    param(
+        [Parameter(Mandatory=$true)]$Task,
+        [Parameter(Mandatory=$true)][string]$ExpectedScriptPath
+    )
+    if ([string]::IsNullOrWhiteSpace($script:UninstallUserSid) -or $null -eq $Task.Principal) { return $false }
+    try {
+        $actual = [string]$Task.Principal.UserId
+        $actualSid = if ($actual -match '^[sS]-\d-(?:\d+-)+\d+$') {
+            ([System.Security.Principal.SecurityIdentifier]::new($actual)).Value
+        } else {
+            ([System.Security.Principal.NTAccount]::new($actual)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+        }
+        if ([string]$actualSid -ine [string]$script:UninstallUserSid) { return $false }
+        $actions = @($Task.Actions)
+        if ($actions.Count -ne 1) { return $false }
+        $expectedFullPath = [System.IO.Path]::GetFullPath($ExpectedScriptPath)
+        return ([string]$actions[0].Arguments).IndexOf($expectedFullPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    } catch { return $false }
 }
 
 function Convert-ToBackupPath {
@@ -290,7 +329,29 @@ if (-not $Confirm) {
     }
 }
 
-foreach ($tn in @($TaskMain, $TaskUpdate)) {
+$taskTargets = [System.Collections.Generic.List[string]]::new()
+if ($HasScopedTaskNames) {
+    [void]$taskTargets.Add($TaskMain)
+    [void]$taskTargets.Add($TaskUpdate)
+} else {
+    Write-Warning "Could not resolve the current user SID; preserving scheduled tasks and continuing with profile/file cleanup."
+}
+foreach ($legacySpec in @(
+    [pscustomobject]@{ Name = $LegacyTaskMain; Script = (Join-Path $SecureDir "windo_runner.ps1") },
+    [pscustomobject]@{ Name = $LegacyTaskUpdate; Script = (Join-Path $SecureDir "windo_self_update.ps1") }
+)) {
+    if ($HasScopedTaskNames -and ($legacySpec.Name -ieq $TaskMain -or $legacySpec.Name -ieq $TaskUpdate)) { continue }
+    try {
+        $legacyTask = Get-ScheduledTask -TaskName $legacySpec.Name -ErrorAction Stop
+        if (Test-WindoLegacyTaskOwnedByCurrentUser -Task $legacyTask -ExpectedScriptPath $legacySpec.Script) {
+            [void]$taskTargets.Add([string]$legacySpec.Name)
+        } else {
+            Write-Warning "Preserving foreign or mismatched legacy task '$($legacySpec.Name)'."
+        }
+    } catch { }
+}
+
+foreach ($tn in @($taskTargets | Select-Object -Unique)) {
     try {
         Unregister-WindoScheduledTask -TaskName $tn
         Write-Host "[windo uninstall] Unregistered task: $tn" -ForegroundColor Green

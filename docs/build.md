@@ -36,22 +36,25 @@ No build step is required for end users.
 ## Branch `Exodus`, checksums, and embedded runner
 
 - **Canonical raw URLs** for bootstrap and `windo upgrade` use the repository branch named **`Exodus`** (GitHub default). Legacy env values `Genesis`, `Genisis`, and `Prometheus` normalize to `Exodus`.
-- After changing **`windo_install.ps1`**, update **[`checksums/installer.sha256`](../checksums/installer.sha256)** with the **published** installer SHA256 (uppercase hex, one line). Use the helper so Windows checkout line endings do not produce a stale hash:
+- After changing **`windo_install.ps1`** or **`windo_uninstall.ps1`**, regenerate the deterministic multi-hash manifest at **[`checksums/installer.sha256`](../checksums/installer.sha256)**. `.gitattributes` pins release artifacts to LF, and the helper canonicalizes an existing CRLF worktree to the exact LF byte domain GitHub publishes:
   `./tools/Sync-InstallerChecksum.ps1`
-- **v3.2.7+:** **`bootstrap.ps1`** and **`_windo_verify_installer_sha256_optional`** compare the downloaded installer’s hash to the **first 64 hex** characters found in the fetched checksum file (so BOM, extra whitespace, or `sha256sum`-style lines still verify). The canonical file remains a single 64-character uppercase line.
+- Sign the final manifest with the offline/private release key, then verify it with the committed public key. The signer defaults to `RSA-PKCS1-SHA256` so the same signature verifies on Windows PowerShell 5.1 and PowerShell 7; `RSA-PSS-SHA256` is an explicit CNG-capable-estate opt-in:
+  `./tools/Sign-WindoChecksumManifest.ps1`
+  `./tools/Test-WindoChecksumSignature.ps1`
+- **Bootstrap** resolves one release commit and requires the downloaded installer's raw SHA256 to match `installerSha256` from that commit. A temporarily unavailable checksum source may fall back only to an exact Git blob-object attestation; a checksum mismatch always fails.
 - **v3.2.8+:** `tools/Validate-Windo.ps1` also validates the current `versions/vX.Y.Z/checksums/installer.sha256` when that snapshot exists.
 - **`windo_runner.ps1`** embeds **`WindoRunner.ChildExec`** C# via base64. Source: [`src/windo/snippets/ChildExec.cs`](../src/windo/snippets/ChildExec.cs). Regenerate the base64 string with [`tools/Encode-ChildExec.ps1`](../tools/Encode-ChildExec.ps1), paste into **`windo_runner.ps1`**, then re-sync the **`$RunnerContent`** block in **`windo_install.ps1`** (same file content as `windo_runner.ps1`).
 - **`bootstrap.ps1`** cannot dot-source repo helpers; keep it self-contained or duplicate small logic intentionally.
 
 ## Version snapshot (`versions/vX.Y.Z`)
 
-After you bump **`$WindoVersion`** in **`windo_install.ps1`** and refresh **[`checksums/installer.sha256`](../checksums/installer.sha256)** (see above), generate a **frozen** tree for that tag:
+After you bump **`$WindoVersion`** in **`windo_install.ps1`**, refresh and sign **[`checksums/installer.sha256`](../checksums/installer.sha256)** (see above), then generate a **frozen** tree for that tag:
 
 ```powershell
-./tools/Sync-VersionSnapshot.ps1 -Version 3.2.3
+./tools/Sync-VersionSnapshot.ps1 -Version 8.5.9
 ```
 
-This writes **`versions/v3.2.3/`** (example) with the installer, checksum, top-level **`README.md`**, **`SECURITY.md`**, **`CHANGELOG.md`**, **`docs/*.md`** (including **`json-schema.md`**, **`build.md`**, **`modules-and-extras.md`**, **`framework-wave.md`**, **`ai-bridge.md`**, **`v5-roadmap.md`**), **`brand/Enterprise/`**, and **`extras/`** (including **`samples/hello`**). Use it before publishing a release so the repo carries a point-in-time copy with branch-resolved canonical URLs.
+The tool requires the requested version to match the installer, validates root hashes/signature before copying, and refuses to overwrite a frozen snapshot unless `-Force` is explicitly supplied for an unpublished rebuild. It writes **`versions/v8.5.9/`** (example) with bootstrap, installer, runner, self-update, uninstaller, healer, checksum manifest/signature, release public key, top-level docs, selected supporting docs/assets, and extras. It then reruns validation against the frozen copy.
 
 ## JSON CLI schema
 

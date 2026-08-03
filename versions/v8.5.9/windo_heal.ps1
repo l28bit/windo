@@ -288,7 +288,7 @@ Write-Host "  windo version" -ForegroundColor Yellow
 Write-Host "  windo heal --all   # if more repairs needed" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "Rescue (always works, even with broken profile):" -ForegroundColor DarkGray
-Write-Host "  iex (irm https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1)" -ForegroundColor DarkGray
+Write-Host "  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1')" -ForegroundColor DarkGray
 
 if (Get-Variable -Name WINDO_EXIT_CODE -Scope Global -ErrorAction SilentlyContinue) {
     $global:WINDO_EXIT_CODE = 0

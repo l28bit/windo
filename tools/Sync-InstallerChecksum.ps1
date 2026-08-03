@@ -96,10 +96,15 @@ function New-WindoHashAlgorithm {
 function Get-WindoPublishedTextFileHash([string]$Path, [string]$Algorithm = "SHA256") {
     if (!(Test-Path -LiteralPath $Path)) { return $null }
     $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $text = $strictUtf8.GetString($bytes)
+    $publishedBytes = $utf8NoBom.GetBytes($text.Replace("`r`n", "`n"))
     $sha = New-WindoHashAlgorithm -Algorithm $Algorithm
     try {
-        # Runtime verification uses raw file bytes, so publish the same byte domain for every algorithm.
-        $hashBytes = $sha.ComputeHash($bytes)
+        # .gitattributes publishes release scripts with LF. Hash that exact Git
+        # text domain even in an existing Windows worktree that still has CRLF.
+        $hashBytes = $sha.ComputeHash($publishedBytes)
         -join ($hashBytes | ForEach-Object { $_.ToString("X2") })
     } finally {
         $sha.Dispose()

@@ -8,7 +8,7 @@ Default source contract:
 
 ```powershell
 # 1) Fresh install (official path)
-iex (irm https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1)
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1')
 ```
 
 ```text
@@ -33,7 +33,7 @@ windo upgrade
 [windo] Starting installer (pwsh.exe). After it exits, reopen this shell and run `. $PROFILE` (or open a new shell) to load the upgraded profile block.
 [windo] Installer launch was declined. Update handoff was not applied.
 [windo] Recovery one-liners:
-[windo]   Start-Process pwsh.exe -Verb RunAs -ArgumentList '-NoProfile','-Command','windo install-latest'
+[windo]   . $PROFILE; windo install-latest
 [windo]   windo self-update
 ```
 

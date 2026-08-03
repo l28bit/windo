@@ -1,5 +1,5 @@
 param(
-    [string]$PrivateKeyPath = (Join-Path $HOME ".windo-release-keys\windo-release-private.rsa.xml"),
+    [string]$PrivateKeyPath = (Join-Path ([Environment]::GetFolderPath('UserProfile')) ".windo-release-keys\windo-release-private.rsa.xml"),
     [string]$PublicKeyPath = (Join-Path (Split-Path $PSScriptRoot -Parent) "keys\windo-release-public.rsa.xml"),
     [int]$KeySize = 3072,
     [switch]$Force

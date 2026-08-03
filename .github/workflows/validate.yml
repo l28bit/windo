@@ -1,23 +1,33 @@
 name: Validate PowerShell
+permissions:
+  contents: read
+
 on:
   push:
-    branches: [ Exodus ]
+    branches: [ Exodus, Genisis, main ]
   pull_request:
-    branches: [ Exodus ]
+    branches: [ Exodus, Genisis, main ]
 jobs:
   validate:
     runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        ps_shell: [pwsh, powershell]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Install PSScriptAnalyzer
-        shell: pwsh
-        run: Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -MinimumVersion 1.21.0
+        shell: ${{ matrix.ps_shell }}
+        run: |
+          [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion 1.25.0 -ErrorAction Stop
       - name: Validate syntax
-        shell: pwsh
-        run: ./tools/Validate-Windo.ps1
+        shell: ${{ matrix.ps_shell }}
+        run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
       - name: Logic tests (integrity levels)
-        shell: pwsh
+        shell: ${{ matrix.ps_shell }}
         run: ./tools/Test-WindoLogic.ps1
       - name: PSScriptAnalyzer (Error severity)
-        shell: pwsh
+        shell: ${{ matrix.ps_shell }}
         run: ./tools/Invoke-PSScriptAnalyzer.ps1
