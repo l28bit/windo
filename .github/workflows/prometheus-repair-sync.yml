@@ -1,0 +1,48 @@
+name: Prometheus Repair Synchronization
+
+on:
+  push:
+    branches:
+      - Exodus
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  synchronize-generated-artifacts:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout recovery branch
+        uses: actions/checkout@v4
+        with:
+          ref: repair/inline-elevation
+          fetch-depth: 0
+
+      - name: Repair generated artifacts and Windows PowerShell encoding
+        id: repair
+        continue-on-error: true
+        shell: pwsh
+        run: ./tools/Prometheus-RepairGeneratedArtifacts.ps1
+
+      - name: Commit repair evidence to recovery branch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'repair: synchronize Prometheus generated artifacts'
+            git push origin HEAD:repair/inline-elevation
+          } else {
+            Write-Host 'No generated-artifact changes were required.'
+          }
+
+      - name: Report repair-step outcome
+        shell: pwsh
+        run: |
+          if ('${{ steps.repair.outcome }}' -ne 'success') {
+            Write-Warning 'The repair step reported a remaining parser or parity failure. Its generated report was committed for diagnosis.'
+          }
