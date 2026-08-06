@@ -32,7 +32,11 @@ function Get-Sha256Hex {
 
 function Set-CanonicalChildExecPayload {
     param([string]$Text, [string]$CanonicalPayload)
-    $pattern = "(?s)(\[Convert\]::FromBase64String\(\s*')(?<payload>[A-Za-z0-9+/=\r\n]+)('\s*\)\))"
+
+    # Discover large quoted Base64 literals by content rather than depending on
+    # one exact FromBase64String parenthesis layout. Decode every candidate and
+    # replace only the literal that proves it contains WindoRunner.ChildExec.
+    $pattern = '(?s)(?<prefix>'')(?<payload>[A-Za-z0-9+/=\r\n]{10000,})(?<suffix>'')'
     $replacements = [ref]0
     $updated = [regex]::Replace($Text, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{
         param($match)
@@ -41,7 +45,7 @@ function Set-CanonicalChildExecPayload {
             $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($candidate))
             if ($decoded -match 'namespace\s+WindoRunner' -and $decoded -match 'class\s+ChildExec') {
                 $replacements.Value++
-                return $match.Groups[1].Value + $CanonicalPayload + $match.Groups[3].Value
+                return $match.Groups['prefix'].Value + $CanonicalPayload + $match.Groups['suffix'].Value
             }
         } catch { }
         return $match.Value
@@ -60,7 +64,7 @@ $canonicalPayload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($so
 $runnerText = [IO.File]::ReadAllText($RunnerPath)
 $runnerSync = Set-CanonicalChildExecPayload -Text $runnerText -CanonicalPayload $canonicalPayload
 if ($runnerSync.Replacements -ne 1) {
-    throw "Expected exactly one WindoRunner ChildExec payload in windo_runner.ps1; found $($runnerSync.Replacements)."
+    throw "Expected exactly one content-verified WindoRunner ChildExec payload in windo_runner.ps1; found $($runnerSync.Replacements)."
 }
 Write-Utf8NoBomFile -Path $RunnerPath -Content $runnerSync.Text
 
