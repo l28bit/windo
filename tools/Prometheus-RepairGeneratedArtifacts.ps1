@@ -88,7 +88,14 @@ foreach ($relative in @(
     $tokens = $null
     $errors = $null
     [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $path), [ref]$tokens, [ref]$errors)
-    foreach ($parseError in @($errors)) { $parseFailures.Add("${relative}: $($parseError.Message)") }
+    foreach ($parseError in @($errors)) {
+        $line = $parseError.Extent.StartLineNumber
+        $column = $parseError.Extent.StartColumnNumber
+        $errorId = [string]$parseError.ErrorId
+        $extentText = ([string]$parseError.Extent.Text -replace '[\r\n]+', ' ')
+        if ($extentText.Length -gt 180) { $extentText = $extentText.Substring(0, 180) + '...' }
+        $parseFailures.Add("${relative}: line $line, column $column [$errorId] $($parseError.Message) :: $extentText")
+    }
 }
 
 $decodedPayload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((([IO.File]::ReadAllText($PayloadPath)) -replace '\s', '')))
