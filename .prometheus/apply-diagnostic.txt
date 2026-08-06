@@ -1,0 +1,10 @@
+python_decode_exit=1
+python: Traceback (most recent call last):
+python:   File "<stdin>", line 8, in <module>
+python:   File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\gzip.py", line 649, in decompress
+python:     decompressed = do.decompress(data[fp.tell():])
+python:                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python: zlib.error: Error -3 while decompressing data: invalid distance too far back
+result=failure
+exception=Python patch decode failed.
+utc=2026-08-06T08:40:03.9165247Z
