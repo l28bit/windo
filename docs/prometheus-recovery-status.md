@@ -11,4 +11,6 @@ Promotion to `main` and the public one-line installer remain blocked until all o
 - The release checksum manifest is regenerated and verified with the published release-signing key.
 - A clean Windows interactive UAC smoke test is recorded.
 
+The Prometheus validation workflow is installed on the `main` base branch so every synchronization of this recovery branch is evaluated against the same Windows release gate.
+
 No private signing key belongs in this repository.
