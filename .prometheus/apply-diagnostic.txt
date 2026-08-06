@@ -15,5 +15,5 @@ check: error: patch failed: tools/Prometheus-RepairGeneratedArtifacts.ps1:7
 check: error: tools/Prometheus-RepairGeneratedArtifacts.ps1: patch does not apply
 patch_state=already_applied_and_markers_verified
 result=failure
-exception=PowerShell parser gate failed. See D:\a\windo\windo\docs\prometheus-generated-repair-report.md
-utc=2026-08-06T08:59:44.0811766Z
+exception=Expected exactly one WindoRunner ChildExec payload in windo_runner.ps1; found 0.
+utc=2026-08-06T09:00:11.2269696Z
