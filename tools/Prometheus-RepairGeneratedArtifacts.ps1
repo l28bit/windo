@@ -13,7 +13,7 @@ $ReportPath = Join-Path $Root 'docs\prometheus-generated-repair-report.md'
 
 function Write-Utf8BomFile {
     param([string]$Path, [string]$Content)
-    [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($true))
+    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
 }
 
 function Write-Utf8NoBomFile {
@@ -22,7 +22,7 @@ function Write-Utf8NoBomFile {
     if ($parent -and -not (Test-Path -LiteralPath $parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
-    [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Get-Sha256Hex {
@@ -34,37 +34,44 @@ function Set-CanonicalChildExecPayload {
     param([string]$Text, [string]$CanonicalPayload)
 
     $marker = '[Convert]::FromBase64String('
+    $markerIndexes = New-Object System.Collections.Generic.List[int]
     $searchIndex = 0
-    $replacements = 0
-    $updated = $Text
-
-    while ($searchIndex -lt $updated.Length) {
-        $markerIndex = $updated.IndexOf($marker, $searchIndex, [StringComparison]::OrdinalIgnoreCase)
-        if ($markerIndex -lt 0) { break }
-
-        $openQuote = $updated.IndexOf([char]39, $markerIndex + $marker.Length)
-        if ($openQuote -lt 0) { break }
-        $closeQuote = $updated.IndexOf([char]39, $openQuote + 1)
-        if ($closeQuote -lt 0) { break }
-
-        $candidateRaw = $updated.Substring($openQuote + 1, $closeQuote - $openQuote - 1)
-        $candidate = ($candidateRaw -replace '\s', '')
-        $isChildExec = $false
-        try {
-            $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($candidate))
-            $isChildExec = $decoded -match 'namespace\s+WindoRunner' -and $decoded -match 'class\s+ChildExec'
-        } catch { }
-
-        if ($isChildExec) {
-            $updated = $updated.Substring(0, $openQuote + 1) + $CanonicalPayload + $updated.Substring($closeQuote)
-            $replacements++
-            $searchIndex = $openQuote + 1 + $CanonicalPayload.Length + 1
-        } else {
-            $searchIndex = $closeQuote + 1
-        }
+    while ($searchIndex -lt $Text.Length) {
+        $found = $Text.IndexOf($marker, $searchIndex, [StringComparison]::OrdinalIgnoreCase)
+        if ($found -lt 0) { break }
+        $markerIndexes.Add($found)
+        $searchIndex = $found + $marker.Length
     }
 
-    return [pscustomobject]@{ Text = $updated; Replacements = $replacements }
+    if ($markerIndexes.Count -ne 1) {
+        throw "Expected exactly one ChildExec FromBase64String marker in windo_runner.ps1; found $($markerIndexes.Count)."
+    }
+
+    $markerIndex = $markerIndexes[0]
+    $openQuote = $Text.IndexOf([char]39, $markerIndex + $marker.Length)
+    if ($openQuote -lt 0) { throw 'ChildExec payload opening quote was not found.' }
+    $closeQuote = $Text.IndexOf([char]39, $openQuote + 1)
+    if ($closeQuote -lt 0) { throw 'ChildExec payload closing quote was not found.' }
+
+    $candidateRaw = $Text.Substring($openQuote + 1, $closeQuote - $openQuote - 1)
+    $candidate = ($candidateRaw -replace '\s', '')
+    if ($candidate.Length -lt 10000) {
+        throw "ChildExec payload is unexpectedly short: $($candidate.Length) characters."
+    }
+    if ($candidate -match '[^A-Za-z0-9+/=]') {
+        throw 'ChildExec payload contains characters outside the Base64 alphabet.'
+    }
+
+    # Decode only as a structural validation. The canonical source remains the
+    # authority even when the previous embedded copy is stale or malformed.
+    try {
+        [void][Convert]::FromBase64String($candidate)
+    } catch {
+        throw "Existing ChildExec payload is not valid Base64: $($_.Exception.Message)"
+    }
+
+    $updated = $Text.Substring(0, $openQuote + 1) + $CanonicalPayload + $Text.Substring($closeQuote)
+    return [pscustomobject]@{ Text = $updated; Replacements = 1; PreviousPayloadLength = $candidate.Length }
 }
 
 foreach ($required in @($SourcePath, $RunnerPath, $InstallerPath)) {
@@ -77,9 +84,6 @@ $canonicalPayload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($so
 
 $runnerText = [IO.File]::ReadAllText($RunnerPath)
 $runnerSync = Set-CanonicalChildExecPayload -Text $runnerText -CanonicalPayload $canonicalPayload
-if ($runnerSync.Replacements -ne 1) {
-    throw "Expected exactly one position-discovered WindoRunner ChildExec payload in windo_runner.ps1; found $($runnerSync.Replacements)."
-}
 Write-Utf8NoBomFile -Path $RunnerPath -Content $runnerSync.Text
 
 $installerText = [IO.File]::ReadAllText($InstallerPath)
@@ -89,7 +93,7 @@ $updatedInstaller = [regex]::Replace($installerText, $runnerContentPattern, [Sys
 if ($updatedInstaller -ceq $installerText) { throw 'Could not locate and synchronize the installer RunnerContent block.' }
 Write-Utf8BomFile -Path $InstallerPath -Content $updatedInstaller
 
-$parseFailures = [System.Collections.Generic.List[string]]::new()
+$parseFailures = New-Object System.Collections.Generic.List[string]
 foreach ($relative in @(
     'bootstrap.ps1',
     'windo_install.ps1',
@@ -132,6 +136,7 @@ $report = @(
     "- ChildExec source/payload parity: **$sourceParity**",
     "- Standalone runner synchronized: **$runnerParity**",
     "- Runner embedded payload replacements: **$($runnerSync.Replacements)**",
+    "- Previous embedded payload length: **$($runnerSync.PreviousPayloadLength)**",
     ('- ChildExec source SHA256: `{0}`' -f (Get-Sha256Hex $SourcePath)),
     ('- Runner SHA256: `{0}`' -f (Get-Sha256Hex $RunnerPath)),
     '',
