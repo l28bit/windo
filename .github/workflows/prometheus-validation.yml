@@ -74,6 +74,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Export exact checked-out source
+        shell: pwsh
+        run: git archive --format=zip --output=prometheus-source.zip HEAD
+
+      - name: Upload exact checked-out source
+        uses: actions/upload-artifact@v4
+        with:
+          name: prometheus-source
+          path: prometheus-source.zip
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Run logic tests
         shell: pwsh
         run: ./tools/Test-WindoLogic.ps1
