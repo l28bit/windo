@@ -15,4 +15,4 @@ check: error: patch failed: tools/Prometheus-RepairGeneratedArtifacts.ps1:7
 check: error: tools/Prometheus-RepairGeneratedArtifacts.ps1: patch does not apply
 result=failure
 exception=Prometheus repair patch preflight failed.
-utc=2026-08-06T08:56:04.3569373Z
+utc=2026-08-06T08:57:20.2124861Z
