@@ -15,5 +15,5 @@ check: error: patch failed: tools/Prometheus-RepairGeneratedArtifacts.ps1:7
 check: error: tools/Prometheus-RepairGeneratedArtifacts.ps1: patch does not apply
 patch_state=already_applied_and_markers_verified
 result=failure
-exception=Expected exactly one content-verified WindoRunner ChildExec payload in windo_runner.ps1; found 0.
-utc=2026-08-06T09:05:54.3927650Z
+exception=Expected exactly one position-discovered WindoRunner ChildExec payload in windo_runner.ps1; found 0.
+utc=2026-08-06T09:08:06.5899021Z
