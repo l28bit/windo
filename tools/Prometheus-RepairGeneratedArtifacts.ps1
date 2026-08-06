@@ -33,24 +33,38 @@ function Get-Sha256Hex {
 function Set-CanonicalChildExecPayload {
     param([string]$Text, [string]$CanonicalPayload)
 
-    # Discover large quoted Base64 literals by content rather than depending on
-    # one exact FromBase64String parenthesis layout. Decode every candidate and
-    # replace only the literal that proves it contains WindoRunner.ChildExec.
-    $pattern = '(?s)(?<prefix>'')(?<payload>[A-Za-z0-9+/=\r\n]{10000,})(?<suffix>'')'
-    $replacements = [ref]0
-    $updated = [regex]::Replace($Text, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{
-        param($match)
-        $candidate = ($match.Groups['payload'].Value -replace '\s', '')
+    $marker = '[Convert]::FromBase64String('
+    $searchIndex = 0
+    $replacements = 0
+    $updated = $Text
+
+    while ($searchIndex -lt $updated.Length) {
+        $markerIndex = $updated.IndexOf($marker, $searchIndex, [StringComparison]::OrdinalIgnoreCase)
+        if ($markerIndex -lt 0) { break }
+
+        $openQuote = $updated.IndexOf([char]39, $markerIndex + $marker.Length)
+        if ($openQuote -lt 0) { break }
+        $closeQuote = $updated.IndexOf([char]39, $openQuote + 1)
+        if ($closeQuote -lt 0) { break }
+
+        $candidateRaw = $updated.Substring($openQuote + 1, $closeQuote - $openQuote - 1)
+        $candidate = ($candidateRaw -replace '\s', '')
+        $isChildExec = $false
         try {
             $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($candidate))
-            if ($decoded -match 'namespace\s+WindoRunner' -and $decoded -match 'class\s+ChildExec') {
-                $replacements.Value++
-                return $match.Groups['prefix'].Value + $CanonicalPayload + $match.Groups['suffix'].Value
-            }
+            $isChildExec = $decoded -match 'namespace\s+WindoRunner' -and $decoded -match 'class\s+ChildExec'
         } catch { }
-        return $match.Value
-    })
-    return [pscustomobject]@{ Text = $updated; Replacements = [int]$replacements.Value }
+
+        if ($isChildExec) {
+            $updated = $updated.Substring(0, $openQuote + 1) + $CanonicalPayload + $updated.Substring($closeQuote)
+            $replacements++
+            $searchIndex = $openQuote + 1 + $CanonicalPayload.Length + 1
+        } else {
+            $searchIndex = $closeQuote + 1
+        }
+    }
+
+    return [pscustomobject]@{ Text = $updated; Replacements = $replacements }
 }
 
 foreach ($required in @($SourcePath, $RunnerPath, $InstallerPath)) {
@@ -64,7 +78,7 @@ $canonicalPayload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($so
 $runnerText = [IO.File]::ReadAllText($RunnerPath)
 $runnerSync = Set-CanonicalChildExecPayload -Text $runnerText -CanonicalPayload $canonicalPayload
 if ($runnerSync.Replacements -ne 1) {
-    throw "Expected exactly one content-verified WindoRunner ChildExec payload in windo_runner.ps1; found $($runnerSync.Replacements)."
+    throw "Expected exactly one position-discovered WindoRunner ChildExec payload in windo_runner.ps1; found $($runnerSync.Replacements)."
 }
 Write-Utf8NoBomFile -Path $RunnerPath -Content $runnerSync.Text
 
