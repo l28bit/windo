@@ -7,22 +7,17 @@ Set-StrictMode -Version Latest
 $Root = Split-Path -Parent $PSScriptRoot
 $SourcePath = Join-Path $Root 'src\windo\snippets\ChildExec.cs'
 $PayloadPath = Join-Path $Root 'tools\ChildExec.b64.txt'
+$RunnerPath = Join-Path $Root 'windo_runner.ps1'
 $InstallerPath = Join-Path $Root 'windo_install.ps1'
 $ReportPath = Join-Path $Root 'docs\prometheus-generated-repair-report.md'
 
 function Write-Utf8BomFile {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$Content
-    )
+    param([string]$Path, [string]$Content)
     [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($true))
 }
 
 function Write-Utf8NoBomFile {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$Content
-    )
+    param([string]$Path, [string]$Content)
     $parent = Split-Path -Parent $Path
     if ($parent -and -not (Test-Path -LiteralPath $parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
@@ -31,146 +26,108 @@ function Write-Utf8NoBomFile {
 }
 
 function Get-Sha256Hex {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param([string]$Path)
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
 }
 
-function Sync-WindoEmbeddedChildExecPayload {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$CanonicalPayload
-    )
-
-    $text = [System.IO.File]::ReadAllText($Path)
-    $pattern = "(?s)(\[Convert\]::FromBase64String\(\s*')(?<payload>[A-Za-z0-9+/=\r\n]+)('\s*\))"
-    $replacementCount = 0
-    $updated = [System.Text.RegularExpressions.Regex]::Replace(
-        $text,
-        $pattern,
-        [System.Text.RegularExpressions.MatchEvaluator]{
-            param($match)
-            $candidate = ($match.Groups['payload'].Value -replace '\s', '')
-            try {
-                $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($candidate))
-                if ($decoded -match 'namespace\s+WindoRunner' -and $decoded -match 'class\s+ChildExec') {
-                    $script:replacementCount++
-                    return $match.Groups[1].Value + $CanonicalPayload + $match.Groups[3].Value
-                }
-            } catch { }
-            return $match.Value
-        }
-    )
-
-    if ($replacementCount -gt 0 -and $updated -cne $text) {
-        $hasBom = $false
-        $bytes = [System.IO.File]::ReadAllBytes($Path)
-        if ($bytes.Length -ge 3) {
-            $hasBom = ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
-        }
-        if ($hasBom) {
-            Write-Utf8BomFile -Path $Path -Content $updated
-        } else {
-            Write-Utf8NoBomFile -Path $Path -Content $updated
-        }
-    }
-
-    return $replacementCount
+function Set-CanonicalChildExecPayload {
+    param([string]$Text, [string]$CanonicalPayload)
+    $pattern = "(?s)(\[Convert\]::FromBase64String\(\s*')(?<payload>[A-Za-z0-9+/=\r\n]+)('\s*\)\))"
+    $replacements = [ref]0
+    $updated = [regex]::Replace($Text, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{
+        param($match)
+        $candidate = ($match.Groups['payload'].Value -replace '\s', '')
+        try {
+            $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($candidate))
+            if ($decoded -match 'namespace\s+WindoRunner' -and $decoded -match 'class\s+ChildExec') {
+                $replacements.Value++
+                return $match.Groups[1].Value + $CanonicalPayload + $match.Groups[3].Value
+            }
+        } catch { }
+        return $match.Value
+    })
+    return [pscustomobject]@{ Text = $updated; Replacements = [int]$replacements.Value }
 }
 
-if (-not (Test-Path -LiteralPath $SourcePath)) { throw "Missing maintained ChildExec source: $SourcePath" }
-if (-not (Test-Path -LiteralPath $InstallerPath)) { throw "Missing installer: $InstallerPath" }
-
-$source = [System.IO.File]::ReadAllText($SourcePath)
-$canonicalPayload = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($source))
-[System.IO.File]::WriteAllText($PayloadPath, $canonicalPayload + [Environment]::NewLine, [System.Text.Encoding]::ASCII)
-
-$payloadTargets = Get-ChildItem -LiteralPath $Root -Recurse -File -Filter '*.ps1' |
-    Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' }
-
-$syncResults = New-Object System.Collections.Generic.List[object]
-foreach ($file in $payloadTargets) {
-    $count = Sync-WindoEmbeddedChildExecPayload -Path $file.FullName -CanonicalPayload $canonicalPayload
-    if ($count -gt 0) {
-        $syncResults.Add([pscustomobject]@{
-            Path = $file.FullName.Substring($Root.Length + 1).Replace('\', '/')
-            Replacements = $count
-        })
-    }
+foreach ($required in @($SourcePath, $RunnerPath, $InstallerPath)) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing required file: $required" }
 }
 
-# Windows PowerShell 5.1 does not reliably infer BOM-less UTF-8. The installer
-# intentionally contains Unicode presentation glyphs, so make the encoding
-# declaration explicit at the byte level instead of depending on host locale.
-$installerText = [System.IO.File]::ReadAllText($InstallerPath)
-Write-Utf8BomFile -Path $InstallerPath -Content $installerText
+$source = [IO.File]::ReadAllText($SourcePath)
+$canonicalPayload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($source))
+[IO.File]::WriteAllText($PayloadPath, $canonicalPayload + [Environment]::NewLine, [Text.Encoding]::ASCII)
 
-$parseFailures = New-Object System.Collections.Generic.List[string]
-$entryPoints = @(
+$runnerText = [IO.File]::ReadAllText($RunnerPath)
+$runnerSync = Set-CanonicalChildExecPayload -Text $runnerText -CanonicalPayload $canonicalPayload
+if ($runnerSync.Replacements -ne 1) {
+    throw "Expected exactly one WindoRunner ChildExec payload in windo_runner.ps1; found $($runnerSync.Replacements)."
+}
+Write-Utf8NoBomFile -Path $RunnerPath -Content $runnerSync.Text
+
+$installerText = [IO.File]::ReadAllText($InstallerPath)
+$runnerContentPattern = '(?ms)^\$RunnerContent = @''\r?\n.*?^''@\r?\nWrite-Utf8NoBomFile -Path \$RunnerPath -Content \$RunnerContent'
+$runnerContentReplacement = '$RunnerContent = @''' + [Environment]::NewLine + $runnerSync.Text.TrimEnd("`r", "`n") + [Environment]::NewLine + '''@' + [Environment]::NewLine + 'Write-Utf8NoBomFile -Path $RunnerPath -Content $RunnerContent'
+$updatedInstaller = [regex]::Replace($installerText, $runnerContentPattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $runnerContentReplacement }, 1)
+if ($updatedInstaller -ceq $installerText) { throw 'Could not locate and synchronize the installer RunnerContent block.' }
+Write-Utf8BomFile -Path $InstallerPath -Content $updatedInstaller
+
+$parseFailures = [System.Collections.Generic.List[string]]::new()
+foreach ($relative in @(
     'bootstrap.ps1',
     'windo_install.ps1',
     'windo_runner.ps1',
     'windo_uninstall.ps1',
     'tools/Test-WindoLogic.ps1',
     'tools/Validate-Windo.ps1'
-)
-foreach ($relative in $entryPoints) {
+)) {
     $path = Join-Path $Root $relative
-    if (-not (Test-Path -LiteralPath $path)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         $parseFailures.Add("Missing: $relative")
         continue
     }
     $tokens = $null
     $errors = $null
-    [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $path), [ref]$tokens, [ref]$errors)
-    foreach ($parseError in @($errors)) {
-        $parseFailures.Add("${relative}: $($parseError.Message)")
-    }
+    [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $path), [ref]$tokens, [ref]$errors)
+    foreach ($parseError in @($errors)) { $parseFailures.Add("${relative}: $($parseError.Message)") }
 }
 
-$decodedPayload = [System.Text.Encoding]::UTF8.GetString(
-    [Convert]::FromBase64String((([System.IO.File]::ReadAllText($PayloadPath)) -replace '\s', ''))
-)
+$decodedPayload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((([IO.File]::ReadAllText($PayloadPath)) -replace '\s', '')))
 $sourceParity = ($source -ceq $decodedPayload)
+$runnerParity = ([IO.File]::ReadAllText($RunnerPath) -ceq $runnerSync.Text)
+$installerBytes = [IO.File]::ReadAllBytes($InstallerPath)
+$installerHasBom = $installerBytes.Length -ge 3 -and $installerBytes[0] -eq 0xEF -and $installerBytes[1] -eq 0xBB -and $installerBytes[2] -eq 0xBF
 
-$report = New-Object System.Collections.Generic.List[string]
-$report.Add('# Prometheus Generated Artifact Repair Report')
-$report.Add('')
-$report.Add("Generated: $([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))")
-$report.Add('')
-$report.Add('## Canonical ChildExec')
-$report.Add('')
-$report.Add("- Source/payload byte-equivalent: **$sourceParity**")
-$report.Add("- Source SHA256: `$(Get-Sha256Hex -Path $SourcePath)`")
-$report.Add("- Payload SHA256: `$(Get-Sha256Hex -Path $PayloadPath)`")
-$report.Add('')
-$report.Add('## Embedded payload synchronization')
-$report.Add('')
-if ($syncResults.Count -eq 0) {
-    $report.Add('- No embedded WindoRunner payloads required replacement.')
-} else {
-    foreach ($item in $syncResults) {
-        $report.Add("- `$($item.Path)`: $($item.Replacements) replacement(s)")
-    }
+$report = @(
+    '# Prometheus Generated Artifact Repair Report',
+    '',
+    "Generated: $([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))",
+    '',
+    '## Canonical execution helper',
+    '',
+    "- ChildExec source/payload parity: **$sourceParity**",
+    "- Standalone runner synchronized: **$runnerParity**",
+    "- Runner embedded payload replacements: **$($runnerSync.Replacements)**",
+    "- ChildExec source SHA256: `$(Get-Sha256Hex $SourcePath)`",
+    "- Runner SHA256: `$(Get-Sha256Hex $RunnerPath)`",
+    '',
+    '## Windows PowerShell encoding',
+    '',
+    "- Installer has explicit UTF-8 BOM: **$installerHasBom**",
+    '',
+    '## Parser gate',
+    ''
+)
+if ($parseFailures.Count -eq 0) { $report += '- PASS: all declared release entry points parse.' }
+else {
+    $report += '- FAIL:'
+    foreach ($failure in $parseFailures) { $report += "  - $failure" }
 }
-$report.Add('')
-$report.Add('## Windows PowerShell encoding')
-$report.Add('')
-$report.Add('- `windo_install.ps1` written as UTF-8 with BOM for Windows PowerShell 5.1 compatibility.')
-$report.Add('')
-$report.Add('## Parser gate')
-$report.Add('')
-if ($parseFailures.Count -eq 0) {
-    $report.Add('- PASS: all declared release entry points parse in the executing PowerShell host.')
-} else {
-    $report.Add('- FAIL:')
-    foreach ($failure in $parseFailures) { $report.Add("  - $failure") }
-}
-$report.Add('')
-$report.Add('The checksum manifest and signature are intentionally not rewritten by this repair step. Release integrity artifacts must be regenerated and signed only after the complete Prometheus runtime is finalized.')
-
+$report += @(
+    '',
+    'Release checksums are regenerated only after the complete Prometheus runtime is finalized. No private signing key is stored in the repository.'
+)
 Write-Utf8NoBomFile -Path $ReportPath -Content (($report -join [Environment]::NewLine) + [Environment]::NewLine)
 
-if (-not $sourceParity) { throw 'Maintained ChildExec source and regenerated payload are not equivalent.' }
+if (-not $sourceParity -or -not $runnerParity -or -not $installerHasBom) { throw "Generated artifact parity failed. See $ReportPath" }
 if ($parseFailures.Count -gt 0) { throw "PowerShell parser gate failed. See $ReportPath" }
-
 Write-Host 'Prometheus generated artifact repair completed.'

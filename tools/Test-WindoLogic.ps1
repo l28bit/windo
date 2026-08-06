@@ -369,6 +369,11 @@ try {
     Assert-Equal ($decodedChildExec.Contains("BuildGatedScript")) $true "ChildExec gates user code until job containment succeeds"
     Assert-Equal ($decodedChildExec.Contains("command was not executed")) $true "ChildExec fails closed when process containment cannot be established"
     Assert-Equal ($decodedChildExec.Contains("Task.WaitAll")) $true "ChildExec bounds redirected stream draining"
+    Assert-Equal ($decodedChildExec.Contains("RunPowerShellStreaming")) $true "ChildExec exposes live stdout and stderr streaming"
+    Assert-Equal ($decodedChildExec.Contains("IsCancellationRequested")) $true "ChildExec observes a caller cancellation marker"
+    Assert-Equal ($decodedChildExec.Contains("exitCode = 130")) $true "ChildExec maps caller cancellation to exit code 130"
+    Assert-Equal ($decodedChildExec.Contains("stdoutSink = OpenStreamSink")) $true "ChildExec opens stream channels before starting elevated code"
+    Assert-Equal ($decodedChildExec.Contains("StreamSinkFailed")) $true "ChildExec reports degraded inline stream delivery"
 
     if (-not ("WindoRunner.ChildExec" -as [type])) {
         Add-Type -TypeDefinition $decodedChildExec -Language CSharp
@@ -416,6 +421,114 @@ try {
             $fallbackOutputPath = $childStdOut.Trim()
             Assert-Equal (Test-Path -LiteralPath $fallbackOutputPath -PathType Container) $true "ChildExec deleted-directory fallback is an existing directory"
             Assert-Equal ([System.IO.Path]::GetFullPath($fallbackOutputPath) -ceq [System.IO.Path]::GetFullPath($missingWorkingDir)) $false "ChildExec never uses a missing working directory"
+
+            $streamOutPath = Join-Path $childExecWorkingDir "stream.stdout.log"
+            $streamErrPath = Join-Path $childExecWorkingDir "stream.stderr.log"
+            $streamCancelPath = Join-Path $childExecWorkingDir "stream.cancel.signal"
+            $streamScript = "[Console]::Out.Write('first'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 1500; [Console]::Error.Write('warn'); [Console]::Error.Flush(); Start-Sleep -Milliseconds 250; [Console]::Out.Write('second'); exit 7"
+            $streamJob = Start-Job -ScriptBlock {
+                param($Source, $HostPath, $ScriptText, $WorkingDirectory, $OutPath, $ErrPath, $CancelPath)
+                Add-Type -TypeDefinition $Source -Language CSharp
+                $stdout = ""
+                $stderr = ""
+                $timedOut = $false
+                $truncated = $false
+                $cancelled = $false
+                $streamSinkFailed = $false
+                $exitCode = -999
+                [WindoRunner.ChildExec]::RunPowerShellStreaming(
+                    $HostPath, $ScriptText, $WorkingDirectory, 15000, 131072,
+                    $OutPath, $ErrPath, $CancelPath,
+                    [ref]$stdout, [ref]$stderr, [ref]$timedOut, [ref]$truncated,
+                    [ref]$cancelled, [ref]$streamSinkFailed, [ref]$exitCode
+                )
+                [pscustomobject]@{
+                    StdOut = $stdout
+                    StdErr = $stderr
+                    TimedOut = $timedOut
+                    Truncated = $truncated
+                    Cancelled = $cancelled
+                    StreamSinkFailed = $streamSinkFailed
+                    ExitCode = $exitCode
+                }
+            } -ArgumentList $decodedChildExec, $childExecHost, $streamScript, $childExecWorkingDir, $streamOutPath, $streamErrPath, $streamCancelPath
+            $firstOutputObserved = $false
+            $streamObserveWatch = [Diagnostics.Stopwatch]::StartNew()
+            while ($streamObserveWatch.ElapsedMilliseconds -lt 7000 -and -not $firstOutputObserved) {
+                if (Test-Path -LiteralPath $streamOutPath) {
+                    try { $firstOutputObserved = ([IO.File]::ReadAllText($streamOutPath).Contains('first')) } catch { }
+                }
+                if (-not $firstOutputObserved) { Start-Sleep -Milliseconds 50 }
+            }
+            Assert-Equal $firstOutputObserved $true "ChildExec publishes stdout before the elevated child exits"
+            $streamJobState = Wait-Job -Job $streamJob -Timeout 20
+            Assert-Equal ($null -ne $streamJobState -and $streamJobState.State -eq 'Completed') $true "ChildExec live streaming probe completes within its bound"
+            $streamResults = @(Receive-Job -Job $streamJob -ErrorAction SilentlyContinue)
+            Remove-Job -Job $streamJob -Force -ErrorAction SilentlyContinue
+            $streamResult = @($streamResults | Where-Object { $_.PSObject.Properties.Name -contains 'ExitCode' } | Select-Object -Last 1)
+            Assert-Equal ($streamResult.Count -eq 1) $true "ChildExec live streaming probe returns a structured result"
+            if ($streamResult.Count -eq 1) {
+                Assert-Equal ([int]$streamResult[0].ExitCode) 7 "ChildExec live streaming preserves the child exit code"
+                Assert-Equal ([bool]$streamResult[0].Cancelled) $false "ChildExec live streaming does not invent cancellation"
+                Assert-Equal ([bool]$streamResult[0].StreamSinkFailed) $false "ChildExec live stream sinks remain healthy"
+                Assert-Equal ([string]$streamResult[0].StdOut) "firstsecond" "ChildExec preserves complete captured stdout while streaming"
+                Assert-Equal ([string]$streamResult[0].StdErr) "warn" "ChildExec preserves complete captured stderr while streaming"
+            }
+
+            $cancelOutPath = Join-Path $childExecWorkingDir "cancel.stdout.log"
+            $cancelErrPath = Join-Path $childExecWorkingDir "cancel.stderr.log"
+            $cancelSignalPath = Join-Path $childExecWorkingDir "cancel.signal"
+            $cancelScript = "[Console]::Out.Write('started'); [Console]::Out.Flush(); Start-Sleep -Seconds 120"
+            $cancelJob = Start-Job -ScriptBlock {
+                param($Source, $HostPath, $ScriptText, $WorkingDirectory, $OutPath, $ErrPath, $CancelPath)
+                Add-Type -TypeDefinition $Source -Language CSharp
+                $stdout = ""
+                $stderr = ""
+                $timedOut = $false
+                $truncated = $false
+                $cancelled = $false
+                $streamSinkFailed = $false
+                $exitCode = -999
+                [WindoRunner.ChildExec]::RunPowerShellStreaming(
+                    $HostPath, $ScriptText, $WorkingDirectory, 60000, 131072,
+                    $OutPath, $ErrPath, $CancelPath,
+                    [ref]$stdout, [ref]$stderr, [ref]$timedOut, [ref]$truncated,
+                    [ref]$cancelled, [ref]$streamSinkFailed, [ref]$exitCode
+                )
+                [pscustomobject]@{
+                    StdOut = $stdout
+                    StdErr = $stderr
+                    TimedOut = $timedOut
+                    Truncated = $truncated
+                    Cancelled = $cancelled
+                    StreamSinkFailed = $streamSinkFailed
+                    ExitCode = $exitCode
+                }
+            } -ArgumentList $decodedChildExec, $childExecHost, $cancelScript, $childExecWorkingDir, $cancelOutPath, $cancelErrPath, $cancelSignalPath
+            $cancelStarted = $false
+            $cancelObserveWatch = [Diagnostics.Stopwatch]::StartNew()
+            while ($cancelObserveWatch.ElapsedMilliseconds -lt 7000 -and -not $cancelStarted) {
+                if (Test-Path -LiteralPath $cancelOutPath) {
+                    try { $cancelStarted = ([IO.File]::ReadAllText($cancelOutPath).Contains('started')) } catch { }
+                }
+                if (-not $cancelStarted) { Start-Sleep -Milliseconds 50 }
+            }
+            Assert-Equal $cancelStarted $true "ChildExec cancellation fixture starts before cancellation"
+            [IO.File]::WriteAllText($cancelSignalPath, 'cancel', [Text.UTF8Encoding]::new($false))
+            $cancelBound = [Diagnostics.Stopwatch]::StartNew()
+            $cancelJobState = Wait-Job -Job $cancelJob -Timeout 25
+            $cancelBound.Stop()
+            Assert-Equal ($null -ne $cancelJobState -and $cancelJobState.State -eq 'Completed') $true "ChildExec caller cancellation remains bounded"
+            $cancelResults = @(Receive-Job -Job $cancelJob -ErrorAction SilentlyContinue)
+            Remove-Job -Job $cancelJob -Force -ErrorAction SilentlyContinue
+            $cancelResult = @($cancelResults | Where-Object { $_.PSObject.Properties.Name -contains 'ExitCode' } | Select-Object -Last 1)
+            Assert-Equal ($cancelResult.Count -eq 1) $true "ChildExec cancellation returns a structured result"
+            if ($cancelResult.Count -eq 1) {
+                Assert-Equal ([int]$cancelResult[0].ExitCode) 130 "ChildExec cancellation returns shell-standard exit code 130"
+                Assert-Equal ([bool]$cancelResult[0].Cancelled) $true "ChildExec reports caller cancellation"
+                Assert-Equal ([bool]$cancelResult[0].TimedOut) $false "ChildExec cancellation is not misreported as timeout"
+            }
+            Assert-Equal ($cancelBound.ElapsedMilliseconds -lt 25000) $true "ChildExec cancellation terminates the child process tree promptly"
 
             $outputLimitStarted = [Diagnostics.Stopwatch]::StartNew()
             [WindoRunner.ChildExec]::RunPowerShell(
@@ -2921,6 +3034,43 @@ Assert-Equal ($roadmapRaw.Contains("windo edition") -eq $true) $true "v5 roadmap
 Assert-Equal ($roadmapRaw.Contains("windo mesh doctor") -eq $true) $true "v5 roadmap documents mesh doctor command"
 Assert-Equal ($roadmapRaw.Contains("windo mesh workbench") -eq $true) $true "v5 roadmap documents mesh workbench command"
 Assert-Equal ($roadmapRaw.Contains("Extravaganza") -eq $false) $true "roadmap keeps future major reveal copy reserved"
+
+$runnerArtifactPathFn = Get-WindoFunctionTextFromSource -Source $runnerSource -Name "Test-WindoRequestArtifactPath"
+Assert-Equal (-not [string]::IsNullOrWhiteSpace($runnerArtifactPathFn)) $true "runner defines correlated stream artifact path validation"
+if (-not [string]::IsNullOrWhiteSpace($runnerArtifactPathFn)) {
+    Invoke-Expression $runnerArtifactPathFn
+    $artifactRoot = Join-Path ([IO.Path]::GetTempPath()) ("windo-artifact-path-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+    try {
+        $artifactRequestId = [Guid]::NewGuid().ToString("N")
+        $validStdoutPath = Join-Path $artifactRoot ("windo_stdout.$artifactRequestId.log")
+        Assert-Equal (Test-WindoRequestArtifactPath -Path $validStdoutPath -SecureDirectory $artifactRoot -RequestId $artifactRequestId -Kind stdout) $null "runner accepts the exact correlated stdout path"
+        $outsidePath = Join-Path ([IO.Path]::GetTempPath()) ("windo_stdout.$artifactRequestId.log")
+        Assert-Equal ([string]::IsNullOrWhiteSpace([string](Test-WindoRequestArtifactPath -Path $outsidePath -SecureDirectory $artifactRoot -RequestId $artifactRequestId -Kind stdout))) $false "runner rejects stream paths outside SecureDir"
+        $wrongIdPath = Join-Path $artifactRoot ("windo_stdout.$([Guid]::NewGuid().ToString('N')).log")
+        Assert-Equal ([string]::IsNullOrWhiteSpace([string](Test-WindoRequestArtifactPath -Path $wrongIdPath -SecureDirectory $artifactRoot -RequestId $artifactRequestId -Kind stdout))) $false "runner rejects mismatched stream request identifiers"
+        $nestedPath = Join-Path (Join-Path $artifactRoot 'nested') ("windo_stdout.$artifactRequestId.log")
+        Assert-Equal ([string]::IsNullOrWhiteSpace([string](Test-WindoRequestArtifactPath -Path $nestedPath -SecureDirectory $artifactRoot -RequestId $artifactRequestId -Kind stdout))) $false "runner rejects nested stream artifact paths"
+    } finally {
+        Remove-Item -LiteralPath $artifactRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+Assert-Equal ($runnerSource.Contains('StreamProtocolVersion must be 1.')) $true "runner requires the inline stream protocol version"
+Assert-Equal ($runnerSource.Contains('RunnerCancelled = [bool]$cancelled')) $true "runner publishes cancellation state"
+Assert-Equal ($runnerSource.Contains('StreamSinkFailed = [bool]$streamSinkFailed')) $true "runner publishes live stream health"
+Assert-Equal (([string]$generatedRuntimeBody).Contains('StdOutStreamPath = $stdOutStreamPath')) $true "runtime protects the stdout stream path in each request"
+Assert-Equal (([string]$generatedRuntimeBody).Contains('StdErrStreamPath = $stdErrStreamPath')) $true "runtime protects the stderr stream path in each request"
+Assert-Equal (([string]$generatedRuntimeBody).Contains('CancelPath = $cancelPath')) $true "runtime protects the cancellation path in each request"
+Assert-Equal (([string]$generatedRuntimeBody).Contains('StreamProtocolVersion = 1')) $true "runtime declares inline stream protocol version 1"
+Assert-Equal (([string]$generatedRuntimeBody).Contains('_windo_pump_live_stream')) $true "runtime pumps elevated output into the caller terminal"
+Assert-Equal (([string]$generatedRuntimeBody).Contains('_windo_signal_runner_cancel')) $true "runtime signals cancellation on interrupted waits"
+Assert-Equal (([string]$generatedRuntimeBody).Contains('OutputAlreadyEmitted')) $true "runtime suppresses duplicate final output after inline streaming"
+Assert-Equal (([string]$generatedRuntimeBody).Contains('windo_stdout.*.log')) $true "runtime cleanup includes stale stdout stream files"
+Assert-Equal (([string]$generatedRuntimeBody).Contains('windo_stderr.*.log')) $true "runtime cleanup includes stale stderr stream files"
+Assert-Equal (([string]$generatedRuntimeBody).Contains('windo_cancel.*.signal')) $true "runtime cleanup includes stale cancellation markers"
+$installerBytes = [IO.File]::ReadAllBytes((Join-Path $root 'windo_install.ps1'))
+$installerHasUtf8Bom = $installerBytes.Length -ge 3 -and $installerBytes[0] -eq 0xEF -and $installerBytes[1] -eq 0xBB -and $installerBytes[2] -eq 0xBF
+Assert-Equal $installerHasUtf8Bom $true "installer carries an explicit UTF-8 BOM for Windows PowerShell 5.1"
 
 if ($failed -gt 0) {
     Write-Host "Test-WindoLogic: $failed failure(s)." -ForegroundColor Red

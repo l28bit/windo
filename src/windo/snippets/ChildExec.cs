@@ -176,6 +176,7 @@ namespace WindoRunner
         private sealed class CaptureState
         {
             public volatile bool LimitReached;
+            public volatile bool StreamSinkFailed;
         }
 
         private static string CompletedReaderResult(Task<string> task)
@@ -221,36 +222,69 @@ namespace WindoRunner
             return new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
         }
 
-        private static string ReadStreamToMax(StreamReader r, int maxChars, CaptureState state, string streamPath)
+        private static string ReadStreamToMax(
+            StreamReader reader,
+            int maxChars,
+            CaptureState state,
+            StreamWriter sink)
         {
-            var sb = new StringBuilder();
-            StreamWriter sink = null;
-            try { sink = OpenStreamSink(streamPath); } catch { throw; }
-            var buf = new char[8192];
+            var buffer = new char[8192];
+            var captured = new StringBuilder();
             int total = 0;
             try
             {
                 while (total < maxChars)
                 {
-                    int n = r.Read(buf, 0, Math.Min(buf.Length, maxChars - total));
-                    if (n <= 0) break;
-                    sb.Append(buf, 0, n);
-                    if (sink != null) sink.Write(buf, 0, n);
-                    total += n;
+                    int count = reader.Read(buffer, 0, Math.Min(buffer.Length, maxChars - total));
+                    if (count <= 0) break;
+                    captured.Append(buffer, 0, count);
+                    total += count;
+
+                    if (sink != null)
+                    {
+                        try
+                        {
+                            sink.Write(buffer, 0, count);
+                        }
+                        catch
+                        {
+                            state.StreamSinkFailed = true;
+                            try { sink.Dispose(); } catch { }
+                            sink = null;
+                        }
+                    }
                 }
             }
             catch
             {
-                // Preserve the historical capture contract. A broken optional
-                // live sink must not turn a completed command into a false failure.
+                // Preserve captured output and let the bounded process/reader
+                // cleanup path decide the final execution result.
             }
             finally
             {
-                if (sink != null) sink.Dispose();
+                if (sink != null)
+                {
+                    try { sink.Dispose(); } catch { }
+                }
             }
+
             if (total >= maxChars)
                 state.LimitReached = true;
-            return sb.ToString();
+            return captured.ToString();
+        }
+
+        private static bool IsCancellationRequested(string cancelPath)
+        {
+            if (string.IsNullOrWhiteSpace(cancelPath)) return false;
+            try
+            {
+                if (!Path.IsPathRooted(cancelPath)) return false;
+                return File.Exists(Path.GetFullPath(cancelPath));
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string BuildGatedScript(string scriptText, string gateName)
@@ -269,14 +303,19 @@ namespace WindoRunner
             int maxCharsPerStream,
             string stdoutStreamPath,
             string stderrStreamPath,
+            string cancelPath,
             out string stdout,
             out string stderr,
             out bool timedOut,
             out bool truncated,
+            out bool cancelled,
+            out bool streamSinkFailed,
             out int exitCode)
         {
             timedOut = false;
             truncated = false;
+            cancelled = false;
+            streamSinkFailed = false;
             exitCode = 1;
             stdout = "";
             stderr = "";
@@ -310,8 +349,23 @@ namespace WindoRunner
             Process p = null;
             IntPtr job = IntPtr.Zero;
             bool disposeProcessSynchronously = true;
+            StreamWriter stdoutSink = null;
+            StreamWriter stderrSink = null;
+            bool sinksOwnedByReaders = false;
             try
             {
+                // Open the live stream channels before the child starts. An
+                // invalid stream path therefore fails closed without allowing
+                // elevated user code to execute.
+                stdoutSink = OpenStreamSink(stdoutStreamPath);
+                stderrSink = OpenStreamSink(stderrStreamPath);
+                if (IsCancellationRequested(cancelPath))
+                {
+                    cancelled = true;
+                    exitCode = 130;
+                    return;
+                }
+
                 p = Process.Start(psi);
                 if (p == null)
                     throw new InvalidOperationException("The PowerShell child process did not start.");
@@ -332,23 +386,35 @@ namespace WindoRunner
                 try
                 {
                     var captureState = new CaptureState();
-                    var tOut = Task.Run(() => ReadStreamToMax(p.StandardOutput, maxCharsPerStream, captureState, stdoutStreamPath));
-                    var tErr = Task.Run(() => ReadStreamToMax(p.StandardError, maxCharsPerStream, captureState, stderrStreamPath));
+                    var tOut = Task.Run(() => ReadStreamToMax(p.StandardOutput, maxCharsPerStream, captureState, stdoutSink));
+                    var tErr = Task.Run(() => ReadStreamToMax(p.StandardError, maxCharsPerStream, captureState, stderrSink));
+                    sinksOwnedByReaders = true;
                     var wait = Stopwatch.StartNew();
                     bool finished = false;
-                    while (!finished && wait.ElapsedMilliseconds < timeoutMs && !captureState.LimitReached)
+                    while (!finished && wait.ElapsedMilliseconds < timeoutMs && !captureState.LimitReached && !cancelled)
                     {
+                        if (IsCancellationRequested(cancelPath))
+                        {
+                            cancelled = true;
+                            break;
+                        }
                         int remaining = timeoutMs - (int)Math.Min(timeoutMs, wait.ElapsedMilliseconds);
                         finished = p.WaitForExit(Math.Max(1, Math.Min(remaining, 100)));
                     }
-                    if (captureState.LimitReached && !finished)
+                    if (cancelled && !finished)
+                    {
+                        TerminateProcessTree(p, job);
+                        try { p.WaitForExit(15000); } catch { }
+                        finished = true;
+                    }
+                    else if (captureState.LimitReached && !finished)
                     {
                         truncated = true;
                         TerminateProcessTree(p, job);
                         try { p.WaitForExit(15000); } catch { }
                         finished = true;
                     }
-                    if (!finished)
+                    else if (!finished)
                     {
                         timedOut = true;
                         TerminateProcessTree(p, job);
@@ -361,7 +427,7 @@ namespace WindoRunner
                     // the readers, and allow only a bounded final drain.
                     if (!WaitForReaders(tOut, tErr, 5000))
                     {
-                        timedOut = true;
+                        if (!cancelled) timedOut = true;
                         TerminateProcessTree(p, job);
                         // Closing a StreamReader concurrently with a blocked
                         // synchronous Read can itself block. Kill-on-close is
@@ -383,6 +449,7 @@ namespace WindoRunner
                     }
                     stdout = CompletedReaderResult(tOut);
                     stderr = CompletedReaderResult(tErr);
+                    streamSinkFailed = captureState.StreamSinkFailed;
                     if (stdout.Length >= maxCharsPerStream || stderr.Length >= maxCharsPerStream)
                         truncated = true;
                     try
@@ -393,7 +460,9 @@ namespace WindoRunner
                     {
                         exitCode = -1;
                     }
-                    if (timedOut)
+                    if (cancelled)
+                        exitCode = 130;
+                    else if (timedOut)
                         exitCode = -1;
                 }
                 finally
@@ -406,10 +475,41 @@ namespace WindoRunner
             {
                 if (startGate != null) startGate.Dispose();
                 if (job != IntPtr.Zero) CloseHandle(job);
+                if (!sinksOwnedByReaders)
+                {
+                    if (stdoutSink != null) { try { stdoutSink.Dispose(); } catch { } }
+                    if (stderrSink != null) { try { stderrSink.Dispose(); } catch { } }
+                }
                 if (p != null && disposeProcessSynchronously) p.Dispose();
             }
         }
 
+        public static void RunPowerShellStreaming(
+            string executablePath,
+            string scriptText,
+            string workingDirectory,
+            int timeoutMs,
+            int maxCharsPerStream,
+            string stdoutStreamPath,
+            string stderrStreamPath,
+            string cancelPath,
+            out string stdout,
+            out string stderr,
+            out bool timedOut,
+            out bool truncated,
+            out bool cancelled,
+            out bool streamSinkFailed,
+            out int exitCode)
+        {
+            RunPowerShellCore(
+                executablePath, scriptText, workingDirectory, timeoutMs, maxCharsPerStream,
+                stdoutStreamPath, stderrStreamPath, cancelPath,
+                out stdout, out stderr, out timedOut, out truncated,
+                out cancelled, out streamSinkFailed, out exitCode);
+        }
+
+        // Backward-compatible streaming entry point created before explicit
+        // cancellation and stream-health reporting were added.
         public static void RunPowerShellStreaming(
             string executablePath,
             string scriptText,
@@ -424,10 +524,13 @@ namespace WindoRunner
             out bool truncated,
             out int exitCode)
         {
+            bool cancelled;
+            bool streamSinkFailed;
             RunPowerShellCore(
                 executablePath, scriptText, workingDirectory, timeoutMs, maxCharsPerStream,
-                stdoutStreamPath, stderrStreamPath,
-                out stdout, out stderr, out timedOut, out truncated, out exitCode);
+                stdoutStreamPath, stderrStreamPath, null,
+                out stdout, out stderr, out timedOut, out truncated,
+                out cancelled, out streamSinkFailed, out exitCode);
         }
 
         public static void RunPowerShell(
@@ -442,10 +545,13 @@ namespace WindoRunner
             out bool truncated,
             out int exitCode)
         {
+            bool cancelled;
+            bool streamSinkFailed;
             RunPowerShellCore(
                 executablePath, scriptText, workingDirectory, timeoutMs, maxCharsPerStream,
-                null, null,
-                out stdout, out stderr, out timedOut, out truncated, out exitCode);
+                null, null, null,
+                out stdout, out stderr, out timedOut, out truncated,
+                out cancelled, out streamSinkFailed, out exitCode);
         }
 
         // Backward-compatible overload for callers created before working
