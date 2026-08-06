@@ -24,32 +24,71 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $encodedPath = '.prometheus/inline-elevation.patch.gz.b64'
+          Set-StrictMode -Version Latest
+
+          $chunkRoot = '.prometheus/chunks8'
+          $encodedPath = '.prometheus/reconstructed.patch.gz.b64'
           $patchPath = 'prometheus-inline-elevation.patch'
           $diagnosticPath = '.prometheus/apply-diagnostic.txt'
+          $expectedEncodedLength = 48048
+          $expectedEncodedSha256 = 'B22B36DD9EDDCB0B3532CB89CD40D0EFE8C33D21B72E48A5313A44B994747482'
+          $expectedPatchLength = 188643
+          $expectedPatchSha256 = '22ABD920FD2FAA36FF2D86981291CE9D20A51BBBFAD7CC7CDB294BE1A7C197A4'
           $diagnostic = [System.Collections.Generic.List[string]]::new()
           $success = $false
 
+          function Get-BytesSha256 {
+            param([Parameter(Mandatory = $true)][byte[]]$Bytes)
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try {
+              return (-join ($sha.ComputeHash($Bytes) | ForEach-Object { $_.ToString('X2') }))
+            } finally {
+              $sha.Dispose()
+            }
+          }
+
           try {
-            if (-not (Test-Path -LiteralPath $encodedPath)) {
-              throw "Missing staged repair payload: $encodedPath"
+            $expectedChunks = 0..6 | ForEach-Object { Join-Path $chunkRoot ('{0:D3}.txt' -f $_) }
+            foreach ($chunk in $expectedChunks) {
+              if (-not (Test-Path -LiteralPath $chunk)) { throw "Missing staged repair chunk: $chunk" }
             }
 
-            $python = @'
-          import base64
-          import gzip
-          from pathlib import Path
+            $encoded = -join ($expectedChunks | ForEach-Object { ([IO.File]::ReadAllText((Resolve-Path -LiteralPath $_)) -replace '\s', '') })
+            $encodedBytes = [Text.Encoding]::ASCII.GetBytes($encoded)
+            $encodedSha = Get-BytesSha256 -Bytes $encodedBytes
+            $diagnostic.Add("encoded_length=$($encoded.Length)")
+            $diagnostic.Add("encoded_sha256=$encodedSha")
+            if ($encoded.Length -ne $expectedEncodedLength) {
+              throw "Encoded repair payload length mismatch: expected $expectedEncodedLength, got $($encoded.Length)."
+            }
+            if ($encodedSha -cne $expectedEncodedSha256) {
+              throw "Encoded repair payload SHA256 mismatch: expected $expectedEncodedSha256, got $encodedSha."
+            }
+            [IO.File]::WriteAllText($encodedPath, $encoded, [Text.Encoding]::ASCII)
 
-          encoded_path = Path('.prometheus/inline-elevation.patch.gz.b64')
-          patch_path = Path('prometheus-inline-elevation.patch')
-          encoded = ''.join(encoded_path.read_text(encoding='utf-8').split())
-          patch_path.write_bytes(gzip.decompress(base64.b64decode(encoded)))
-          print(f'decoded_bytes={patch_path.stat().st_size}')
-          '@
-            $decodeOutput = $python | python - 2>&1
-            $diagnostic.Add("python_decode_exit=$LASTEXITCODE")
-            foreach ($line in @($decodeOutput)) { $diagnostic.Add("python: $line") }
-            if ($LASTEXITCODE -ne 0) { throw 'Python patch decode failed.' }
+            $gzipBytes = [Convert]::FromBase64String($encoded)
+            $input = [IO.MemoryStream]::new($gzipBytes, $false)
+            $gzip = [IO.Compression.GZipStream]::new($input, [IO.Compression.CompressionMode]::Decompress)
+            $output = [IO.MemoryStream]::new()
+            try {
+              $gzip.CopyTo($output)
+              $patchBytes = $output.ToArray()
+            } finally {
+              $output.Dispose()
+              $gzip.Dispose()
+              $input.Dispose()
+            }
+
+            $patchSha = Get-BytesSha256 -Bytes $patchBytes
+            $diagnostic.Add("patch_length=$($patchBytes.Length)")
+            $diagnostic.Add("patch_sha256=$patchSha")
+            if ($patchBytes.Length -ne $expectedPatchLength) {
+              throw "Repair patch length mismatch: expected $expectedPatchLength, got $($patchBytes.Length)."
+            }
+            if ($patchSha -cne $expectedPatchSha256) {
+              throw "Repair patch SHA256 mismatch: expected $expectedPatchSha256, got $patchSha."
+            }
+            [IO.File]::WriteAllBytes($patchPath, $patchBytes)
 
             $checkOutput = & git apply --check -p1 --whitespace=nowarn $patchPath 2>&1
             $checkExit = $LASTEXITCODE
@@ -69,22 +108,30 @@ jobs:
             foreach ($line in @($repairOutput)) { $diagnostic.Add("repair: $line") }
             if ($repairExit -ne 0) { throw 'Generated-artifact repair verification failed.' }
 
-            Remove-Item -LiteralPath $encodedPath -Force
-            Remove-Item -LiteralPath $patchPath -Force -ErrorAction SilentlyContinue
             $success = $true
             $diagnostic.Add('result=success')
+
+            Remove-Item -LiteralPath '.prometheus/inline-elevation.patch.gz.b64' -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath '.prometheus/chunks' -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath '.prometheus/chunks8' -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $encodedPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $patchPath -Force -ErrorAction SilentlyContinue
           } catch {
-            $diagnostic.Add("result=failure")
+            $diagnostic.Add('result=failure')
             $diagnostic.Add("exception=$($_.Exception.Message)")
           } finally {
             $diagnostic.Add("utc=$([DateTime]::UtcNow.ToString('o'))")
+            $diagnosticParent = Split-Path -Parent $diagnosticPath
+            if (-not (Test-Path -LiteralPath $diagnosticParent)) {
+              New-Item -ItemType Directory -Path $diagnosticParent -Force | Out-Null
+            }
             [IO.File]::WriteAllLines($diagnosticPath, $diagnostic, [Text.UTF8Encoding]::new($false))
 
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add --all
             if (-not (git diff --cached --quiet)) {
-              $message = if ($success) { 'repair: wire Prometheus inline elevation end to end' } else { 'diagnostic: capture Prometheus patch application failure' }
+              $message = if ($success) { 'repair: wire Prometheus inline elevation end to end' } else { 'diagnostic: capture Prometheus repair reconstruction failure' }
               git commit -m $message
               git push origin HEAD:repair/inline-elevation
             }
