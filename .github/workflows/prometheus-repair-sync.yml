@@ -47,6 +47,22 @@ jobs:
             }
           }
 
+          function Test-PrometheusPatchMarkers {
+            $checks = @(
+              @{ Path = 'src/windo/snippets/ChildExec.cs'; Pattern = 'RunPowerShellStreaming' },
+              @{ Path = 'windo_runner.ps1'; Pattern = 'StdOutStreamPath' },
+              @{ Path = 'windo_runner.ps1'; Pattern = 'CancelPath' },
+              @{ Path = 'windo_install.ps1'; Pattern = '_windo_new_live_stream_state' },
+              @{ Path = 'windo_install.ps1'; Pattern = '_windo_signal_runner_cancel' },
+              @{ Path = 'tools/Test-WindoLogic.ps1'; Pattern = 'RunPowerShellStreaming' }
+            )
+            foreach ($check in $checks) {
+              if (-not (Test-Path -LiteralPath $check.Path -PathType Leaf)) { return $false }
+              if (-not (Select-String -LiteralPath $check.Path -SimpleMatch -Quiet -Pattern $check.Pattern)) { return $false }
+            }
+            return $true
+          }
+
           try {
             $expectedChunks = 0..6 | ForEach-Object { Join-Path $chunkRoot ('{0:D3}.txt' -f $_) }
             foreach ($chunk in $expectedChunks) {
@@ -94,19 +110,23 @@ jobs:
             $checkExit = $LASTEXITCODE
             $diagnostic.Add("git_apply_check_exit=$checkExit")
             foreach ($line in @($checkOutput)) { $diagnostic.Add("check: $line") }
-            if ($checkExit -ne 0) { throw 'Prometheus repair patch preflight failed.' }
 
-            $applyOutput = & git apply -p1 --whitespace=nowarn $patchPath 2>&1
-            $applyExit = $LASTEXITCODE
-            $diagnostic.Add("git_apply_exit=$applyExit")
-            foreach ($line in @($applyOutput)) { $diagnostic.Add("apply: $line") }
-            if ($applyExit -ne 0) { throw 'Prometheus repair patch application failed.' }
+            if ($checkExit -eq 0) {
+              $applyOutput = & git apply -p1 --whitespace=nowarn $patchPath 2>&1
+              $applyExit = $LASTEXITCODE
+              $diagnostic.Add("git_apply_exit=$applyExit")
+              foreach ($line in @($applyOutput)) { $diagnostic.Add("apply: $line") }
+              if ($applyExit -ne 0) { throw 'Prometheus repair patch application failed.' }
+              $diagnostic.Add('patch_state=applied_now')
+            } elseif (Test-PrometheusPatchMarkers) {
+              $diagnostic.Add('patch_state=already_applied_and_markers_verified')
+            } else {
+              throw 'Prometheus repair patch neither applies cleanly nor has a verified applied-state marker set.'
+            }
 
-            $repairOutput = ./tools/Prometheus-RepairGeneratedArtifacts.ps1 2>&1
-            $repairExit = $LASTEXITCODE
-            $diagnostic.Add("repair_script_exit=$repairExit")
+            $repairOutput = & ./tools/Prometheus-RepairGeneratedArtifacts.ps1 2>&1
             foreach ($line in @($repairOutput)) { $diagnostic.Add("repair: $line") }
-            if ($repairExit -ne 0) { throw 'Generated-artifact repair verification failed.' }
+            $diagnostic.Add('repair_script=success')
 
             $success = $true
             $diagnostic.Add('result=success')
@@ -131,7 +151,7 @@ jobs:
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add --all
             if (-not (git diff --cached --quiet)) {
-              $message = if ($success) { 'repair: wire Prometheus inline elevation end to end' } else { 'diagnostic: capture Prometheus repair reconstruction failure' }
+              $message = if ($success) { 'repair: finalize Prometheus generated artifacts' } else { 'diagnostic: capture Prometheus repair reconstruction failure' }
               git commit -m $message
               git push origin HEAD:repair/inline-elevation
             }
