@@ -2,16 +2,17 @@ encoded_length=48048
 encoded_sha256=B22B36DD9EDDCB0B3532CB89CD40D0EFE8C33D21B72E48A5313A44B994747482
 patch_length=188643
 patch_sha256=22ABD920FD2FAA36FF2D86981291CE9D20A51BBBFAD7CC7CDB294BE1A7C197A4
-git_apply_check_exit=0
-git_apply_exit=0
+git_apply_check_exit=1
+check: error: patch failed: src/windo/snippets/ChildExec.cs:176
+check: error: src/windo/snippets/ChildExec.cs: patch does not apply
+check: error: patch failed: windo_runner.ps1:79
+check: error: windo_runner.ps1: patch does not apply
+check: error: patch failed: windo_install.ps1:1
+check: error: windo_install.ps1: patch does not apply
+check: error: patch failed: tools/Test-WindoLogic.ps1:369
+check: error: tools/Test-WindoLogic.ps1: patch does not apply
+check: error: patch failed: tools/Prometheus-RepairGeneratedArtifacts.ps1:7
+check: error: tools/Prometheus-RepairGeneratedArtifacts.ps1: patch does not apply
 result=failure
-exception=At D:\a\windo\windo\tools\Prometheus-RepairGeneratedArtifacts.ps1:111 char:7
-+     "- Runner SHA256: `$(Get-Sha256Hex $RunnerPath)`",
-+       ~
-You must provide a value expression following the '-' operator.
-
-At D:\a\windo\windo\tools\Prometheus-RepairGeneratedArtifacts.ps1:111 char:8
-+     "- Runner SHA256: `$(Get-Sha256Hex $RunnerPath)`",
-+        ~~~~~~
-Unexpected token 'Runner' in expression or statement.
-utc=2026-08-06T08:55:48.0875417Z
+exception=Prometheus repair patch preflight failed.
+utc=2026-08-06T08:56:04.3569373Z
