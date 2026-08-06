@@ -20,13 +20,52 @@ jobs:
           ref: repair/inline-elevation
           fetch-depth: 0
 
-      - name: Repair generated artifacts and Windows PowerShell encoding
+      - name: Apply exact Prometheus repair patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $encodedPath = '.prometheus/inline-elevation.patch.gz.b64'
+          if (-not (Test-Path -LiteralPath $encodedPath)) {
+            throw "Missing staged repair payload: $encodedPath"
+          }
+
+          $encoded = ([IO.File]::ReadAllText((Resolve-Path -LiteralPath $encodedPath)) -replace '\s', '')
+          $gzipBytes = [Convert]::FromBase64String($encoded)
+          $input = [IO.MemoryStream]::new($gzipBytes, $false)
+          $gzip = [IO.Compression.GZipStream]::new($input, [IO.Compression.CompressionMode]::Decompress)
+          $output = [IO.MemoryStream]::new()
+          try {
+            $gzip.CopyTo($output)
+            [IO.File]::WriteAllBytes('prometheus-inline-elevation.patch', $output.ToArray())
+          } finally {
+            $output.Dispose()
+            $gzip.Dispose()
+            $input.Dispose()
+          }
+
+          git apply --check -p1 --whitespace=nowarn prometheus-inline-elevation.patch
+          if ($LASTEXITCODE -ne 0) { throw 'Prometheus repair patch preflight failed.' }
+          git apply -p1 --whitespace=nowarn prometheus-inline-elevation.patch
+          if ($LASTEXITCODE -ne 0) { throw 'Prometheus repair patch application failed.' }
+
+      - name: Regenerate and verify generated artifacts
         id: repair
         continue-on-error: true
         shell: pwsh
         run: ./tools/Prometheus-RepairGeneratedArtifacts.ps1
 
-      - name: Commit repair evidence to recovery branch
+      - name: Remove transfer-only repair payload
+        if: always()
+        shell: pwsh
+        run: |
+          Remove-Item -LiteralPath '.prometheus/inline-elevation.patch.gz.b64' -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath 'prometheus-inline-elevation.patch' -Force -ErrorAction SilentlyContinue
+          if ((Test-Path -LiteralPath '.prometheus') -and -not (Get-ChildItem -LiteralPath '.prometheus' -Force | Select-Object -First 1)) {
+            Remove-Item -LiteralPath '.prometheus' -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Commit repaired candidate to recovery branch
+        if: always()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -34,15 +73,16 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add --all
           if (-not (git diff --cached --quiet)) {
-            git commit -m 'repair: synchronize Prometheus generated artifacts'
+            git commit -m 'repair: wire Prometheus inline elevation end to end'
             git push origin HEAD:repair/inline-elevation
           } else {
-            Write-Host 'No generated-artifact changes were required.'
+            Write-Host 'No repair changes were produced.'
           }
 
-      - name: Report repair-step outcome
+      - name: Enforce repair-step outcome
+        if: always()
         shell: pwsh
         run: |
           if ('${{ steps.repair.outcome }}' -ne 'success') {
-            Write-Warning 'The repair step reported a remaining parser or parity failure. Its generated report was committed for diagnosis.'
+            throw 'The deterministic repair step reported a remaining parser or generated-artifact failure. Its evidence was committed to the recovery branch.'
           }
