@@ -3,13 +3,11 @@ name: Prometheus Validation
 on:
   push:
     branches:
-      - repair/inline-elevation
-      - Prometheus
-      - main
+      - repair/prometheus-final
       - Exodus
   pull_request:
     branches:
-      - main
+      - Exodus
   workflow_dispatch:
 
 permissions:
@@ -17,7 +15,7 @@ permissions:
 
 jobs:
   windows-powershell-51:
-    name: Windows PowerShell 5.1
+    name: Windows PowerShell 5.1 pre-sign
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -32,8 +30,10 @@ jobs:
             'bootstrap.ps1',
             'windo_install.ps1',
             'windo_runner.ps1',
+            'windo_uninstall.ps1',
             'tools/Test-WindoLogic.ps1',
-            'tools/Validate-Windo.ps1'
+            'tools/Validate-Windo.ps1',
+            'tools/Test-WindoReservedVariables.ps1'
           )
           foreach ($file in $files) {
             if (-not (Test-Path -LiteralPath $file)) { throw "Missing required file: $file" }
@@ -50,13 +50,13 @@ jobs:
             }
           }
 
+      - name: Reject reserved automatic-variable assignments
+        shell: powershell
+        run: .\tools\Test-WindoReservedVariables.ps1
+
       - name: Run logic tests
         shell: powershell
         run: .\tools\Test-WindoLogic.ps1
-
-      - name: Run release validation
-        shell: powershell
-        run: .\tools\Validate-Windo.ps1
 
       - name: Verify ChildExec source payload parity
         shell: powershell
@@ -67,13 +67,102 @@ jobs:
           $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))
           if ($source -cne $decoded) { throw 'ChildExec.cs and ChildExec.b64.txt are not byte-equivalent.' }
 
+      - name: Run pre-sign release validation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $validationOutput = @(& .\tools\Validate-Windo.ps1 2>&1)
+          $exitCode = $LASTEXITCODE
+          $validationOutput | ForEach-Object { Write-Host ([string]$_) }
+          $failLines = @($validationOutput | Where-Object { ([string]$_) -match '^FAIL ' })
+          $signatureFails = @($failLines | Where-Object { ([string]$_) -match '^FAIL checksums/installer\.sha256\.sig$' })
+          $unexpectedFails = @($failLines | Where-Object { ([string]$_) -notmatch '^FAIL checksums/installer\.sha256\.sig$' })
+          if ($unexpectedFails.Count -gt 0) {
+            throw ('Pre-sign validation has non-signature failures: ' + (($unexpectedFails | ForEach-Object { [string]$_ }) -join '; '))
+          }
+          if ($exitCode -ne 0 -and $signatureFails.Count -eq 0) {
+            throw "Validate-Windo.ps1 failed without the expected pending signature gate. exit=$exitCode"
+          }
+          if ($exitCode -eq 0) {
+            Write-Host 'PASS: full release validation is already green.'
+          } else {
+            Write-Host 'PASS: all validator findings except the intentionally pending private-key signature are green.'
+          }
+
   powershell-7:
-    name: PowerShell 7
+    name: PowerShell 7 pre-sign
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Parse release scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(
+            'bootstrap.ps1',
+            'windo_install.ps1',
+            'windo_runner.ps1',
+            'windo_uninstall.ps1',
+            'tools/Test-WindoLogic.ps1',
+            'tools/Validate-Windo.ps1',
+            'tools/Test-WindoReservedVariables.ps1'
+          )
+          foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file)) { throw "Missing required file: $file" }
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $file),
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "${file}: $($_.Message)" }
+              throw "PowerShell parse failed: $file"
+            }
+          }
+
+      - name: Reject reserved automatic-variable assignments
+        shell: pwsh
+        run: ./tools/Test-WindoReservedVariables.ps1
+
+      - name: Run logic tests
+        shell: pwsh
+        run: ./tools/Test-WindoLogic.ps1
+
+      - name: Verify ChildExec source payload parity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = [IO.File]::ReadAllText((Resolve-Path 'src/windo/snippets/ChildExec.cs'))
+          $encoded = ([IO.File]::ReadAllText((Resolve-Path 'tools/ChildExec.b64.txt')) -replace '\s','')
+          $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))
+          if ($source -cne $decoded) { throw 'ChildExec.cs and ChildExec.b64.txt are not byte-equivalent.' }
+
+      - name: Run pre-sign release validation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $validationOutput = @(& ./tools/Validate-Windo.ps1 2>&1)
+          $exitCode = $LASTEXITCODE
+          $validationOutput | ForEach-Object { Write-Host ([string]$_) }
+          $failLines = @($validationOutput | Where-Object { ([string]$_) -match '^FAIL ' })
+          $signatureFails = @($failLines | Where-Object { ([string]$_) -match '^FAIL checksums/installer\.sha256\.sig$' })
+          $unexpectedFails = @($failLines | Where-Object { ([string]$_) -notmatch '^FAIL checksums/installer\.sha256\.sig$' })
+          if ($unexpectedFails.Count -gt 0) {
+            throw ('Pre-sign validation has non-signature failures: ' + (($unexpectedFails | ForEach-Object { [string]$_ }) -join '; '))
+          }
+          if ($exitCode -ne 0 -and $signatureFails.Count -eq 0) {
+            throw "Validate-Windo.ps1 failed without the expected pending signature gate. exit=$exitCode"
+          }
+          if ($exitCode -eq 0) {
+            Write-Host 'PASS: full release validation is already green.'
+          } else {
+            Write-Host 'PASS: all validator findings except the intentionally pending private-key signature are green.'
+          }
 
       - name: Export exact checked-out source
         shell: pwsh
@@ -87,20 +176,16 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-      - name: Run logic tests
-        shell: pwsh
-        run: ./tools/Test-WindoLogic.ps1
-
-      - name: Run release validation
-        shell: pwsh
-        run: ./tools/Validate-Windo.ps1
+  signature-gate:
+    name: Private-key release signature
+    runs-on: windows-latest
+    needs:
+      - windows-powershell-51
+      - powershell-7
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Verify checksum signature
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if (Test-Path -LiteralPath './tools/Test-WindoChecksumSignature.ps1') {
-            ./tools/Test-WindoChecksumSignature.ps1
-          } else {
-            throw 'Missing checksum signature verifier.'
-          }
+        run: ./tools/Test-WindoChecksumSignature.ps1
