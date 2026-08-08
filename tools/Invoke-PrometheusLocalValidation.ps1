@@ -68,7 +68,8 @@ function Test-PrometheusParseGate {
         'tools/Test-WindoLogic.ps1',
         'tools/Validate-Windo.ps1',
         'tools/Test-WindoReservedVariables.ps1',
-        'tools/Invoke-PrometheusLocalValidation.ps1'
+        'tools/Invoke-PrometheusLocalValidation.ps1',
+        'tools/Invoke-PrometheusLocalStage.ps1'
     )
 
     foreach ($relative in $files) {
@@ -91,7 +92,7 @@ function Test-PrometheusParseGate {
         }
     }
 
-    Write-Host 'PASS: release entry points parse.' -ForegroundColor Green
+    Write-Host 'PASS: release entry points and local Prometheus tools parse.' -ForegroundColor Green
 }
 
 function Test-PrometheusChildExecParity {
@@ -122,7 +123,8 @@ function Test-PrometheusChildExecParity {
     }
 
     $installerText = [System.IO.File]::ReadAllText($installerPath)
-    $runnerBlockMatch = [regex]::Match($installerText, "(?ms)^\$RunnerContent = @'\r?\n(?<runner>.*?)^'@\r?\nWrite-Utf8NoBomFile -Path \$RunnerPath -Content \$RunnerContent")
+    $runnerBlockPattern = '(?ms)^\$RunnerContent = @''\r?\n(?<runner>.*?)^''@\r?\nWrite-Utf8NoBomFile -Path \$RunnerPath -Content \$RunnerContent'
+    $runnerBlockMatch = [regex]::Match($installerText, $runnerBlockPattern)
     if (-not $runnerBlockMatch.Success) {
         throw 'Installer RunnerContent block could not be located.'
     }
@@ -245,12 +247,16 @@ if ($Worker) {
 }
 
 $branch = ''
-try { $branch = (& git -C $RepoRoot rev-parse --abbrev-ref HEAD).Trim() } catch {}
+try {
+    $branchOutput = @(& git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null)
+    if ($LASTEXITCODE -eq 0) { $branch = (($branchOutput | ForEach-Object { [string]$_ }) -join '').Trim() }
+}
+catch {}
 if ($branch -and $branch -ne 'repair/prometheus-final') {
     throw "Local Prometheus validation must run from repair/prometheus-final. Current branch: $branch"
 }
 
-$hosts = New-Object System.Collections.Generic.List[object]
+$hosts = New-Object 'System.Collections.Generic.List[object]'
 $ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path -LiteralPath $ps51 -PathType Leaf)) {
     throw "Windows PowerShell 5.1 host was not found at $ps51"
@@ -266,8 +272,8 @@ $hosts.Add([pscustomobject]@{ Label = 'PowerShell 7'; Path = $pwshCommand.Source
 $logRoot = Join-Path $env:TEMP 'WINDO-Prometheus'
 if (-not (Test-Path -LiteralPath $logRoot)) { New-Item -ItemType Directory -Path $logRoot -Force | Out-Null }
 $logPath = Join-Path $logRoot ('prometheus-local-validation-{0}.log' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
-$allOutput = New-Object System.Collections.Generic.List[string]
-$failedHosts = New-Object System.Collections.Generic.List[string]
+$allOutput = New-Object 'System.Collections.Generic.List[string]'
+$failedHosts = New-Object 'System.Collections.Generic.List[string]'
 
 foreach ($hostInfo in $hosts) {
     Write-PrometheusSection $hostInfo.Label
