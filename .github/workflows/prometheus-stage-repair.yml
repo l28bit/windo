@@ -1,9 +1,8 @@
 name: Prometheus Stage Repair
 
+# Hosted Actions are intentionally manual-only while project validation runs
+# through tools/Invoke-PrometheusLocalStage.ps1 on a Windows workstation.
 on:
-  push:
-    branches:
-      - repair/prometheus-final
   workflow_dispatch:
 
 permissions:
@@ -12,7 +11,6 @@ permissions:
 jobs:
   stage-repair:
     name: Selective Prometheus repair staging
-    if: github.actor != 'github-actions[bot]'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
