@@ -101,15 +101,20 @@ jobs:
           $ErrorActionPreference = 'Stop'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- \
-            windo_install.ps1 \
-            windo_runner.ps1 \
-            src/windo/snippets/ChildExec.cs \
-            tools/ChildExec.b64.txt \
-            tools/Test-WindoLogic.ps1 \
-            tools/Prometheus-RepairGeneratedArtifacts.ps1 \
-            tools/Test-WindoReservedVariables.ps1 \
-            checksums/installer.sha256 \
-            docs/prometheus-generated-repair-report.md
+          $stagePaths = @(
+            'windo_install.ps1',
+            'windo_runner.ps1',
+            'src/windo/snippets/ChildExec.cs',
+            'tools/ChildExec.b64.txt',
+            'tools/Test-WindoLogic.ps1',
+            'tools/Prometheus-RepairGeneratedArtifacts.ps1',
+            'tools/Test-WindoReservedVariables.ps1',
+            'checksums/installer.sha256',
+            'docs/prometheus-generated-repair-report.md'
+          )
+          git add -- @stagePaths
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to stage Prometheus repair artifacts.' }
           git commit -m 'fix: stage Prometheus inline elevation artifacts [prometheus-stage]'
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to commit Prometheus repair artifacts.' }
           git push origin HEAD:repair/prometheus-final
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to push staged Prometheus repair artifacts.' }
