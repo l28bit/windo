@@ -1,0 +1,115 @@
+name: Prometheus Stage Repair
+
+on:
+  push:
+    branches:
+      - repair/prometheus-final
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  stage-repair:
+    name: Selective Prometheus repair staging
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch donor main branch
+        shell: pwsh
+        run: git fetch origin main
+
+      - name: Carry forward only reviewed Prometheus execution files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $paths = @(
+            'windo_install.ps1',
+            'windo_runner.ps1',
+            'src/windo/snippets/ChildExec.cs',
+            'tools/Test-WindoLogic.ps1',
+            'tools/Prometheus-RepairGeneratedArtifacts.ps1'
+          )
+          foreach ($path in $paths) {
+            git cat-file -e "origin/main:$path"
+            if ($LASTEXITCODE -ne 0) { throw "Donor main is missing required path: $path" }
+          }
+          git checkout origin/main -- @paths
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to copy reviewed Prometheus donor files.' }
+
+      - name: Fix PowerShell automatic-variable collision
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = (Resolve-Path './windo_install.ps1').Path
+          $text = [IO.File]::ReadAllText($path)
+          $assignment = [regex]::Matches($text, '(?im)^\s*\$isWindows\s*=')
+          if ($assignment.Count -lt 1) {
+            throw 'Expected WINDO-owned $isWindows assignment was not found in the donor installer.'
+          }
+          $updated = [regex]::Replace($text, '(?i)\$isWindows\b', '$windoIsWindows')
+          if ($updated -ceq $text) { throw 'Installer automatic-variable collision repair made no change.' }
+          [IO.File]::WriteAllText($path, $updated, (New-Object Text.UTF8Encoding($true)))
+          if ([regex]::IsMatch($updated, '(?im)^\s*\$isWindows\s*=')) {
+            throw 'Installer still assigns to $IsWindows after repair.'
+          }
+
+      - name: Regenerate ChildExec, runner embedding, and PS5.1-safe installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tools/Prometheus-RepairGeneratedArtifacts.ps1
+
+      - name: Refresh unsigned release checksum manifest
+        shell: pwsh
+        env:
+          WINDO_TRACKING_BRANCH: Exodus
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tools/Sync-InstallerChecksum.ps1
+
+      - name: Run source logic and reserved-variable gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tools/Test-WindoReservedVariables.ps1
+          ./tools/Test-WindoLogic.ps1
+
+      - name: Check staged diff
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git diff --check
+          git status --short
+          if (-not (git status --porcelain)) {
+            throw 'Prometheus staging produced no repository changes.'
+          }
+          $forbidden = @(git status --porcelain | Where-Object { $_ -match '\.prometheus/' })
+          if ($forbidden.Count -gt 0) {
+            throw ('Recovery scratch files entered the clean lane: ' + ($forbidden -join '; '))
+          }
+
+      - name: Commit clean staged repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            windo_install.ps1 \
+            windo_runner.ps1 \
+            src/windo/snippets/ChildExec.cs \
+            tools/ChildExec.b64.txt \
+            tools/Test-WindoLogic.ps1 \
+            tools/Prometheus-RepairGeneratedArtifacts.ps1 \
+            tools/Test-WindoReservedVariables.ps1 \
+            checksums/installer.sha256 \
+            docs/prometheus-generated-repair-report.md
+          git commit -m 'fix: stage Prometheus inline elevation artifacts [prometheus-stage]'
+          git push origin HEAD:repair/prometheus-final
