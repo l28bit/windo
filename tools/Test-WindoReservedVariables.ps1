@@ -40,7 +40,7 @@ foreach ($file in $targets) {
 
         foreach ($variable in $variables) {
             if ($variable.VariablePath.UserPath -ieq 'IsWindows') {
-                $relative = $file.FullName.Substring($resolvedRoot.Length).TrimStart('\\','/')
+                $relative = $file.FullName.Substring($resolvedRoot.Length).TrimStart([char[]]@('\','/'))
                 $violations.Add(
                     ('{0}:{1}: assignment to read-only automatic variable $IsWindows' -f `
                         $relative,
