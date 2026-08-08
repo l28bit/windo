@@ -68,7 +68,7 @@ Write-Host '  repair PowerShell 7 $IsWindows collision'
 Write-Host '  regenerate ChildExec Base64 + runner + installer embedding'
 Write-Host '  refresh unsigned checksum manifest for Exodus'
 Write-Host '  run dual-host local pre-sign gate (Windows PowerShell 5.1 + PowerShell 7)'
-Write-Host '  leave the resulting diff uncommitted for human review'
+Write-Host '  leave every resulting change uncommitted and unstaged for human review'
 
 if (-not $Apply) {
     Write-Host ''
@@ -82,6 +82,16 @@ Write-Host ''
 Write-Host 'Applying reviewed Prometheus donor files...' -ForegroundColor Cyan
 foreach ($path in $donorPaths) {
     Invoke-Git -Arguments @('checkout', 'origin/main', '--', $path)
+}
+
+# `git checkout <tree> -- <path>` updates both worktree and index. Undo only
+# that index effect so the user sees a normal unstaged review diff. The
+# working tree was required to be clean before this operation.
+foreach ($path in $donorPaths) {
+    Invoke-Git -Arguments @('reset', 'HEAD', '--', $path)
+}
+if (-not [string]::IsNullOrWhiteSpace((Get-GitText -Arguments @('diff', '--cached', '--name-only')))) {
+    throw 'Prometheus local staging unexpectedly left staged changes in the index.'
 }
 
 $installerPath = Join-Path $RepoRoot 'windo_install.ps1'
@@ -118,6 +128,10 @@ finally {
     else { $env:WINDO_TRACKING_BRANCH = $oldTrackingBranch }
 }
 
+if (-not [string]::IsNullOrWhiteSpace((Get-GitText -Arguments @('diff', '--cached', '--name-only')))) {
+    throw 'Generated repair unexpectedly staged files. Local review must remain unstaged.'
+}
+
 Write-Host ''
 Write-Host 'Running local dual-host pre-sign gate...' -ForegroundColor Cyan
 $validator = Join-Path $RepoRoot 'tools\Invoke-PrometheusLocalValidation.ps1'
@@ -126,8 +140,7 @@ $validationExit = $LASTEXITCODE
 if ($validationExit -ne 0) {
     Write-Host ''
     Write-Host 'Prometheus staging stopped on a local validation failure.' -ForegroundColor Red
-    Write-Host 'The working tree was intentionally left unchanged for diagnosis.' -ForegroundColor Yellow
-    Write-Host 'To discard this staging attempt (only after reviewing status): git reset --hard HEAD' -ForegroundColor DarkGray
+    Write-Host 'Nothing was committed or pushed. Leave the files in place and send the validation output back for diagnosis.' -ForegroundColor Yellow
     exit $validationExit
 }
 
@@ -137,10 +150,13 @@ $forbidden = @($status -split "`r?`n" | Where-Object { $_ -match '\.prometheus/'
 if ($forbidden.Count -gt 0) {
     throw ('Recovery scratch files entered the clean lane: {0}' -f ($forbidden -join '; '))
 }
+if (-not [string]::IsNullOrWhiteSpace((Get-GitText -Arguments @('diff', '--cached', '--name-only')))) {
+    throw 'Local staging finished with staged changes; refusing review handoff.'
+}
 
 Write-Host ''
 Write-Host 'PROMETHEUS LOCAL STAGING: PASS' -ForegroundColor Green
-Write-Host 'No commit or push was performed.' -ForegroundColor Yellow
+Write-Host 'No commit, push, or signing operation was performed.' -ForegroundColor Yellow
 Write-Host ''
 Write-Host 'Changed files:' -ForegroundColor Cyan
 & git -C $RepoRoot status --short
@@ -149,6 +165,7 @@ Write-Host 'Diff summary:' -ForegroundColor Cyan
 & git -C $RepoRoot diff --stat
 Write-Host ''
 Write-Host 'Review before committing:' -ForegroundColor Cyan
+Write-Host '  git status --short'
 Write-Host '  git diff --check'
 Write-Host '  git diff --stat'
 Write-Host '  git diff -- windo_install.ps1 windo_runner.ps1 src/windo/snippets/ChildExec.cs tools/Test-WindoLogic.ps1 checksums/installer.sha256'
