@@ -69,7 +69,8 @@ function Test-PrometheusParseGate {
         'tools/Validate-Windo.ps1',
         'tools/Test-WindoReservedVariables.ps1',
         'tools/Invoke-PrometheusLocalValidation.ps1',
-        'tools/Invoke-PrometheusLocalStage.ps1'
+        'tools/Invoke-PrometheusLocalStage.ps1',
+        'tools/Prometheus-RepairGeneratedArtifacts.ps1'
     )
 
     foreach ($relative in $files) {
@@ -95,6 +96,27 @@ function Test-PrometheusParseGate {
     Write-Host 'PASS: release entry points and local Prometheus tools parse.' -ForegroundColor Green
 }
 
+function Get-PrometheusRunnerChildExecPayload {
+    param([Parameter(Mandatory = $true)][string]$Text)
+
+    $anchor = '$cs = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('
+    $anchorIndex = $Text.IndexOf($anchor, [StringComparison]::OrdinalIgnoreCase)
+    if ($anchorIndex -lt 0) { throw 'Standalone runner ChildExec assignment anchor could not be located.' }
+    $secondAnchor = $Text.IndexOf($anchor, $anchorIndex + $anchor.Length, [StringComparison]::OrdinalIgnoreCase)
+    if ($secondAnchor -ge 0) { throw 'Standalone runner contains multiple ChildExec assignment anchors.' }
+
+    $openQuote = $Text.IndexOf([char]39, $anchorIndex + $anchor.Length)
+    if ($openQuote -lt 0) { throw 'Standalone runner ChildExec opening quote could not be located.' }
+    $closeQuote = $Text.IndexOf([char]39, $openQuote + 1)
+    if ($closeQuote -lt 0) { throw 'Standalone runner ChildExec closing quote could not be located.' }
+
+    $payload = ($Text.Substring($openQuote + 1, $closeQuote - $openQuote - 1) -replace '\s', '')
+    if ($payload.Length -lt 10000 -or $payload -match '[^A-Za-z0-9+/=]') {
+        throw 'Standalone runner ChildExec payload is malformed.'
+    }
+    return $payload
+}
+
 function Test-PrometheusChildExecParity {
     $sourcePath = Join-Path $RepoRoot 'src\windo\snippets\ChildExec.cs'
     $payloadPath = Join-Path $RepoRoot 'tools\ChildExec.b64.txt'
@@ -113,11 +135,7 @@ function Test-PrometheusChildExecParity {
     }
 
     $runnerText = [System.IO.File]::ReadAllText($runnerPath)
-    $runnerPayloadMatch = [regex]::Match($runnerText, "(?s)\[Convert\]::FromBase64String\(\s*'(?<b64>[A-Za-z0-9+/=\r\n]+)'\s*\)")
-    if (-not $runnerPayloadMatch.Success) {
-        throw 'Standalone runner ChildExec payload could not be located.'
-    }
-    $runnerPayload = ($runnerPayloadMatch.Groups['b64'].Value -replace '\s', '')
+    $runnerPayload = Get-PrometheusRunnerChildExecPayload -Text $runnerText
     if ($runnerPayload -cne $payload) {
         throw 'Standalone runner embedded ChildExec payload differs from tools/ChildExec.b64.txt.'
     }
