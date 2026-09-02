@@ -2,10 +2,10 @@
 
 Use this block in the main README and keep it identical wherever the one-liner is repeated.
 
-**Install or update** (downloads the current installer from the canonical `Exodus` branch, runs it from a temp file, then deletes the temp file):
+**Install or update** (downloads the current installer from the canonical `jonex/windo-production-ready` branch, runs it from a temp file, then deletes the temp file):
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1')
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/jonex/windo-production-ready/bootstrap.ps1')
 ```
 
 Notes:
@@ -14,7 +14,7 @@ Notes:
 - Run bootstrap from a standard (non-elevated), interactive shell; installer flows confirm before launch and perform the required UAC handoff.
 - The one-liner returns control to the caller and sets `$global:WINDO_EXIT_CODE`. Direct `pwsh -File bootstrap.ps1` execution returns the same native exit code.
 - Set `WINDO_SESSION_AUDIT=1` to include elevated handoff correlation metadata in `windo_history.enc` entries.
-- Source contract is `Exodus` by default, with optional overrides via `WINDO_TRACKING_BRANCH` or `WINDO_RELEASE_COMMIT`.
+- Source contract is `jonex/windo-production-ready` by default, with optional overrides via `WINDO_TRACKING_BRANCH` or `WINDO_RELEASE_COMMIT`.
 - `windo install-latest` and `windo upgrade` share this same source and checksum contract, including strict-mode fail-fast behavior with `WINDO_STRICT_INSTALLER_VERIFICATION=1`.
 - In interactive sessions, `windo install-latest / windo upgrade` prompts before launch (`Run the installer now? ... [y/N]`) and then performs a one-shot elevated handoff attempt (UAC) when confirmed.
 - If elevation is blocked, retry from a normal shell, load the existing profile when applicable, and approve UAC:

@@ -21,7 +21,7 @@ if ($installerVersion -cne $Version) {
 
 # Refuse to freeze unverified bytes. This validates every shipped script, all
 # declared release hashes, the manifest signature, and the embedded trust root.
-& (Join-Path $PSScriptRoot "Validate-Windo.ps1")
+& (Join-Path $PSScriptRoot "Validate-Windo.ps1") -SkipCurrentSnapshot
 if (-not $?) { throw "Root release validation failed; snapshot was not created." }
 
 if ((Test-Path -LiteralPath $destRoot) -and -not $Force) {

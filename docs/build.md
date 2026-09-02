@@ -33,9 +33,9 @@ To reduce monolithic edit risk without changing the install contract:
 
 No build step is required for end users.
 
-## Branch `Exodus`, checksums, and embedded runner
+## Branch `jonex/windo-production-ready`, checksums, and embedded runner
 
-- **Canonical raw URLs** for bootstrap and `windo upgrade` use the repository branch named **`Exodus`** (GitHub default). Legacy env values `Genesis`, `Genisis`, and `Prometheus` normalize to `Exodus`.
+- **Canonical raw URLs** for bootstrap and `windo upgrade` use **`jonex/windo-production-ready`**. Legacy env values `Genesis`, `Genisis`, and `Prometheus` normalize to this production-ready branch.
 - After changing **`windo_install.ps1`** or **`windo_uninstall.ps1`**, regenerate the deterministic multi-hash manifest at **[`checksums/installer.sha256`](../checksums/installer.sha256)**. `.gitattributes` pins release artifacts to LF, and the helper canonicalizes an existing CRLF worktree to the exact LF byte domain GitHub publishes:
   `./tools/Sync-InstallerChecksum.ps1`
 - Sign the final manifest with the offline/private release key, then verify it with the committed public key. The signer defaults to `RSA-PKCS1-SHA256` so the same signature verifies on Windows PowerShell 5.1 and PowerShell 7; `RSA-PSS-SHA256` is an explicit CNG-capable-estate opt-in:

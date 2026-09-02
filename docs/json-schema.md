@@ -970,7 +970,7 @@ Integration repair is current-user scoped. Expected artifacts include Start Menu
 | `completionPolicy` | object | Effective tab-completion policy: `mode`, `source`, `environmentValue`, `preferenceValue`, `prefsFile`, `description`. |
 | `outputPolicy` | object | **v4.0.1+** Effective compact/quiet/legacy result-output policy. |
 | `motionPolicy` | object | **v4.2.0+** Effective terminal motion policy when present in newer profiles. |
-| `extrasIndexUrl` | string | **v3.2.1+** Resolved extras catalog URL (**`WINDO_EXTRAS_INDEX_URL`** or canonical **`Exodus`**-sourced `extras/index.json`) |
+| `extrasIndexUrl` | string | **v3.2.1+** Resolved extras catalog URL (**`WINDO_EXTRAS_INDEX_URL`** or canonical **`jonex/windo-production-ready`**-sourced `extras/index.json`) |
 | `exitCode` | number | **0** |
 
 The **`settings`** array is the machine-readable source of truth for env-driven behavior; **`extrasIndexUrl`** duplicates the resolved URL for quick automation without parsing **`effectiveNote`** on the **`WINDO_EXTRAS_INDEX_URL`** row.

@@ -12,7 +12,7 @@ Contributions are welcome.
 
 ## Default branch name
 
-The public default branch is **`Exodus`**. Raw GitHub URLs and checksum manifests target it; update branch overrides through migration-safe procedures instead of casual renames. The V8.4 release codename *Prometheus Contract* is not a Git branch name.
+The production-ready release branch is **`jonex/windo-production-ready`**. Raw GitHub URLs and checksum manifests target it; update branch overrides through migration-safe procedures instead of casual renames. The V8.4 release codename *Prometheus Contract* is not a Git branch name.
 
 ## Workflow
 

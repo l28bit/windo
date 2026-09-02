@@ -438,12 +438,16 @@ try {
             $nestedSleepCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes("Start-Sleep -Seconds 120"))
             $quotedChildHost = $childExecHost.Replace("'", "''")
             $descendantScript = "`$p = Start-Process -FilePath '$quotedChildHost' -ArgumentList '-NoProfile -NonInteractive -EncodedCommand $nestedSleepCommand' -PassThru; Set-Content -LiteralPath (Join-Path (Get-Location).Path 'descendant.pid') -Value `$p.Id; Start-Sleep -Seconds 120"
+            # Process startup through WSL can exceed five seconds under host load.
+            # Keep the production Windows timeout probe strict while giving the
+            # cross-platform fixture enough time to create its descendant marker.
+            $processTreeTimeoutMs = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 5000 } else { 15000 }
             $timeoutStarted = [Diagnostics.Stopwatch]::StartNew()
             [WindoRunner.ChildExec]::RunPowerShell(
                 $childExecHost,
                 $descendantScript,
                 $childExecWorkingDir,
-                5000,
+                $processTreeTimeoutMs,
                 131072,
                 [ref]$childStdOut,
                 [ref]$childStdErr,
@@ -453,7 +457,7 @@ try {
             )
             $timeoutStarted.Stop()
             Assert-Equal $childTimedOut $true "ChildExec reports a timed-out child"
-            Assert-Equal ($timeoutStarted.ElapsedMilliseconds -lt 25000) $true "ChildExec timeout and stream drain remain bounded"
+            Assert-Equal ($timeoutStarted.ElapsedMilliseconds -lt ($processTreeTimeoutMs + 20000)) $true "ChildExec timeout and stream drain remain bounded"
             $descendantPidPath = Join-Path $childExecWorkingDir "descendant.pid"
             Assert-Equal (Test-Path -LiteralPath $descendantPidPath) $true "process-tree timeout fixture recorded its descendant"
             if (Test-Path -LiteralPath $descendantPidPath) {
@@ -1532,17 +1536,17 @@ if ($bootstrapBoolFn -and $bootstrapSpinnerFn -and $bootstrapReleaseMetadataFn -
         $env:CI = "1"
         Assert-State "bootstrap spinner disabled in CI" $false (Test-WindoBootstrapSpinnerEnabled) "spinner is disabled under CI"
 
-        $metaPayload = "releaseCommit = 0123456789abcdef0123456789abcdef01234567`r`nreleaseBranch = Exodus"
+        $metaPayload = "releaseCommit = 0123456789abcdef0123456789abcdef01234567`r`nreleaseBranch = jonex/windo-production-ready"
         $meta = Get-WindoBootstrapReleaseMetadata $metaPayload
         Assert-State "bootstrap release metadata parses commit" "0123456789abcdef0123456789abcdef01234567" $meta.releaseCommit "bootstrap release metadata extracts commit"
-        Assert-State "bootstrap release metadata parses branch" "Exodus" $meta.releaseBranch "bootstrap release metadata extracts branch"
+        Assert-State "bootstrap release metadata parses branch" "jonex/windo-production-ready" $meta.releaseBranch "bootstrap release metadata extracts a slash-delimited branch"
         $parsed = Get-WindoBootstrapParsedChecksumPayload $metaPayload
         Assert-State "bootstrap parsed payload stores normalized commit" "0123456789abcdef0123456789abcdef01234567" $parsed.releaseCommit "parsed payload captures release commit"
-        Assert-State "bootstrap parsed payload stores branch" "Exodus" $parsed.releaseBranch "parsed payload captures release branch"
-        $stateMismatch = Get-WindoBootstrapReleaseMetadataState -ReleaseRef "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" -ReleaseCommit "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" -ReleaseCommitRaw "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" -ReleaseBranch "Exodus"
+        Assert-State "bootstrap parsed payload stores branch" "jonex/windo-production-ready" $parsed.releaseBranch "parsed payload captures release branch"
+        $stateMismatch = Get-WindoBootstrapReleaseMetadataState -ReleaseRef "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" -ReleaseCommit "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" -ReleaseCommitRaw "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" -ReleaseBranch "jonex/windo-production-ready"
         Assert-State "bootstrap metadata state detects mismatch" $true $stateMismatch.CompatibilityMode "metadata mismatch switches to compatibility mode"
         Assert-State "bootstrap mismatch includes detail" $true (-not [string]::IsNullOrWhiteSpace($stateMismatch.Detail)) "metadata mismatch exposes detail"
-        $stateBranch = Get-WindoBootstrapReleaseMetadataState -ReleaseRef "Exodus" -ReleaseCommit $null -ReleaseCommitRaw $null -ReleaseBranch $null
+        $stateBranch = Get-WindoBootstrapReleaseMetadataState -ReleaseRef "jonex/windo-production-ready" -ReleaseCommit $null -ReleaseCommitRaw $null -ReleaseBranch $null
         Assert-State "bootstrap missing branch is compatibility mode" $true $stateBranch.CompatibilityMode "missing branch metadata is compatibility mode"
 
         Set-StrictMode -Version Latest
@@ -1963,8 +1967,8 @@ try {
 }
 
 Assert-Equal ($installerSource.Contains('$WindoVersion = "8.5.9"') -eq $true) $true "installer version is 8.5.9"
-Assert-Equal ($installerSource.Contains('function _windo_release_branch') -and $installerSource.Contains("'prometheus'") -and $installerSource.Contains('"Exodus"')) $true "installer normalizes legacy Prometheus alias to Exodus"
-Assert-Equal ($installerSource.Contains('publishedContractBranch = "Exodus"') -eq $true) $true "release contract published branch is Exodus"
+Assert-Equal ($installerSource.Contains('function _windo_release_branch') -and $installerSource.Contains("'prometheus'") -and $installerSource.Contains('"jonex/windo-production-ready"')) $true "installer normalizes legacy Prometheus alias to the production-ready branch"
+Assert-Equal ($installerSource.Contains('publishedContractBranch = "jonex/windo-production-ready"') -eq $true) $true "release contract publishes the production-ready branch"
 Assert-Equal ($installerSource.Contains('function _windo_release_contract') -eq $true) $true "installer exposes release contract helper"
 Assert-Equal ($installerSource.Contains('function _windo_contract_posture') -eq $true) $true "installer exposes contract posture helper"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "contract")') -eq $true) $true "installer handles contract command"
@@ -2902,8 +2906,13 @@ Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "launch"[\s\S
 Assert-Pattern $installerSource '_emit_json "wsl" \@\{\s*command = "path"[\s\S]*direction = \$direction[\s\S]*path = \$targetPath[\s\S]*converted = \$converted' "wsl path emits conversion payload"
 Assert-Equal ($installerSource.Contains("auditIncludedInExcerpt") -eq $true) $true "installer export json includes auditIncludedInExcerpt"
 Assert-Equal ($buildRaw.Contains("Sync-VersionSnapshot.ps1") -eq $true) $true "build.md documents Sync-VersionSnapshot.ps1"
-Assert-Equal ((Get-Content -Path (Join-Path $root "tools\Sync-VersionSnapshot.ps1") -Raw).Contains('docs\v5-roadmap.md')) $true "snapshot tool preserves the v5 roadmap document"
-Assert-Equal ($installerSource.Contains("native-companion") -or (Get-Content -Path (Join-Path $root "tools\Sync-VersionSnapshot.ps1") -Raw).Contains("native-companion")) $true "snapshot tool preserves native companion scaffold"
+$snapshotToolSource = Get-Content -Path (Join-Path $root "tools\Sync-VersionSnapshot.ps1") -Raw
+$validatorToolSource = Get-Content -Path (Join-Path $root "tools\Validate-Windo.ps1") -Raw
+Assert-Equal ($snapshotToolSource.Contains('docs\v5-roadmap.md')) $true "snapshot tool preserves the v5 roadmap document"
+Assert-Equal ($installerSource.Contains("native-companion") -or $snapshotToolSource.Contains("native-companion")) $true "snapshot tool preserves native companion scaffold"
+Assert-Equal ($snapshotToolSource.Contains('Validate-Windo.ps1") -SkipCurrentSnapshot')) $true "snapshot refresh validates root artifacts without being blocked by the snapshot it replaces"
+Assert-Equal ($validatorToolSource.Contains('[switch]$SkipCurrentSnapshot')) $true "release validator exposes a root-only snapshot refresh gate"
+Assert-Equal ($validatorToolSource.Contains('$RequireCurrentSnapshot -and $SkipCurrentSnapshot')) $true "release validator rejects contradictory snapshot modes"
 $roadmapDoc = Join-Path $root "docs\v5-roadmap.md"
 $roadmapRaw = Get-Content -Path $roadmapDoc -Raw
 Assert-Equal ($roadmapRaw.Contains("windo trust") -eq $true) $true "v5 roadmap documents trust command"

@@ -76,11 +76,12 @@ function Test-WindoBootstrapProcessElevated {
 
 function Get-WindoBootstrapReleaseBranch {
     $trackingBranch = Get-WindoBootstrapEnvValue -Name "WINDO_TRACKING_BRANCH"
-    $raw = if (Test-WindoBootstrapHasText $trackingBranch) { $trackingBranch } else { "Exodus" }
+    $defaultBranch = "jonex/windo-production-ready"
+    $raw = if (Test-WindoBootstrapHasText $trackingBranch) { $trackingBranch } else { $defaultBranch }
     $trimmed = $raw.Trim()
     $lower = $trimmed.ToLowerInvariant()
-    if ($lower -in @('genesis', 'genisis', 'prometheus')) { return "Exodus" }
-    if ($trimmed -notmatch '^[A-Za-z0-9._-]{1,64}$') { return "Exodus" }
+    if ($lower -in @('genesis', 'genisis', 'prometheus')) { return $defaultBranch }
+    if ($trimmed.Length -gt 128 -or $trimmed -notmatch '^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$' -or $trimmed.Contains('..') -or $trimmed.EndsWith('.lock')) { return $defaultBranch }
     return $trimmed
 }
 $script:_windo_bootstrap_release_ref = $null
@@ -97,7 +98,8 @@ function Get-WindoBootstrapReleaseRef {
     if ($null -ne $script:_windo_bootstrap_release_ref) { return $script:_windo_bootstrap_release_ref }
 
     $branch = Get-WindoBootstrapReleaseBranch
-    $uri = "https://api.github.com/repos/l28bit/windo/commits/$branch"
+    $encodedBranch = [uri]::EscapeDataString($branch)
+    $uri = "https://api.github.com/repos/l28bit/windo/commits/$encodedBranch"
     $resolutionError = $null
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
@@ -318,7 +320,7 @@ function Get-WindoBootstrapReleaseMetadata([string]$Text) {
     $releaseBranchRaw = Get-WindoBootstrapManifestValue -Text $Text -Key "releaseBranch"
 
     $normalizedCommit = if ($releaseCommitRaw -match '^[a-fA-F0-9]{40,64}$') { $releaseCommitRaw.ToLowerInvariant() } else { $null }
-    $normalizedBranch = if ($releaseBranchRaw -match '^[A-Za-z0-9._-]{1,64}$') { $releaseBranchRaw } else { $null }
+    $normalizedBranch = if ($releaseBranchRaw -match '^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$' -and $releaseBranchRaw.Length -le 128 -and -not $releaseBranchRaw.Contains('..') -and -not $releaseBranchRaw.EndsWith('.lock')) { $releaseBranchRaw } else { $null }
 
     return [pscustomobject]@{
         releaseCommit = $normalizedCommit

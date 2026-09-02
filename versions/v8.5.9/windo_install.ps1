@@ -1,4 +1,4 @@
-<# =====================================================================
+﻿<# =====================================================================
 WINDO V8.5 Installer
 Run once in an elevated PowerShell session.
 
@@ -129,13 +129,14 @@ function Get-WindoMissingScheduledTaskCommands {
 }
 
 function Get-WindoRuntimeProfile {
-    # $IsWindows exists only in PowerShell 6+. Resolve it without referencing an
-    # undefined variable so Windows PowerShell 5.1 remains valid under strict mode.
-    $isWindows = $false
-    try { $isWindows = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT } catch { }
+    # $IsWindows exists only in PowerShell 6+ and is read-only there. Resolve
+    # the platform into a WINDO-owned variable so PowerShell 5.1 remains valid
+    # under strict mode without colliding with the automatic variable in 7+.
+    $windoIsWindows = $false
+    try { $windoIsWindows = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT } catch { }
     try {
         $isWindowsVariable = Get-Variable -Name IsWindows -ErrorAction SilentlyContinue
-        if ($null -ne $isWindowsVariable) { $isWindows = [bool]$isWindowsVariable.Value }
+        if ($null -ne $isWindowsVariable) { $windoIsWindows = [bool]$isWindowsVariable.Value }
     } catch { }
 
     $osVersion = $null
@@ -162,7 +163,7 @@ function Get-WindoRuntimeProfile {
     $missingScheduledTaskCommands = @(Get-WindoMissingScheduledTaskCommands)
 
     $windowsFormsDrawingAvailable = $false
-    if ($isWindows) {
+    if ($windoIsWindows) {
         try {
             Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop | Out-Null
             Add-Type -AssemblyName System.Drawing -ErrorAction Stop | Out-Null
@@ -173,7 +174,7 @@ function Get-WindoRuntimeProfile {
     }
 
     return [pscustomobject]@{
-        IsWindows = [bool]$isWindows
+        IsWindows = [bool]$windoIsWindows
         IsWindows10OrLater = if ($null -ne $osVersion) { $osVersion.Major -ge 10 } else { $false }
         IsPowerShellSupported = if ($null -ne $psVersion) { $psVersion -ge [version]'5.1' } else { $false }
         PSVersion = if ($null -ne $psVersion) { [string]$psVersion } else { "unknown" }
@@ -7612,11 +7613,12 @@ function _windo_draw_ascii_startup_frame {
 
     function _windo_release_branch {
         $trackingBranch = _windo_get_env_value -Name "WINDO_TRACKING_BRANCH"
-        $raw = if (_windo_has_text $trackingBranch) { $trackingBranch } else { "Exodus" }
+        $defaultBranch = "jonex/windo-production-ready"
+        $raw = if (_windo_has_text $trackingBranch) { $trackingBranch } else { $defaultBranch }
         $trimmed = $raw.Trim()
         $lower = $trimmed.ToLowerInvariant()
-        if ($lower -in @('genesis', 'genisis', 'prometheus')) { return "Exodus" }
-        if ($trimmed -notmatch '^[A-Za-z0-9._-]{1,64}$') { return "Exodus" }
+        if ($lower -in @('genesis', 'genisis', 'prometheus')) { return $defaultBranch }
+        if ($trimmed.Length -gt 128 -or $trimmed -notmatch '^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$' -or $trimmed.Contains('..') -or $trimmed.EndsWith('.lock')) { return $defaultBranch }
         return $trimmed
     }
 
@@ -7634,8 +7636,8 @@ function _windo_draw_ascii_startup_frame {
             releaseBranch = (_windo_release_branch)
             schemaVersion = "3.0"
             installerBranding = ("WINDO {0} Installer" -f $edition)
-            publishedContractBranch = "Exodus"
-            developmentBranchNote = "GitHub default branch is Exodus. Legacy aliases Genesis, Genisis, and Prometheus normalize to Exodus."
+            publishedContractBranch = "jonex/windo-production-ready"
+            developmentBranchNote = "The production-ready release branch is jonex/windo-production-ready. Legacy aliases Genesis, Genisis, and Prometheus normalize to it."
         }
     }
 
@@ -7719,7 +7721,8 @@ function _windo_draw_ascii_startup_frame {
 
         $branch = _windo_release_branch
         try {
-            $uri = "https://api.github.com/repos/l28bit/windo/commits/$branch"
+            $encodedBranch = [uri]::EscapeDataString($branch)
+            $uri = "https://api.github.com/repos/l28bit/windo/commits/$encodedBranch"
             $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
             $obj = $resp.Content | ConvertFrom-Json -ErrorAction Stop
             if ($obj.sha) {
@@ -8046,7 +8049,7 @@ function _windo_draw_ascii_startup_frame {
         $releaseBranchRaw = _windo_parse_manifest_value $Text "releaseBranch"
 
         $normalizedCommit = if ($releaseCommitRaw -match '^[a-fA-F0-9]{40}$') { $releaseCommitRaw.ToLowerInvariant() } else { $null }
-        $normalizedBranch = if ($releaseBranchRaw -match '^[A-Za-z0-9._-]{1,64}$') { $releaseBranchRaw } else { $null }
+        $normalizedBranch = if ($releaseBranchRaw -match '^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$' -and $releaseBranchRaw.Length -le 128 -and -not $releaseBranchRaw.Contains('..') -and -not $releaseBranchRaw.EndsWith('.lock')) { $releaseBranchRaw } else { $null }
 
         return [pscustomobject]@{
             releaseCommit = $normalizedCommit
@@ -8713,7 +8716,7 @@ function _windo_draw_ascii_startup_frame {
             requested = @($wanted)
             actions = @($unique)
             actionCount = [int]$unique.Count
-            rescueCommand = "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1')"
+            rescueCommand = "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/jonex/windo-production-ready/bootstrap.ps1')"
             exitCode = $(if ($unique.Count -gt 0) { 3 } elseif ($failed.Count -gt 0) { 2 } else { 0 })
         }
     }
@@ -18773,4 +18776,3 @@ Write-Host "    windo dashboard --html" -ForegroundColor Yellow
 Write-Host "    windo version" -ForegroundColor Yellow
 Write-Host ""
 Write-WindoInstallerFinale
-

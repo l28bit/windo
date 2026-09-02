@@ -13,14 +13,14 @@ Experienced operators treat commands as intent. Elevation should not be accident
 
 **intent → choose elevation → execute with authority**
 
-The default GitHub branch for raw URLs is **`Exodus`** (the repository default on GitHub) unless overridden by `WINDO_TRACKING_BRANCH`.
+The production-ready GitHub branch for raw URLs is **`jonex/windo-production-ready`** unless overridden by `WINDO_TRACKING_BRANCH`.
 
-**Version story:** the live installer reports **`8.5.9`** with **`V8.5`** branding. Bootstrap, upgrade, checksum verification, and extras index downloads all target the **`Exodus`** branch. The V8.5.7 release **codename** was *Midflight Fuel* (curated preflight healers); V8.4 was *Prometheus Contract*. Use `windo contract` or `windo version --contract` to inspect the effective contract on any machine.
+**Version story:** the live installer reports **`8.5.9`** with **`V8.5`** branding. Bootstrap, upgrade, checksum verification, and extras index downloads all target the **`jonex/windo-production-ready`** branch. The V8.5.7 release **codename** was *Midflight Fuel* (curated preflight healers); V8.4 was *Prometheus Contract*. Use `windo contract` or `windo version --contract` to inspect the effective contract on any machine.
 
 Release source contract:
 - `WINDO_RELEASE_COMMIT` (optional valid 40-hex commit) has highest priority.
-- `WINDO_TRACKING_BRANCH` (default `Exodus`) is the fallback branch.
-- invalid overrides and legacy aliases (`Genesis`, `Genisis`, `Prometheus`) fall back to **`Exodus`** automatically.
+- `WINDO_TRACKING_BRANCH` (default `jonex/windo-production-ready`) is the fallback branch.
+- invalid overrides and legacy aliases (`Genesis`, `Genisis`, `Prometheus`) fall back to **`jonex/windo-production-ready`** automatically.
 
 ---
 
@@ -44,7 +44,7 @@ Release source contract:
 
 ## What's new in WINDO V8.4
 
-- **Single version contract** — `windo version --contract` shows semver (`8.4.0`), edition (`V8.4`), branch (`Exodus` by default), and JSON schema version in one place.
+- **Single version contract** — `windo version --contract` shows semver (`8.4.0`), edition (`V8.4`), branch (`jonex/windo-production-ready` by default), and JSON schema version in one place.
 - **V8.4 command surface and branding** — refreshed installer identity (`WINDO 8.4.0 V8.4`) and aligned README guidance for concise operator workflows.
 - **Sudo-like aliases** — `windo do`, `windo recdo`, `windo upd`, `windo health`, `windo check`, and `windo status` map to the underlying WINDO verbs without weakening elevation gates.
 - **Network posture in one command** — `windo net-scan` now covers `status`, `resolve`, `arp`, and `ping` with clear local-only behavior and bounded probing defaults.
@@ -75,10 +75,10 @@ WINDO does **not** bypass Windows security boundaries; it uses a controlled elev
 
 ## Install / Update
 
-- **Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1), resolves one release commit, saves `windo_install.ps1` to a **temp file**, and requires an exact match against that commit's published checksum. If the manifest endpoint is temporarily unavailable, the commit-pinned Git blob identity is the only automatic fallback. The **full installer is not** piped through `Invoke-Expression`. The temp file is removed afterward.
+- **Recommended (GitHub):** downloads [`bootstrap.ps1`](https://raw.githubusercontent.com/l28bit/windo/jonex/windo-production-ready/bootstrap.ps1), resolves one release commit, saves `windo_install.ps1` to a **temp file**, and requires an exact match against that commit's published checksum. If the manifest endpoint is temporarily unavailable, the commit-pinned Git blob identity is the only automatic fallback. The **full installer is not** piped through `Invoke-Expression`. The temp file is removed afterward.
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1')
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/jonex/windo-production-ready/bootstrap.ps1')
 ```
 
 Use a **standard (non-elevated), interactive** session for bootstrap handoff and approve the UAC prompt. Automation flags skip confirmation; they do not weaken checksum validation or the required elevation handoff. Headless automation should fetch and verify the release in an unprivileged stage, then run the trusted local installer from its controlled elevated stage.
@@ -112,7 +112,7 @@ windo self-update
   - prompt before launch when interactive,
   - skip confirmation in non-interactive mode (`--non-interactive` / `CI` / `WINDO_INSTALL_NONINTERACTIVE` / `WINDO_BOOTSTRAP_FORCE_INSTALL`).
   - `--non-interactive` still requires `--force` for `install-latest`/`upgrade`; `CI` and bootstrap env flags auto-skip when set.
-- source contract for prompts and checksum checks comes from the canonical `Exodus` branch artifacts.
+- source contract for prompts and checksum checks comes from the canonical `jonex/windo-production-ready` branch artifacts.
   - `windo self-update` follows the same interactive contract and branch/source checks as install flows.
   - prompts before launching installer repair when required in interactive sessions,
   - skips the repair prompt in non-interactive mode and returns a repair recommendation instead.
@@ -151,7 +151,7 @@ If an old/foreign installer prompt appears:
 - set `WINDO_INSTALL_NONINTERACTIVE=1` for automation reruns (where prompts are intentionally suppressed),
 - sanitize unexpected host prompts by clearing `SUDO_PROMPT` (`Remove-Item Env:SUDO_PROMPT`).
 
-**Remove WINDO completely:** run **`windo uninstall`** (or **`windo remove`**) from a normal shell. WINDO prefers the bundled local **`%USERPROFILE%\.pwsh_secure\windo_uninstall.ps1`** and starts it elevated with UAC; if the local copy is missing it falls back to the published raw uninstaller from the configured raw branch (default `Exodus`). After your profile is loaded you can also run **`windo-uninstall`** (alias: **`windoremove`**) directly. Optional **`-KeepSnapshots`** / **`--keep-snapshots`** keeps `%USERPROFILE%\Documents\windo\`. The uninstaller removes WINDO marker blocks from the known **current-user** PowerShell profiles for **pwsh** and **Windows PowerShell**.
+**Remove WINDO completely:** run **`windo uninstall`** (or **`windo remove`**) from a normal shell. WINDO prefers the bundled local **`%USERPROFILE%\.pwsh_secure\windo_uninstall.ps1`** and starts it elevated with UAC; if the local copy is missing it falls back to the published raw uninstaller from the configured raw branch (default `jonex/windo-production-ready`). After your profile is loaded you can also run **`windo-uninstall`** (alias: **`windoremove`**) directly. Optional **`-KeepSnapshots`** / **`--keep-snapshots`** keeps `%USERPROFILE%\Documents\windo\`. The uninstaller removes WINDO marker blocks from the known **current-user** PowerShell profiles for **pwsh** and **Windows PowerShell**.
 
 **Offline / clone:** run the installer from disk:
 
@@ -240,7 +240,7 @@ For a concise terminal workflow that covers install → upgrade → self-update 
 | `windo stats [--since YYYY-MM-DD] [--last-days N]` | Audit log summary; optional filters on decrypted entry **`Timestamp`** (still scans full log to decrypt). **`--last-days`** must be a **positive** integer; **`--since`** and **`--last-days`** are mutually exclusive. |
 | `windo profile [status\|doctor\|repair] [--prompt-init] [--all] [--json]` | Show known profile paths, WINDO block state, and prompt-init issues. **v4.2.0+** can guard oh-my-posh init so missing cached prompt scripts do not break profile load. |
 | `windo cleanup [-w] [--runner-dry-run\|--runner-apply] [--older-than N]` | Back up log to `.pwsh_secure` and clear active log. **v8.5.6+** runner artifact cleanup is dry-run unless `--runner-apply` is used; only known WINDO request/result/temp patterns under `.pwsh_secure` are eligible. |
-| `windo install-latest [--force] [--non-interactive] [--timeout <seconds|ms>] [--preserve-env [ALL\|name1,name2]]` | **v3.1.0+** Download and run the latest `windo_install.ps1` from the configured tracking source (default `Exodus`). **v3.1.1+:** download only in a **non-elevated** shell; **confirm** after verify, then run installer ( **`--force`** / env for CI). |
+| `windo install-latest [--force] [--non-interactive] [--timeout <seconds|ms>] [--preserve-env [ALL\|name1,name2]]` | **v3.1.0+** Download and run the latest `windo_install.ps1` from the configured tracking source (default `jonex/windo-production-ready`). **v3.1.1+:** download only in a **non-elevated** shell; **confirm** after verify, then run installer ( **`--force`** / env for CI). |
 | `windo upgrade` | Alias of **`install-latest`**. |
 | `windo theme [classic \| modern \| auto]` | **v3.1.0+** Choose **CLI JSON** “look” only: **`classic`** = `schemaVersion` **2.6** without **`meta`**; **`modern`** = **3.0** + **`meta`**; **`auto`** = follow the embedded profile. Runner, tasks, and audit **do not** change—see [`docs/json-schema.md`](docs/json-schema.md). |
 | `windo modules list \| enable \| disable \| doctor \| verify` | **v3.2.0+** Optional modules under **`Documents\windo\modules`** (see **`windo help modules`**); enabled ids persist in **`windo_prefs.json`**. |
@@ -417,7 +417,7 @@ Optional **modules** and **extras** (v3.2+): [`docs/modules-and-extras.md`](docs
 | `WINDO_RUNNER_TIMEOUT_MS` | Max wait for the elevated child process (default **7200000** ms = 2 h; max **86400000**). |
 | `WINDO_RUNNER_MAX_OUTPUT_BYTES` | Approximate cap on captured stdout+stderr (default **4194304**; split per stream in the runner). |
 | `WINDO_MAX_COMMAND_CHARS` | Max length of the validated display and encoded PowerShell execution commands (default **8191**). |
-| `WINDO_TRACKING_BRANCH` | Override tracking branch used for installer source checks (default `Exodus`). |
+| `WINDO_TRACKING_BRANCH` | Override tracking branch used for installer source checks (default `jonex/windo-production-ready`). |
 | `WINDO_RELEASE_COMMIT` | Optional pinned 40-hex commit hash for release artifact lookups (`bootstrap.ps1`, `windo_install.ps1`). |
 | `WINDO_SKIP_INSTALLER_SHA256` | Set to skip comparing downloaded `windo_install.ps1` to [`checksums/installer.sha256`](checksums/installer.sha256) on the configured branch (`bootstrap.ps1`, **`windo install-latest`** / **`upgrade`**). |
 | `WINDO_STRICT_INSTALLER_VERIFICATION` | Set to `1` for strict installer hash checking. |

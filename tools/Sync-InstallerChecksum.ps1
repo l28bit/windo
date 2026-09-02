@@ -11,16 +11,16 @@ function Get-WindoReleaseBranch {
     param([string]$Branch)
 
     $rawBranch = if ([string]::IsNullOrWhiteSpace($Branch)) {
-        if ([string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { "Exodus" } else { [string]$env:WINDO_TRACKING_BRANCH }
+        if ([string]::IsNullOrWhiteSpace($env:WINDO_TRACKING_BRANCH)) { "jonex/windo-production-ready" } else { [string]$env:WINDO_TRACKING_BRANCH }
     } else {
         [string]$Branch.Trim()
     }
     $resolved = $rawBranch.Trim()
-    if ($resolved -notmatch '^[A-Za-z0-9._-]{1,64}$') {
-        return "Exodus"
+    if ($resolved.Length -gt 128 -or $resolved -notmatch '^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$' -or $resolved.Contains('..') -or $resolved.EndsWith('.lock')) {
+        return "jonex/windo-production-ready"
     }
     $lower = $resolved.ToLowerInvariant()
-    if ($lower -in @('genesis', 'genisis', 'prometheus')) { return "Exodus" }
+    if ($lower -in @('genesis', 'genisis', 'prometheus')) { return "jonex/windo-production-ready" }
     return $resolved
 }
 
@@ -51,7 +51,7 @@ function Resolve-WindoReleaseMetadata {
     $releaseBranch = Get-WindoReleaseBranch $rawBranch
 
     if ([string]::IsNullOrWhiteSpace($releaseBranch)) {
-        $releaseBranch = "Exodus"
+        $releaseBranch = "jonex/windo-production-ready"
     }
 
     $commitWasProvided = -not [string]::IsNullOrWhiteSpace($Commit)

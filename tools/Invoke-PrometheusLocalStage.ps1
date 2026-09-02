@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$ExpectedBranch = 'repair/prometheus-final'
+$ExpectedBranch = 'jonex/windo-production-ready'
 
 function Invoke-Git {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
@@ -61,7 +61,7 @@ if (-not [string]::IsNullOrWhiteSpace($dirty)) {
 }
 
 Write-Host 'Refreshing repair, donor, and release refs...' -ForegroundColor Cyan
-Invoke-Git -Arguments @('fetch', 'origin', 'main', $ExpectedBranch, 'Exodus')
+Invoke-Git -Arguments @('fetch', 'origin', 'main', $ExpectedBranch)
 
 $localHead = Get-GitText -Arguments @('rev-parse', 'HEAD')
 $remoteHead = Get-GitText -Arguments @('rev-parse', ('origin/{0}' -f $ExpectedBranch))
@@ -92,7 +92,7 @@ foreach ($path in $donorPaths) { Write-Host ('  donor main -> {0}' -f $path) }
 Write-Host '  use branch-owned deterministic artifact generator'
 Write-Host '  repair PowerShell 7 $IsWindows collision'
 Write-Host '  regenerate ChildExec Base64 + runner + installer embedding'
-Write-Host '  refresh unsigned checksum manifest for Exodus'
+Write-Host '  refresh unsigned checksum manifest for jonex/windo-production-ready'
 Write-Host '  run dual-host local pre-sign gate (Windows PowerShell 5.1 + PowerShell 7)'
 Write-Host '  leave every resulting change uncommitted and unstaged for human review'
 Write-Host '  automatically roll back to clean HEAD if any staging gate fails'
@@ -139,7 +139,7 @@ try {
     if (-not (Test-Path -LiteralPath $syncChecksum -PathType Leaf)) { throw "Missing checksum synchronizer: $syncChecksum" }
     $oldTrackingBranch = $env:WINDO_TRACKING_BRANCH
     try {
-        $env:WINDO_TRACKING_BRANCH = 'Exodus'
+        $env:WINDO_TRACKING_BRANCH = 'jonex/windo-production-ready'
         & $syncChecksum
         if ($LASTEXITCODE -ne 0) { throw 'Checksum manifest refresh failed.' }
     }

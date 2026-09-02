@@ -1,9 +1,15 @@
 # Validate WINDO repo scripts (syntax). Run from repo root: ./tools/Validate-Windo.ps1
 [CmdletBinding()]
-param([switch]$RequireCurrentSnapshot)
+param(
+    [switch]$RequireCurrentSnapshot,
+    [switch]$SkipCurrentSnapshot
+)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
+if ($RequireCurrentSnapshot -and $SkipCurrentSnapshot) {
+    throw "RequireCurrentSnapshot and SkipCurrentSnapshot cannot be used together."
+}
 
 function New-WindoHashAlgorithm {
     param([Parameter(Mandatory = $true)][ValidateSet("SHA256", "SHA384", "SHA512")][string]$Algorithm)
@@ -70,10 +76,11 @@ function Test-WindoHexDigest {
 
 function Get-WindoReleaseTargetMeta {
     $envBranch = [string]$env:WINDO_TRACKING_BRANCH
-    $rawBranch = if ([string]::IsNullOrWhiteSpace($envBranch)) { "Exodus" } else { $envBranch.Trim() }
+    $defaultBranch = "jonex/windo-production-ready"
+    $rawBranch = if ([string]::IsNullOrWhiteSpace($envBranch)) { $defaultBranch } else { $envBranch.Trim() }
 
-    if ($rawBranch -match '^(?i:genesis|genisis|prometheus)$') { $rawBranch = "Exodus" }
-    if ($rawBranch -notmatch '^[A-Za-z0-9._-]{1,64}$') { $rawBranch = "Exodus" }
+    if ($rawBranch -match '^(?i:genesis|genisis|prometheus)$') { $rawBranch = $defaultBranch }
+    if ($rawBranch.Length -gt 128 -or $rawBranch -notmatch '^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$' -or $rawBranch.Contains('..') -or $rawBranch.EndsWith('.lock')) { $rawBranch = $defaultBranch }
 
     $rawCommit = $null
     try {
@@ -292,6 +299,7 @@ try {
     $ok = $false
 }
 
+if (-not $SkipCurrentSnapshot) {
 try {
     $versionMatch = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $root "windo_install.ps1")), '\$WindoVersion\s*=\s*"(?<v>\d+\.\d+\.\d+)"')
     if ($versionMatch.Success) {
@@ -337,6 +345,7 @@ try {
     Write-Host "Failed to validate snapshot checksum manifest. $_.Exception.Message"
     Write-Host "Remediation: verify snapshot files exist and are readable, then rerun validation."
     $ok = $false
+}
 }
 if (-not $ok) { exit 1 }
 Write-Host "Validate-Windo: all checks passed." -ForegroundColor Cyan

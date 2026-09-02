@@ -177,8 +177,8 @@ function Test-PrometheusReleaseHashes {
     if (-not $manifest.ContainsKey('schemaVersion') -or [string]$manifest.schemaVersion -cne '2') {
         throw 'Checksum manifest schemaVersion must be 2.'
     }
-    if (-not $manifest.ContainsKey('releaseBranch') -or [string]$manifest.releaseBranch -cne 'Exodus') {
-        throw 'Checksum manifest releaseBranch must be Exodus.'
+    if (-not $manifest.ContainsKey('releaseBranch') -or [string]$manifest.releaseBranch -cne 'jonex/windo-production-ready') {
+        throw 'Checksum manifest releaseBranch must be jonex/windo-production-ready.'
     }
 
     $specs = @(
@@ -239,10 +239,12 @@ function Invoke-PrometheusWorker {
     Test-PrometheusParseGate
 
     & (Join-Path $RepoRoot 'tools\Test-WindoReservedVariables.ps1')
-    if ($LASTEXITCODE -ne 0) { throw 'Reserved-variable regression test failed.' }
+    $reservedVariableGatePassed = $?
+    if (-not $reservedVariableGatePassed) { throw 'Reserved-variable regression test failed.' }
 
     & (Join-Path $RepoRoot 'tools\Test-WindoLogic.ps1')
-    if ($LASTEXITCODE -ne 0) { throw 'WINDO logic suite failed.' }
+    $logicGatePassed = $?
+    if (-not $logicGatePassed) { throw 'WINDO logic suite failed.' }
 
     Test-PrometheusChildExecParity
     Test-PrometheusInstallerEncoding
@@ -270,8 +272,8 @@ try {
     if ($LASTEXITCODE -eq 0) { $branch = (($branchOutput | ForEach-Object { [string]$_ }) -join '').Trim() }
 }
 catch {}
-if ($branch -and $branch -ne 'repair/prometheus-final') {
-    throw "Local Prometheus validation must run from repair/prometheus-final. Current branch: $branch"
+if ($branch -and $branch -ne 'jonex/windo-production-ready') {
+    throw "Local Prometheus validation must run from jonex/windo-production-ready. Current branch: $branch"
 }
 
 $hosts = New-Object 'System.Collections.Generic.List[object]'

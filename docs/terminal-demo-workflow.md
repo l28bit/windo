@@ -3,12 +3,12 @@
 This concise flow covers install/upgrade/self-update/task repair/history from one terminal.
 
 Default source contract:
-- Bootstrap/install flows use the `Exodus` branch by default.
+- Bootstrap/install flows use the `jonex/windo-production-ready` branch by default.
 - override with `WINDO_TRACKING_BRANCH` or pin via `WINDO_RELEASE_COMMIT`.
 
 ```powershell
 # 1) Fresh install (official path)
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/Exodus/bootstrap.ps1')
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex (irm 'https://raw.githubusercontent.com/l28bit/windo/jonex/windo-production-ready/bootstrap.ps1')
 ```
 
 ```text
@@ -27,7 +27,7 @@ windo upgrade
 
 ```text
 [windo] install-latest: download is not performed while running as Administrator.
-[windo] Download finished; checksum verified when published on the configured branch (default `Exodus`).
+[windo] Download finished; checksum verified when published on the configured branch (default `jonex/windo-production-ready`).
 [windo] The installer is ready. You can review the file before continuing: %TEMP%\windo_install.ps1
 [windo] Run the installer now? (If approved, this same command relaunches elevated to register tasks.) [y/N]
 [windo] Starting installer (pwsh.exe). After it exits, reopen this shell and run `. $PROFILE` (or open a new shell) to load the upgraded profile block.
@@ -59,7 +59,7 @@ windo install-latest --force
 
 ```text
 [windo] strict mode is enabled: checksum/source/branch compatibility mismatches now fail fast.
-[windo] Installer path remains the same default branch artifact path on `Exodus`.
+[windo] Installer path remains the same default branch artifact path on `jonex/windo-production-ready`.
 ```
 
 ```powershell

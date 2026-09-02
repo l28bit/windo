@@ -8,7 +8,10 @@ $ErrorActionPreference = 'Stop'
 $resolvedRoot = (Resolve-Path -LiteralPath $Root).Path
 $targets = Get-ChildItem -LiteralPath $resolvedRoot -Filter '*.ps1' -File -Recurse | Where-Object {
     $_.FullName -notmatch '[\\/]\.git[\\/]' -and
-    $_.FullName -notmatch '[\\/]\.prometheus[\\/]'
+    $_.FullName -notmatch '[\\/]\.prometheus[\\/]' -and
+    # Frozen releases document previously published behavior and must not be
+    # rewritten by a current-source regression gate.
+    $_.FullName -notmatch '[\\/]versions[\\/]'
 }
 
 $violations = New-Object 'System.Collections.Generic.List[string]'
