@@ -96,9 +96,9 @@ if ($parseErrors.Count -gt 0) {
     throw 'Canonical runner does not parse after Issue #8 repair.'
 }
 
+# Prometheus-RepairGeneratedArtifacts.ps1 is PowerShell and reports failures by
+# throwing. Do not inspect $LASTEXITCODE here: that variable belongs to native
+# process execution and is not guaranteed to exist after invoking a .ps1 file.
 & $generatorPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Generated-artifact repair failed with exit code $LASTEXITCODE."
-}
 
 Write-Host 'Issue #8 source repair and generated-artifact propagation completed.' -ForegroundColor Green
