@@ -102,52 +102,62 @@ jobs:
           import os
           import pathlib
 
-          journal = pathlib.Path('docs/ENGINEER_JOURNAL.md')
+          journal = pathlib.Path("docs/ENGINEER_JOURNAL.md")
           if not journal.exists():
-              raise SystemExit('docs/ENGINEER_JOURNAL.md is missing on the selected base ref.')
+              raise SystemExit("docs/ENGINEER_JOURNAL.md is missing on the selected base ref.")
 
           def bullets(value):
-              items = [item.strip() for item in value.split(';') if item.strip()]
-              return '\n'.join(f'- {item}' for item in items) if items else '- None recorded.'
+              items = [item.strip() for item in value.split(";") if item.strip()]
+              return items or ["None recorded."]
 
           today = datetime.date.today().isoformat()
-          related = os.environ.get('JOURNAL_RELATED', '').strip() or f"workflow run {os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')}"
+          related = os.environ.get("JOURNAL_RELATED", "").strip()
+          if not related:
+              related = (
+                  f"workflow run {os.environ.get('GITHUB_SERVER_URL')}/"
+                  f"{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/"
+                  f"{os.environ.get('GITHUB_RUN_ID')}"
+              )
 
-          entry = f"""
+          lines = [
+              "",
+              "---",
+              "",
+              f"## {today} — {os.environ['JOURNAL_TITLE'].strip()}",
+              "",
+              f"**Category:** {os.environ['JOURNAL_CATEGORY']}  ",
+              f"**Status:** {os.environ['JOURNAL_STATUS']}  ",
+              f"**Related:** {related}",
+              "",
+              "### Context / question",
+              "",
+              os.environ["JOURNAL_CONTEXT"].strip(),
+              "",
+              "### Evidence / observations",
+              "",
+              os.environ["JOURNAL_EVIDENCE"].strip(),
+              "",
+              "### Alternatives considered",
+              "",
+          ]
+          lines.extend(f"- {item}" for item in bullets(os.environ["JOURNAL_ALTERNATIVES"]))
+          lines.extend([
+              "",
+              "### Decision / hypothesis",
+              "",
+              os.environ["JOURNAL_DECISION"].strip(),
+              "",
+              "### Result",
+              "",
+              os.environ["JOURNAL_RESULT"].strip(),
+              "",
+              "### Follow-up",
+              "",
+          ])
+          lines.extend(f"- {item}" for item in bullets(os.environ["JOURNAL_FOLLOW_UP"]))
+          entry = "\n".join(lines) + "\n"
 
----
-
-## {today} — {os.environ['JOURNAL_TITLE'].strip()}
-
-**Category:** {os.environ['JOURNAL_CATEGORY']}  
-**Status:** {os.environ['JOURNAL_STATUS']}  
-**Related:** {related}
-
-### Context / question
-
-{os.environ['JOURNAL_CONTEXT'].strip()}
-
-### Evidence / observations
-
-{os.environ['JOURNAL_EVIDENCE'].strip()}
-
-### Alternatives considered
-
-{bullets(os.environ['JOURNAL_ALTERNATIVES'])}
-
-### Decision / hypothesis
-
-{os.environ['JOURNAL_DECISION'].strip()}
-
-### Result
-
-{os.environ['JOURNAL_RESULT'].strip()}
-
-### Follow-up
-
-{bullets(os.environ['JOURNAL_FOLLOW_UP'])}
-"""
-          with journal.open('a', encoding='utf-8', newline='\n') as handle:
+          with journal.open("a", encoding="utf-8", newline="\n") as handle:
               handle.write(entry)
           print(entry)
 
