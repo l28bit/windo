@@ -1,0 +1,103 @@
+name: WINDO Issue 8 DPAPI Certification
+
+on:
+  pull_request:
+    branches:
+      - jonex/windo-production-ready
+    paths:
+      - windo_runner.ps1
+      - windo_install.ps1
+      - tools/Test-WindoPs51DpapiRuntime.ps1
+      - tools/Test-WindoLogic.ps1
+      - tools/Prometheus-RepairGeneratedArtifacts.ps1
+      - checksums/**
+      - versions/**
+      - docs/ENGINEER_JOURNAL.md
+      - .github/workflows/windo-issue8-certification.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ps51-runtime:
+    name: Strict PS5.1 DPAPI runtime / ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Prove shipping runtime resolves and uses DPAPI
+        shell: powershell
+        run: .\tools\Test-WindoPs51DpapiRuntime.ps1
+
+  ps7-control:
+    name: PS7 DPAPI control / ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Prove shipping runtime still resolves and uses DPAPI
+        shell: pwsh
+        run: .\tools\Test-WindoPs51DpapiRuntime.ps1
+
+  generated-runtime:
+    name: Generated runtime stays reproducible
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Regenerate derived runtime artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tools/Encode-ChildExec.ps1
+          ./tools/Prometheus-RepairGeneratedArtifacts.ps1
+
+      - name: Require committed regeneration result
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $changed = @(git status --porcelain)
+          if ($changed.Count -gt 0) {
+            git status --short
+            git diff -- .
+            throw 'Canonical runtime changed without committing all deterministic generated artifacts.'
+          }
+
+      - name: Pre-sign validation
+        shell: pwsh
+        run: |
+          ./tools/Test-WindoReservedVariables.ps1
+          ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'Issue #8 generated runtime'
+
+  issue8-green:
+    name: WINDO Issue 8 runtime green
+    if: always()
+    needs:
+      - ps51-runtime
+      - ps7-control
+      - generated-runtime
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce certification result
+        shell: bash
+        run: |
+          test '${{ needs.ps51-runtime.result }}' = 'success'
+          test '${{ needs.ps7-control.result }}' = 'success'
+          test '${{ needs.generated-runtime.result }}' = 'success'
