@@ -263,3 +263,86 @@ The journal is now part of the WINDO engineering contract rather than optional d
 - Add a PR journal guard.
 - Add a manual journal-entry workflow for low-friction capture.
 - Reuse this pattern as a standard starting point for future projects.
+
+---
+
+## 2026-09-04 — Failure triage should diagnose automatically; repairs should remain reviewable
+
+**Category:** architecture / tooling / security  
+**Status:** active  
+**Related:** PR #6, `WINDO Failure Triage`, `WINDO Repair Laboratory`
+
+### Context / question
+
+Once CI became trustworthy, a red result still required an engineer to manually gather logs, identify the failing subsystem, reproduce the relevant environment, and decide which experiment was safe to run. The next step was to reduce that repeated troubleshooting work without granting a public CI system permission to silently rewrite a security-sensitive elevation tool.
+
+### Evidence / observations
+
+- The PS5.1 failure investigation required workflow logs, runner/PowerShell versions, release hashes, signed-manifest status, and cross-runner comparison before a useful hypothesis emerged.
+- Some WINDO repairs are deterministic, such as regenerating ChildExec and embedded artifacts from canonical source.
+- Other repairs are not safely deterministic: release signing, security semantics, UAC behavior, and runtime logic changes require judgment and review.
+- Failure evidence is valuable even when an experiment fails; discarding it causes repeated investigation later.
+
+### Alternatives considered
+
+- Leave every failed run as a red status and troubleshoot manually.
+- Give an autonomous workflow broad write access and let it patch failing source directly.
+- Automatically classify and preserve failures, provide targeted experiments, but allow source writes only for narrowly deterministic regeneration through a normal PR.
+
+### Decision / hypothesis
+
+Adopt a three-stage model:
+
+1. **Triage:** read-only automation gathers failed jobs, failed logs, runner metadata, existing forensic artifacts, and classifies known failure families.
+2. **Repair laboratory:** targeted experiments reproduce likely causes across the appropriate Windows/PowerShell environments and preserve evidence. Normal diagnostic modes remain read-only.
+3. **Repair PR:** only explicitly requested deterministic generated-artifact regeneration may write a branch. It reruns the regeneration from canonical source, validates the candidate, appends its experiment to this journal, and opens a normal reviewable PR.
+
+No automated troubleshooting path receives private signing material. Unknown failures remain unknown until evidence supports adding a new classifier; the system must not invent a fix merely because CI is red.
+
+### Result
+
+`WINDO Failure Triage` now builds a classified evidence pack and a journal-ready incident candidate. `WINDO Repair Laboratory` provides PS5.1 compatibility experiments, release-trust forensics, deterministic generated-artifact repair previews, and an explicitly gated repair-PR mode. Failed evidence is retained as Actions artifacts rather than disappearing with job logs.
+
+### Follow-up
+
+- Expand classifier rules only from validated incidents.
+- Add disposable/self-hosted privileged certification as a separate trust tier rather than granting hosted CI UAC authority.
+- Keep deterministic repair scope narrow as WINDO evolves.
+
+---
+
+## 2026-09-04 — Automatic failure listeners belong on the GitHub control plane, not in production history by accident
+
+**Category:** architecture / tooling  
+**Status:** active  
+**Related:** PR #7, PR #6
+
+### Context / question
+
+GitHub only delivers `workflow_run` automation from a workflow definition present on the repository default branch. WINDO's default branch is currently `Exodus`, while the current production-ready lineage and the new CI/release system are intentionally being developed against `jonex/windo-production-ready`.
+
+### Evidence / observations
+
+Placing `WINDO Failure Triage` only on the production-ready branch is sufficient for manual dispatch but not for automatic completion-event triage while `Exodus` remains the repository default branch.
+
+### Alternatives considered
+
+- Move all production-ready CI work onto `Exodus` merely to satisfy the listener requirement.
+- Change the repository default branch immediately as part of this CI work.
+- Duplicate triage logic inside every individual workflow.
+- Keep a minimal read-only listener on the current default branch and retain the full engineering system with the production lineage.
+
+### Decision / hypothesis
+
+Use a tiny control-plane exception: PR #7 adds only the read-only failure-triage listener to `Exodus`. It has `contents: read` and `actions: read`, uses SHA-pinned Actions, does not mutate source, does not publish releases, and does not receive signing material.
+
+Keep this change isolated from PR #6 so a GitHub event-routing constraint does not pull unrelated production history into the default branch. If the repository default branch later moves to the production-ready lineage, retire the duplicate listener and return to one canonical copy.
+
+### Result
+
+The automatic listener now has a dedicated one-file draft PR against `Exodus`; the production CI/release/journal work remains isolated in PR #6.
+
+### Follow-up
+
+- Merge the listener only after review and after deciding the near-term default-branch strategy.
+- Remove the control-plane duplicate when the default branch moves to the production lineage.
