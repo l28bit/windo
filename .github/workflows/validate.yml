@@ -25,20 +25,54 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Initialize diagnostics
+        shell: powershell
+        run: New-Item -ItemType Directory -Force -Path ci-forensics | Out-Null
+
       - name: Install PSScriptAnalyzer
+        id: module
         shell: powershell
         run: |
           [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion 1.25.0 -ErrorAction Stop
+
       - name: Validate syntax and release contract
+        id: release
+        if: always()
         shell: powershell
         run: .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
+
       - name: Logic tests
+        id: logic
+        if: always()
+        continue-on-error: true
         shell: powershell
-        run: .\tools\Test-WindoLogic.ps1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Start-Transcript -Path ci-forensics/logic-transcript.txt -Force | Out-Null
+          try {
+            .\tools\Test-WindoLogic.ps1
+          } finally {
+            Stop-Transcript | Out-Null
+          }
+
       - name: PSScriptAnalyzer
+        id: analyzer
+        if: always()
         shell: powershell
         run: .\tools\Invoke-PSScriptAnalyzer.ps1
+
+      - name: Enforce PS5.1 compatibility or exact issue 8 baseline
+        if: always()
+        shell: powershell
+        run: |
+          .\tools\Test-WindoKnownPs51Baseline.ps1 `
+            -LogicTranscriptPath 'ci-forensics/logic-transcript.txt' `
+            -ModuleOutcome '${{ steps.module.outcome }}' `
+            -ReleaseOutcome '${{ steps.release.outcome }}' `
+            -LogicOutcome '${{ steps.logic.outcome }}' `
+            -AnalyzerOutcome '${{ steps.analyzer.outcome }}'
 
   powershell-7:
     name: PowerShell 7
