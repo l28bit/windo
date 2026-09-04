@@ -346,3 +346,46 @@ The automatic listener now has a dedicated one-file draft PR against `Exodus`; t
 
 - Merge the listener only after review and after deciding the near-term default-branch strategy.
 - Remove the control-plane duplicate when the default branch moves to the production lineage.
+
+---
+
+## 2026-09-04 — Repeatability and regression localization come before repair
+
+**Category:** architecture / tooling / process  
+**Status:** active  
+**Related:** PR #6, `WINDO Flake Hunter`, `WINDO Regression Bisect`
+
+### Context / question
+
+A single failing run does not establish whether a defect is deterministic, stateful, environment-sensitive, or newly introduced. Repairing before answering those questions can produce fixes aimed at symptoms rather than causes.
+
+### Evidence / observations
+
+- Windows-hosted failures can depend on runner generation, PowerShell host, module loading, process state, and timing.
+- The PS5.1 investigation demonstrated that identical high-level symptoms across hosts can still require more precise environment evidence before changing runtime behavior.
+- Git history already contains the evidence needed to localize many deterministic regressions when a known-good ancestor is available.
+
+### Alternatives considered
+
+- Immediately patch the first failure that reproduces once.
+- Re-run entire CI manually until confidence feels sufficient.
+- Add explicit repeatability classification and automated `git bisect` tooling before repair experiments.
+
+### Decision / hypothesis
+
+Insert two diagnostic stages between triage and repair:
+
+1. **WINDO Flake Hunter** executes the same probe in fresh PowerShell processes multiple times across PS5.1/PS7 and Windows Server 2022/2025. It classifies outcomes as `NOT_REPRODUCED`, `DETERMINISTIC_FAILURE`, or `FLAKY_OR_STATEFUL` and preserves every run log.
+2. **WINDO Regression Bisect** takes a known-good ancestor and known-bad ref, then uses a constrained parser/logic/release/signature probe to identify the first bad candidate commit. Historical commits missing the selected probe are skipped rather than falsely classified.
+
+A first-bad commit is evidence, not automatic proof of root cause. The candidate diff must still be reviewed and reproduced before a repair decision is journaled as resolved.
+
+### Result
+
+Failure Triage now includes a common escalation path: preserve evidence → establish repeatability → bisect deterministic regressions when possible → run targeted Repair Laboratory experiments → create only narrowly deterministic repair PRs → certify signing/UAC at their separate trust boundaries.
+
+### Follow-up
+
+- Add new bisection probes only when they remain meaningful across historical repository states.
+- Treat mixed Flake Hunter outcomes as a state/timing investigation, not as permission to retry CI until green.
+- Use bisection candidates to improve classifier rules only after root cause is validated.
