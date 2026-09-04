@@ -11,6 +11,7 @@ on:
       - tools/Test-WindoPs51DpapiRuntime.ps1
       - tools/Test-WindoLogic.ps1
       - tools/Prometheus-RepairGeneratedArtifacts.ps1
+      - tools/Sync-InstallerChecksum.ps1
       - checksums/**
       - versions/**
       - docs/ENGINEER_JOURNAL.md
@@ -54,7 +55,7 @@ jobs:
         run: .\tools\Test-WindoPs51DpapiRuntime.ps1
 
   generated-runtime:
-    name: Generated runtime stays reproducible
+    name: Generated runtime and pre-sign manifest stay reproducible
     runs-on: windows-2022
     timeout-minutes: 25
     steps:
@@ -63,31 +64,38 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Regenerate derived runtime artifacts
+      - name: Regenerate derived runtime artifacts and unsigned checksum candidate
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           ./tools/Encode-ChildExec.ps1
           ./tools/Prometheus-RepairGeneratedArtifacts.ps1
+          ./tools/Sync-InstallerChecksum.ps1
 
-      - name: Require committed runtime regeneration result
+      - name: Require committed deterministic candidate
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           # The repair report intentionally carries a generation timestamp, so it
           # is diagnostic evidence rather than a reproducibility input. Measure
-          # only the actual derived runtime artifacts here.
-          $paths = @('tools/ChildExec.b64.txt','windo_runner.ps1','windo_install.ps1')
+          # only the actual derived runtime plus the unsigned checksum candidate.
+          $paths = @(
+            'tools/ChildExec.b64.txt',
+            'windo_runner.ps1',
+            'windo_install.ps1',
+            'checksums/installer.sha256'
+          )
           $changed = @(git status --porcelain -- $paths)
           if ($changed.Count -gt 0) {
             git status --short -- $paths
             git diff -- $paths
-            throw 'Canonical runtime changed without committing all deterministic generated artifacts.'
+            throw 'Canonical runtime or unsigned checksum candidate was regenerated but not committed.'
           }
 
       - name: Pre-sign validation
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           ./tools/Test-WindoReservedVariables.ps1
           ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'Issue #8 generated runtime'
 
