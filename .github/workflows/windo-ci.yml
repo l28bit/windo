@@ -245,7 +245,7 @@ jobs:
           retention-days: 7
 
   negative-path:
-    name: Fail-closed bootstrap
+    name: Fail-closed trust boundaries
     needs: source-contract
     runs-on: windows-2022
     timeout-minutes: 12
@@ -253,20 +253,39 @@ jobs:
       - name: Checkout exact source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - name: Invalid immutable commit must fail
+      - name: Tampered signed manifest must fail
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tampered = Join-Path $env:RUNNER_TEMP 'installer-tampered.sha256'
+          Copy-Item checksums/installer.sha256 $tampered
+          Add-Content -LiteralPath $tampered -Value '# intentional CI tamper'
+
+          & pwsh -NoLogo -NoProfile -File ./tools/Test-WindoChecksumSignature.ps1 -ManifestPath $tampered
+          $code = $LASTEXITCODE
+          if ($code -eq 0) {
+            throw 'Signature verifier unexpectedly accepted a tampered manifest.'
+          }
+          Write-Host "Expected signature rejection observed (exit=$code)."
+          $global:LASTEXITCODE = 0
+
+      - name: Hosted elevated bootstrap boundary must fail cleanly
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $env:CI = '1'
-          $env:WINDO_RELEASE_COMMIT = '0000000000000000000000000000000000000000'
-          Remove-Item Env:WINDO_TRACKING_BRANCH -ErrorAction SilentlyContinue
-
-          & pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./bootstrap.ps1
+          $output = (& pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./bootstrap.ps1 2>&1 | Out-String)
           $code = $LASTEXITCODE
+          Write-Host $output
+
           if ($code -eq 0) {
-            throw 'bootstrap.ps1 unexpectedly succeeded for an impossible immutable release commit.'
+            throw 'bootstrap.ps1 unexpectedly succeeded from the elevated GitHub-hosted Windows runner.'
           }
-          Write-Host "Expected fail-closed behavior observed (exit=$code)."
+          if ($output -notmatch 'bootstrap is disabled in elevated shells') {
+            throw 'bootstrap.ps1 failed, but not at the expected explicit elevated-shell boundary.'
+          }
+          Write-Host "Expected hosted-runner UAC boundary observed (exit=$code)."
+          $global:LASTEXITCODE = 0
 
   workflow-policy:
     name: Workflow security policy
