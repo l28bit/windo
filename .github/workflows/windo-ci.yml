@@ -93,14 +93,13 @@ jobs:
         shell: pwsh
         run: ./tools/Test-WindoChecksumSignature.ps1
 
-  compatibility:
-    name: ${{ matrix.runner }} / ${{ matrix.shell }}
+  compatibility-ps51:
+    name: PS5.1 / ${{ matrix.runner }}
     needs: source-contract
     strategy:
       fail-fast: false
       matrix:
         runner: [windows-2022, windows-2025]
-        shell: [powershell, pwsh]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     steps:
@@ -108,27 +107,27 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install PSScriptAnalyzer
-        shell: ${{ matrix.shell }}
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion $env:PSSCRIPTANALYZER_VERSION -ErrorAction Stop
 
       - name: Release validation
-        shell: ${{ matrix.shell }}
-        run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+        shell: powershell
+        run: .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
 
       - name: Logic tests
-        shell: ${{ matrix.shell }}
-        run: ./tools/Test-WindoLogic.ps1
+        shell: powershell
+        run: .\tools\Test-WindoLogic.ps1
 
       - name: PSScriptAnalyzer
-        shell: ${{ matrix.shell }}
-        run: ./tools/Invoke-PSScriptAnalyzer.ps1
+        shell: powershell
+        run: .\tools\Invoke-PSScriptAnalyzer.ps1
 
       - name: Deep pre-sign contract
-        shell: ${{ matrix.shell }}
-        run: ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel '${{ matrix.runner }} / ${{ matrix.shell }}'
+        shell: powershell
+        run: .\tools\Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'Windows PowerShell 5.1 / ${{ matrix.runner }}'
 
       - name: Capture failure diagnostics
         if: failure()
@@ -147,7 +146,65 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: forensics-${{ matrix.runner }}-${{ matrix.shell }}
+          name: forensics-ps51-${{ matrix.runner }}
+          path: .ci-forensics
+          if-no-files-found: warn
+          retention-days: 7
+
+  compatibility-ps7:
+    name: PS7 / ${{ matrix.runner }}
+    needs: source-contract
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion $env:PSSCRIPTANALYZER_VERSION -ErrorAction Stop
+
+      - name: Release validation
+        shell: pwsh
+        run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+
+      - name: Logic tests
+        shell: pwsh
+        run: ./tools/Test-WindoLogic.ps1
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: ./tools/Invoke-PSScriptAnalyzer.ps1
+
+      - name: Deep pre-sign contract
+        shell: pwsh
+        run: ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'PowerShell 7 / ${{ matrix.runner }}'
+
+      - name: Capture failure diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          New-Item -ItemType Directory -Force -Path .ci-forensics | Out-Null
+          $PSVersionTable | Out-String | Set-Content .ci-forensics/powershell.txt
+          Get-ComputerInfo | Out-String -Width 240 | Set-Content .ci-forensics/computer.txt
+          git status --short | Set-Content .ci-forensics/git-status.txt
+          git diff -- . | Set-Content .ci-forensics/git-diff.txt
+          Get-FileHash bootstrap.ps1,windo_install.ps1,windo_runner.ps1,windo_uninstall.ps1 -Algorithm SHA256 |
+            Format-Table -AutoSize | Out-String -Width 240 | Set-Content .ci-forensics/release-hashes.txt
+
+      - name: Upload failure forensics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: forensics-ps7-${{ matrix.runner }}
           path: .ci-forensics
           if-no-files-found: warn
           retention-days: 7
@@ -240,7 +297,8 @@ jobs:
     if: always()
     needs:
       - source-contract
-      - compatibility
+      - compatibility-ps51
+      - compatibility-ps7
       - generated-artifacts
       - negative-path
       - workflow-policy
@@ -250,7 +308,8 @@ jobs:
         shell: bash
         run: |
           test '${{ needs.source-contract.result }}' = 'success'
-          test '${{ needs.compatibility.result }}' = 'success'
+          test '${{ needs.compatibility-ps51.result }}' = 'success'
+          test '${{ needs.compatibility-ps7.result }}' = 'success'
           test '${{ needs.generated-artifacts.result }}' = 'success'
           test '${{ needs.negative-path.result }}' = 'success'
           test '${{ needs.workflow-policy.result }}' = 'success'
