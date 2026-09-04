@@ -1,0 +1,162 @@
+name: WINDO Failure Triage
+
+on:
+  workflow_run:
+    workflows:
+      - WINDO CI Fabric
+      - Validate PowerShell
+      - WINDO Release Factory
+      - WINDO Published Release Canary
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Existing workflow run ID to diagnose
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  triage:
+    name: Classify and preserve failure evidence
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+    steps:
+      - name: Checkout diagnostic rules
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Collect workflow evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p triage/run-artifacts
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_RUN_ID}" > triage/run.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_RUN_ID}/jobs?filter=all&per_page=100" > triage/jobs.json
+          gh run view "${TARGET_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --log-failed > triage/failed.log 2>&1 || true
+          gh run download "${TARGET_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --dir triage/run-artifacts || true
+
+      - name: Build classified triage report
+        shell: python
+        run: |
+          import json
+          import pathlib
+          import re
+
+          root = pathlib.Path('triage')
+          run = json.loads((root / 'run.json').read_text(encoding='utf-8-sig'))
+          jobs_doc = json.loads((root / 'jobs.json').read_text(encoding='utf-8-sig'))
+          log = (root / 'failed.log').read_text(encoding='utf-8', errors='replace')
+          jobs = jobs_doc.get('jobs', [])
+
+          failed_jobs = []
+          for job in jobs:
+              if job.get('conclusion') not in (None, 'success', 'skipped'):
+                  failed_steps = [
+                      s.get('name') for s in (job.get('steps') or [])
+                      if s.get('conclusion') not in (None, 'success', 'skipped')
+                  ]
+                  failed_jobs.append((job.get('name'), job.get('conclusion'), failed_steps))
+
+          rules = [
+              ('PS5.1 DPAPI assembly/type resolution', [r'ProtectedData', r'DPAPI fixture sealing failed', r'WindoResolverFoundType=False'], 'Run WINDO Repair Laboratory in diagnose-ps51 mode on the failing commit. Probe explicit framework assembly loading before changing runtime code.'),
+              ('Generated installer/uninstaller text parity', [r'maintained uninstaller without runtime drift', r'generated.*drift'], 'Run the repair laboratory comparison first. Compare canonical published text bytes after explicit UTF-8/LF normalization; do not weaken the test to substring matching.'),
+              ('Unsafe installer-path rejection', [r'unsupported quote', r'Illegal characters in path'], 'Verify the security property that the path is rejected. Platform-native invalid-path rejection is acceptable when it occurs before WINDO validation.'),
+              ('Release signature or checksum trust failure', [r'signature.*fail', r'checksum.*mismatch', r'manifest.*signature', r'hash.*mismatch'], 'Run Repair Laboratory verify-release-trust. Never auto-repair signed metadata or move the private signing key into hosted CI.'),
+              ('Generated ChildExec drift', [r'ChildExec.*parity', r'ChildExec.*drift', r'ChildExec\.b64'], 'Run Repair Laboratory repair-generated-artifacts in preview mode. If deterministic validation succeeds, explicitly request a repair PR.'),
+              ('PowerShell parser/static-analysis failure', [r'ParserError', r'ParseException', r'PSScriptAnalyzer', r'parse failed'], 'Reproduce with the exact PowerShell host. If a known-good ref exists, use WINDO Regression Bisect with the parser probe.'),
+              ('Hosted UAC/elevation boundary', [r'bootstrap is disabled in elevated shells', r'UAC', r'elevat'], 'Confirm the hosted runner stopped at the documented UAC boundary. Use disposable/self-hosted Windows only for privileged behavioral certification.'),
+              ('Workflow definition/orchestration failure', [r'workflow.*invalid', r'No jobs were run', r'Unexpected value.*shell', r'Unable to resolve action'], 'Treat this as CI infrastructure, not product behavior. Validate workflow syntax, action pinning, permissions, and expressions before product debugging.'),
+          ]
+
+          classifications = []
+          for name, patterns, recommendation in rules:
+              evidence = [p for p in patterns if re.search(p, log, re.I | re.S)]
+              if evidence:
+                  classifications.append((name, evidence, recommendation))
+
+          report = ['# WINDO Failure Triage', '']
+          report += [
+              f"- **Run:** {run.get('html_url', '')}",
+              f"- **Workflow:** {run.get('name', 'unknown')}",
+              f"- **Branch:** `{run.get('head_branch', 'unknown')}`",
+              f"- **Commit:** `{run.get('head_sha', 'unknown')}`",
+              f"- **Conclusion:** `{run.get('conclusion', 'unknown')}`",
+              '',
+              '## Failed jobs / steps',
+              ''
+          ]
+          if failed_jobs:
+              for name, conclusion, steps in failed_jobs:
+                  report.append(f"- **{name}** — `{conclusion}`")
+                  for step in steps:
+                      report.append(f"  - {step}")
+          else:
+              report.append('- No failed job records were returned; inspect workflow-definition or cancellation state.')
+
+          report += ['', '## Classified failure patterns', '']
+          if classifications:
+              for name, evidence, recommendation in classifications:
+                  report += [f"### {name}", '', f"Matched: `{', '.join(evidence)}`", '', f"**Next experiment:** {recommendation}", '']
+          else:
+              report += ['No known pattern matched. Preserve the incident as new evidence rather than guessing at a repair.', '']
+
+          report += [
+              '## Troubleshooting escalation path',
+              '',
+              '1. **Triage first.** Preserve logs, runner metadata, hashes, and existing artifacts before changing code.',
+              '2. **Question repeatability.** If determinism is unclear, run `WINDO Flake Hunter` against the exact failing SHA. Mixed outcomes mean state/flakiness must be understood before repair.',
+              '3. **Locate the introduction.** For deterministic failures with a known-good ancestor, use `WINDO Regression Bisect` to identify the first bad candidate commit.',
+              '4. **Experiment read-only.** Use `WINDO Repair Laboratory` for targeted PS5.1, trust-chain, or generated-artifact experiments.',
+              '5. **Repair narrowly.** Only deterministic generated-artifact regeneration may create an automated repair PR, and only when explicitly requested.',
+              '6. **Certify at the right boundary.** Signing and real UAC behavior remain outside hosted auto-repair.',
+              '',
+              'A first-bad commit is evidence, not proof of root cause. A repeated failure is evidence of determinism, not proof of the correct fix.',
+              '',
+              '## Engineering-journal candidate',
+              '',
+              'Copy this into `docs/ENGINEER_JOURNAL.md` only after review; automated triage does not rewrite canonical engineering history.',
+              '',
+              '```text',
+              f"## <date> — Investigate {run.get('name', 'workflow')} failure",
+              '',
+              '**Category:** incident / experiment',
+              '**Status:** active',
+              f"**Related:** {run.get('html_url', '')}",
+              '',
+              '### Context / question',
+              '<what failed and what behavior was expected>',
+              '',
+              '### Evidence / observations'
+          ]
+          for name, conclusion, steps in failed_jobs:
+              report.append(f"- {name}: {conclusion}; failed steps: {', '.join(steps) if steps else 'n/a'}")
+          report += [
+              '', '### Alternatives considered', '- <repair/diagnostic alternatives>', '',
+              '### Decision / hypothesis', '<current explanation and why>', '',
+              '### Result', '<experiment result>', '',
+              '### Follow-up', '- <next test or repair>', '```'
+          ]
+
+          text = '\n'.join(report) + '\n'
+          (root / 'TRIAGE.md').write_text(text, encoding='utf-8')
+          print(text)
+
+      - name: Publish report to job summary
+        shell: bash
+        run: cat triage/TRIAGE.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload triage evidence pack
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windo-triage-${{ env.TARGET_RUN_ID }}
+          path: triage
+          if-no-files-found: error
+          retention-days: 30
