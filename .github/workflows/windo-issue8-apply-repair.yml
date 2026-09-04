@@ -1,0 +1,85 @@
+name: WINDO Issue 8 Controlled Repair
+
+on:
+  push:
+    branches:
+      - fix/ps51-dpapi-resolution-20260904
+    paths:
+      - tools/Apply-WindoIssue8DpapiRepair.ps1
+      - .github/workflows/windo-issue8-apply-repair.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windo-issue8-controlled-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Apply canonical repair and regenerate derived runtime
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: fix/ps51-dpapi-resolution-20260904
+          fetch-depth: 0
+
+      - name: Apply exact source repair and regenerate artifacts
+        shell: pwsh
+        run: ./tools/Apply-WindoIssue8DpapiRepair.ps1
+
+      - name: Strict Windows PowerShell 5.1 runtime proof
+        shell: powershell
+        run: .\tools\Test-WindoPs51DpapiRuntime.ps1
+
+      - name: PowerShell 7 control proof
+        shell: pwsh
+        run: ./tools/Test-WindoPs51DpapiRuntime.ps1
+
+      - name: Pre-sign runtime validation
+        shell: pwsh
+        run: |
+          ./tools/Test-WindoReservedVariables.ps1
+          ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'Issue #8 controlled repair'
+
+      - name: Restrict repair diff to declared files
+        id: diff
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $allowed = @(
+            'windo_runner.ps1',
+            'windo_install.ps1',
+            'tools/ChildExec.b64.txt',
+            'docs/prometheus-generated-repair-report.md'
+          )
+          $changed = @(git status --porcelain | ForEach-Object { $_.Substring(3) })
+          foreach ($path in $changed) {
+            if ($path -notin $allowed) {
+              throw "Controlled repair changed an undeclared path: $path"
+            }
+          }
+          if ($changed.Count -eq 0) {
+            'changed=false' >> $env:GITHUB_OUTPUT
+            Write-Host 'No repair diff remains.'
+          } else {
+            'changed=true' >> $env:GITHUB_OUTPUT
+            Write-Host 'Controlled repair diff:'
+            git status --short
+            git diff -- windo_runner.ps1 windo_install.ps1 tools/ChildExec.b64.txt docs/prometheus-generated-repair-report.md
+          }
+
+      - name: Commit deterministic repair result
+        if: steps.diff.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'windo-repair-bot'
+          git config user.email 'windo-repair-bot@users.noreply.github.com'
+          git add -- windo_runner.ps1 windo_install.ps1 tools/ChildExec.b64.txt docs/prometheus-generated-repair-report.md
+          git commit -m 'fix: restore PS5.1 DPAPI runtime resolution'
+          git push origin HEAD:fix/ps51-dpapi-resolution-20260904
