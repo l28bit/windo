@@ -106,50 +106,155 @@ jobs:
       - name: Checkout exact source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
+      - name: Initialize diagnostics
+        shell: powershell
+        run: New-Item -ItemType Directory -Force -Path ci-forensics | Out-Null
+
       - name: Install PSScriptAnalyzer
+        id: module
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion $env:PSSCRIPTANALYZER_VERSION -ErrorAction Stop
 
+      - name: Probe Windows PowerShell 5.1 DPAPI resolution
+        id: dpapi
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lines = New-Object System.Collections.Generic.List[string]
+          $lines.Add("PSVersion=$($PSVersionTable.PSVersion)")
+          $lines.Add("CLRVersion=$($PSVersionTable.CLRVersion)")
+          $lines.Add("OS=$([Environment]::OSVersion.VersionString)")
+
+          $directType = $null
+          try { $directType = [System.Security.Cryptography.ProtectedData] } catch { $lines.Add("DirectTypeError=$($_.Exception.Message)") }
+          $lines.Add("DirectType=$directType")
+
+          $resolved = $null
+          foreach ($qualifiedName in @(
+            'System.Security.Cryptography.ProtectedData, System.Security.Cryptography.ProtectedData',
+            'System.Security.Cryptography.ProtectedData, System.Security'
+          )) {
+            try {
+              $candidate = [type]::GetType($qualifiedName, $false)
+              $lines.Add("GetType[$qualifiedName]=$candidate")
+              if ($null -eq $resolved -and $null -ne $candidate) { $resolved = $candidate }
+            } catch {
+              $lines.Add("GetTypeError[$qualifiedName]=$($_.Exception.Message)")
+            }
+          }
+
+          $directProtectOk = $false
+          if ($null -ne $directType) {
+            try {
+              $bytes = [Text.Encoding]::UTF8.GetBytes('windo-ci-dpapi-probe')
+              $sealed = [System.Security.Cryptography.ProtectedData]::Protect(
+                $bytes,
+                $null,
+                [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+              )
+              $directProtectOk = $null -ne $sealed -and $sealed.Length -gt 0
+              $lines.Add("DirectProtectBytes=$($sealed.Length)")
+            } catch {
+              $lines.Add("DirectProtectError=$($_.Exception.Message)")
+            }
+          }
+          $lines.Add("DirectProtectOk=$directProtectOk")
+          $lines.Add("WindoResolverFoundType=$($null -ne $resolved)")
+          $lines | Set-Content -LiteralPath ci-forensics/ps51-dpapi-probe.txt
+          $lines | ForEach-Object { Write-Host $_ }
+
+          if (-not $directProtectOk) {
+            throw 'Windows PowerShell 5.1 cannot perform direct CurrentUser DPAPI protection on this supported Windows runner.'
+          }
+          if ($null -eq $resolved) {
+            throw 'WINDO DPAPI type-resolution strategy cannot find ProtectedData under Windows PowerShell 5.1 even though direct DPAPI works.'
+          }
+
       - name: Release validation
+        id: release
+        if: always()
         shell: powershell
         run: .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
 
       - name: Logic tests
+        id: logic
+        if: always()
         shell: powershell
-        run: .\tools\Test-WindoLogic.ps1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Start-Transcript -Path ci-forensics/logic-transcript.txt -Force | Out-Null
+          try {
+            .\tools\Test-WindoLogic.ps1
+          } finally {
+            Stop-Transcript | Out-Null
+          }
 
       - name: PSScriptAnalyzer
+        id: analyzer
+        if: always()
         shell: powershell
         run: .\tools\Invoke-PSScriptAnalyzer.ps1
 
       - name: Deep pre-sign contract
+        id: deep
+        if: always()
         shell: powershell
-        run: .\tools\Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'Windows PowerShell 5.1 / ${{ matrix.runner }}'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Start-Transcript -Path ci-forensics/deep-presign-transcript.txt -Force | Out-Null
+          try {
+            .\tools\Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'Windows PowerShell 5.1 / ${{ matrix.runner }}'
+          } finally {
+            Stop-Transcript | Out-Null
+          }
 
-      - name: Capture failure diagnostics
-        if: failure()
+      - name: Capture compatibility diagnostics
+        if: always()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          New-Item -ItemType Directory -Force -Path .ci-forensics | Out-Null
-          $PSVersionTable | Out-String | Set-Content .ci-forensics/powershell.txt
-          Get-ComputerInfo | Out-String -Width 240 | Set-Content .ci-forensics/computer.txt
-          git status --short | Set-Content .ci-forensics/git-status.txt
-          git diff -- . | Set-Content .ci-forensics/git-diff.txt
+          $PSVersionTable | Out-String | Set-Content ci-forensics/pwsh-version.txt
+          Get-ComputerInfo | Out-String -Width 240 | Set-Content ci-forensics/computer.txt
+          git status --short | Set-Content ci-forensics/git-status.txt
+          git diff -- . | Set-Content ci-forensics/git-diff.txt
           Get-FileHash bootstrap.ps1,windo_install.ps1,windo_runner.ps1,windo_uninstall.ps1 -Algorithm SHA256 |
-            Format-Table -AutoSize | Out-String -Width 240 | Set-Content .ci-forensics/release-hashes.txt
+            Format-Table -AutoSize | Out-String -Width 240 | Set-Content ci-forensics/release-hashes.txt
+          @(
+            'module=${{ steps.module.outcome }}',
+            'dpapi=${{ steps.dpapi.outcome }}',
+            'release=${{ steps.release.outcome }}',
+            'logic=${{ steps.logic.outcome }}',
+            'analyzer=${{ steps.analyzer.outcome }}',
+            'deep=${{ steps.deep.outcome }}'
+          ) | Set-Content ci-forensics/step-outcomes.txt
 
-      - name: Upload failure forensics
-        if: failure()
+      - name: Upload PS5.1 forensic pack
+        if: always() && (steps.module.outcome != 'success' || steps.dpapi.outcome != 'success' || steps.release.outcome != 'success' || steps.logic.outcome != 'success' || steps.analyzer.outcome != 'success' || steps.deep.outcome != 'success')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: forensics-ps51-${{ matrix.runner }}
-          path: .ci-forensics
-          if-no-files-found: warn
+          path: ci-forensics
+          if-no-files-found: error
           retention-days: 7
+
+      - name: Enforce PS5.1 compatibility
+        if: always()
+        shell: powershell
+        run: |
+          $failures = @()
+          if ('${{ steps.module.outcome }}' -ne 'success') { $failures += 'PSScriptAnalyzer module setup' }
+          if ('${{ steps.dpapi.outcome }}' -ne 'success') { $failures += 'DPAPI compatibility probe' }
+          if ('${{ steps.release.outcome }}' -ne 'success') { $failures += 'release validation' }
+          if ('${{ steps.logic.outcome }}' -ne 'success') { $failures += 'logic suite' }
+          if ('${{ steps.analyzer.outcome }}' -ne 'success') { $failures += 'PSScriptAnalyzer' }
+          if ('${{ steps.deep.outcome }}' -ne 'success') { $failures += 'deep pre-sign contract' }
+          if ($failures.Count -gt 0) {
+            throw ('Windows PowerShell 5.1 compatibility failed: ' + ($failures -join ', '))
+          }
 
   compatibility-ps7:
     name: PS7 / ${{ matrix.runner }}
@@ -192,20 +297,20 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          New-Item -ItemType Directory -Force -Path .ci-forensics | Out-Null
-          $PSVersionTable | Out-String | Set-Content .ci-forensics/powershell.txt
-          Get-ComputerInfo | Out-String -Width 240 | Set-Content .ci-forensics/computer.txt
-          git status --short | Set-Content .ci-forensics/git-status.txt
-          git diff -- . | Set-Content .ci-forensics/git-diff.txt
+          New-Item -ItemType Directory -Force -Path ci-forensics | Out-Null
+          $PSVersionTable | Out-String | Set-Content ci-forensics/powershell.txt
+          Get-ComputerInfo | Out-String -Width 240 | Set-Content ci-forensics/computer.txt
+          git status --short | Set-Content ci-forensics/git-status.txt
+          git diff -- . | Set-Content ci-forensics/git-diff.txt
           Get-FileHash bootstrap.ps1,windo_install.ps1,windo_runner.ps1,windo_uninstall.ps1 -Algorithm SHA256 |
-            Format-Table -AutoSize | Out-String -Width 240 | Set-Content .ci-forensics/release-hashes.txt
+            Format-Table -AutoSize | Out-String -Width 240 | Set-Content ci-forensics/release-hashes.txt
 
       - name: Upload failure forensics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: forensics-ps7-${{ matrix.runner }}
-          path: .ci-forensics
+          path: ci-forensics
           if-no-files-found: warn
           retention-days: 7
 
