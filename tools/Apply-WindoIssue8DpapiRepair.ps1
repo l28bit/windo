@@ -39,10 +39,10 @@ function Get-WindoProtectedDataType {
         } catch { }
     }
 
-    # Windows PowerShell 5.1 on a fresh .NET Framework process does not load
-    # System.Security merely because an assembly-qualified type name is probed.
-    # Load the framework assembly explicitly, then repeat the exact lookup. The
-    # PowerShell 7 path normally returns above and is left unchanged.
+    # Windows PowerShell 5.1 starts with the .NET Framework System.Security
+    # assembly unloaded. Loading it is necessary, but Type.GetType with the
+    # short assembly name still returns null on a fresh host. Resolve from the
+    # assemblies actually loaded into this AppDomain after the explicit load.
     if ($PSVersionTable.PSVersion.Major -le 5) {
         try {
             Add-Type -AssemblyName System.Security -ErrorAction Stop
@@ -50,9 +50,9 @@ function Get-WindoProtectedDataType {
             return $null
         }
 
-        foreach ($qualifiedName in $qualifiedNames) {
+        foreach ($assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
             try {
-                $resolved = [type]::GetType($qualifiedName, $false)
+                $resolved = $assembly.GetType($typeName, $false, $false)
                 if ($null -ne $resolved) { return $resolved }
             } catch { }
         }
