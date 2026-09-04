@@ -1,33 +1,62 @@
 name: Validate PowerShell
+
 permissions:
   contents: read
 
 on:
   push:
-    branches: [ Exodus, Genisis, main ]
+    branches:
+      - Exodus
+      - Genisis
+      - main
+      - jonex/windo-production-ready
+      - ci/hosted-runner-lab-20260903
   pull_request:
-    branches: [ Exodus, Genisis, main ]
+    branches:
+      - Exodus
+      - Genisis
+      - main
+      - jonex/windo-production-ready
+
 jobs:
-  validate:
+  powershell-51:
+    name: Windows PowerShell 5.1
     runs-on: windows-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        ps_shell: [pwsh, powershell]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Install PSScriptAnalyzer
-        shell: ${{ matrix.ps_shell }}
+        shell: powershell
         run: |
           [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion 1.25.0 -ErrorAction Stop
-      - name: Validate syntax
-        shell: ${{ matrix.ps_shell }}
+      - name: Validate syntax and release contract
+        shell: powershell
+        run: .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
+      - name: Logic tests
+        shell: powershell
+        run: .\tools\Test-WindoLogic.ps1
+      - name: PSScriptAnalyzer
+        shell: powershell
+        run: .\tools\Invoke-PSScriptAnalyzer.ps1
+
+  powershell-7:
+    name: PowerShell 7
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion 1.25.0 -ErrorAction Stop
+      - name: Validate syntax and release contract
+        shell: pwsh
         run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
-      - name: Logic tests (integrity levels)
-        shell: ${{ matrix.ps_shell }}
+      - name: Logic tests
+        shell: pwsh
         run: ./tools/Test-WindoLogic.ps1
-      - name: PSScriptAnalyzer (Error severity)
-        shell: ${{ matrix.ps_shell }}
+      - name: PSScriptAnalyzer
+        shell: pwsh
         run: ./tools/Invoke-PSScriptAnalyzer.ps1
