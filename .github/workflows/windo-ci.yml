@@ -1,0 +1,256 @@
+name: WINDO CI Fabric
+
+on:
+  push:
+    branches:
+      - jonex/windo-production-ready
+      - ci/hosted-runner-lab-20260903
+  pull_request:
+    branches:
+      - jonex/windo-production-ready
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windo-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PSSCRIPTANALYZER_VERSION: '1.25.0'
+
+jobs:
+  source-contract:
+    name: Source + trust contract
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Parse critical scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(
+            'bootstrap.ps1',
+            'windo_install.ps1',
+            'windo_runner.ps1',
+            'windo_uninstall.ps1',
+            'windo_heal.ps1',
+            'tools/Test-WindoLogic.ps1',
+            'tools/Validate-Windo.ps1',
+            'tools/Test-WindoReservedVariables.ps1',
+            'tools/Invoke-PrometheusLocalValidation.ps1',
+            'tools/Test-WindoChecksumSignature.ps1'
+          )
+          foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file)) { throw "Missing required file: $file" }
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $file),
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "${file}: $($_.Message)" }
+              throw "PowerShell parse failed: $file"
+            }
+          }
+
+      - name: Reject reserved automatic-variable assignments
+        shell: pwsh
+        run: ./tools/Test-WindoReservedVariables.ps1
+
+      - name: Verify ChildExec source payload parity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = [IO.File]::ReadAllText((Resolve-Path 'src/windo/snippets/ChildExec.cs'))
+          $encoded = ([IO.File]::ReadAllText((Resolve-Path 'tools/ChildExec.b64.txt')) -replace '\s','')
+          $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))
+          if ($source -cne $decoded) { throw 'ChildExec.cs and ChildExec.b64.txt are not byte-equivalent.' }
+
+      - name: Verify production source contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bootstrap = Get-Content -LiteralPath bootstrap.ps1 -Raw
+          foreach ($needle in @(
+            'jonex/windo-production-ready',
+            'WINDO_RELEASE_COMMIT',
+            'WINDO_TRACKING_BRANCH',
+            'api.github.com/repos/l28bit/windo/commits/'
+          )) {
+            if ($bootstrap.IndexOf($needle, [StringComparison]::Ordinal) -lt 0) {
+              throw "bootstrap.ps1 is missing required release-contract marker: $needle"
+            }
+          }
+
+      - name: Verify signed release manifest
+        shell: pwsh
+        run: ./tools/Test-WindoChecksumSignature.ps1
+
+  compatibility:
+    name: ${{ matrix.runner }} / ${{ matrix.shell }}
+    needs: source-contract
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, windows-2025]
+        shell: [powershell, pwsh]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install PSScriptAnalyzer
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion $env:PSSCRIPTANALYZER_VERSION -ErrorAction Stop
+
+      - name: Release validation
+        shell: ${{ matrix.shell }}
+        run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+
+      - name: Logic tests
+        shell: ${{ matrix.shell }}
+        run: ./tools/Test-WindoLogic.ps1
+
+      - name: PSScriptAnalyzer
+        shell: ${{ matrix.shell }}
+        run: ./tools/Invoke-PSScriptAnalyzer.ps1
+
+      - name: Deep pre-sign contract
+        shell: ${{ matrix.shell }}
+        run: ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel '${{ matrix.runner }} / ${{ matrix.shell }}'
+
+      - name: Capture failure diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          New-Item -ItemType Directory -Force -Path .ci-forensics | Out-Null
+          $PSVersionTable | Out-String | Set-Content .ci-forensics/powershell.txt
+          Get-ComputerInfo | Out-String -Width 240 | Set-Content .ci-forensics/computer.txt
+          git status --short | Set-Content .ci-forensics/git-status.txt
+          git diff -- . | Set-Content .ci-forensics/git-diff.txt
+          Get-FileHash bootstrap.ps1,windo_install.ps1,windo_runner.ps1,windo_uninstall.ps1 -Algorithm SHA256 |
+            Format-Table -AutoSize | Out-String -Width 240 | Set-Content .ci-forensics/release-hashes.txt
+
+      - name: Upload failure forensics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: forensics-${{ matrix.runner }}-${{ matrix.shell }}
+          path: .ci-forensics
+          if-no-files-found: warn
+          retention-days: 7
+
+  generated-artifacts:
+    name: Generated artifact reproducibility
+    needs: source-contract
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Regenerate ChildExec payload
+        shell: pwsh
+        run: ./tools/Encode-ChildExec.ps1
+
+      - name: Demand clean generated diff
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $diff = git status --short -- tools/ChildExec.b64.txt
+          if ($diff) {
+            git diff -- tools/ChildExec.b64.txt
+            throw 'Generated ChildExec payload drift detected. Regenerate and commit it.'
+          }
+
+      - name: Export exact source archive
+        shell: pwsh
+        run: git archive --format=zip --output=windo-source-${{ github.sha }}.zip HEAD
+
+      - name: Upload exact source archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windo-source-${{ github.sha }}
+          path: windo-source-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  negative-path:
+    name: Fail-closed bootstrap
+    needs: source-contract
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Invalid immutable commit must fail
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:CI = '1'
+          $env:WINDO_RELEASE_COMMIT = '0000000000000000000000000000000000000000'
+          Remove-Item Env:WINDO_TRACKING_BRANCH -ErrorAction SilentlyContinue
+
+          & pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./bootstrap.ps1
+          $code = $LASTEXITCODE
+          if ($code -eq 0) {
+            throw 'bootstrap.ps1 unexpectedly succeeded for an impossible immutable release commit.'
+          }
+          Write-Host "Expected fail-closed behavior observed (exit=$code)."
+
+  workflow-policy:
+    name: Workflow security policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Enforce pinned actions in WINDO workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(.github/workflows/windo-*.yml)
+          for file in "${files[@]}"; do
+            [[ -e "$file" ]] || continue
+            while IFS= read -r line; do
+              ref="${line##*@}"
+              if [[ ! "$ref" =~ ^[0-9a-f]{40}([[:space:]]|$) ]]; then
+                echo "::error file=$file::Action reference is not pinned to a full commit SHA: $line"
+                exit 1
+              fi
+            done < <(grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*[^#]+@' "$file" || true)
+          done
+
+  ci-green:
+    name: WINDO CI green
+    if: always()
+    needs:
+      - source-contract
+      - compatibility
+      - generated-artifacts
+      - negative-path
+      - workflow-policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce aggregate result
+        shell: bash
+        run: |
+          test '${{ needs.source-contract.result }}' = 'success'
+          test '${{ needs.compatibility.result }}' = 'success'
+          test '${{ needs.generated-artifacts.result }}' = 'success'
+          test '${{ needs.negative-path.result }}' = 'success'
+          test '${{ needs.workflow-policy.result }}' = 'success'
