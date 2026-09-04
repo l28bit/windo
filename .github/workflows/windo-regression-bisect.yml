@@ -98,19 +98,20 @@ jobs:
               $candidates = @('bootstrap.ps1','windo_install.ps1','windo_runner.ps1','windo_uninstall.ps1') |
                 Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
               if ($candidates.Count -eq 0) { exit 125 }
-              $script = @'
-          $failed = $false
-          foreach ($file in $args) {
-            $tokens = $null
-            $errors = $null
-            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $file), [ref]$tokens, [ref]$errors)
-            if ($errors.Count -gt 0) { $failed = $true }
-          }
-          if ($failed) { exit 1 }
-          exit 0
-          '@
-              & $HostExe -NoLogo -NoProfile -NonInteractive -Command $script @candidates *> $null
-              exit $LASTEXITCODE
+
+              $failed = $false
+              foreach ($file in $candidates) {
+                $tokens = $null
+                $errors = $null
+                [void][System.Management.Automation.Language.Parser]::ParseFile(
+                  (Resolve-Path -LiteralPath $file),
+                  [ref]$tokens,
+                  [ref]$errors
+                )
+                if ($errors.Count -gt 0) { $failed = $true }
+              }
+              if ($failed) { exit 1 }
+              exit 0
             }
             'logic' { Invoke-Child '.\tools\Test-WindoLogic.ps1' }
             'release' { Invoke-Child '.\tools\Validate-Windo.ps1' @('-RequireCurrentSnapshot') }
