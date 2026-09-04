@@ -49,12 +49,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path repair-lab | Out-Null
           $report = New-Object System.Collections.Generic.List[string]
-          $report.Add("# PS5.1 DPAPI experiment")
-          $report.Add("")
-          $report.Add("Runner=${{ matrix.runner }}")
+          $report.Add('# PS5.1 DPAPI experiment')
+          $report.Add('')
+          $report.Add('Runner=${{ matrix.runner }}')
           $report.Add("PSVersion=$($PSVersionTable.PSVersion)")
           $report.Add("CLRVersion=$($PSVersionTable.CLRVersion)")
-          $report.Add("")
+          $report.Add('')
 
           function Test-ProtectedDataState([string]$Label) {
             $direct = $null
@@ -64,7 +64,6 @@ jobs:
             $report.Add("## $Label")
             $report.Add("System.Security lookup: $($null -ne $direct)")
             $report.Add("ProtectedData assembly lookup: $($null -ne $qualified)")
-
             $resolved = if ($direct) { $direct } else { $qualified }
             if ($resolved) {
               try {
@@ -78,11 +77,10 @@ jobs:
                 $report.Add("Protect error: $($_.Exception.GetBaseException().Message)")
               }
             }
-            $report.Add("")
+            $report.Add('')
           }
 
           Test-ProtectedDataState 'Fresh process'
-
           try {
             [void][Reflection.Assembly]::Load('System.Security')
             $report.Add('Assembly.Load(System.Security): success')
@@ -90,7 +88,6 @@ jobs:
             $report.Add("Assembly.Load(System.Security): $($_.Exception.GetBaseException().Message)")
           }
           Test-ProtectedDataState 'After Assembly.Load(System.Security)'
-
           try {
             Add-Type -AssemblyName System.Security -ErrorAction Stop
             $report.Add('Add-Type -AssemblyName System.Security: success')
@@ -98,7 +95,6 @@ jobs:
             $report.Add("Add-Type -AssemblyName System.Security: $($_.Exception.GetBaseException().Message)")
           }
           Test-ProtectedDataState 'After Add-Type System.Security'
-
           $report | Set-Content -LiteralPath repair-lab/ps51-dpapi.md -Encoding UTF8
           $report | ForEach-Object { Write-Host $_ }
 
@@ -131,13 +127,12 @@ jobs:
 
           $embedded = Get-HereStringBeforeAnchor $installer 'UninstallContent' 'Write-Utf8NoBomFile -Path $UninstallPath -Content $UninstallContent'
           if ($null -eq $embedded) { throw 'Could not extract embedded uninstaller.' }
-
           $rawEqual = $embedded.TrimEnd() -ceq $uninstaller.TrimEnd()
           $normalizedEqual = (Normalize-PublishedText $embedded) -ceq (Normalize-PublishedText $uninstaller)
           $lines = @(
             '# Embedded uninstaller parity experiment',
             '',
-            "Runner=${{ matrix.runner }}",
+            'Runner=${{ matrix.runner }}',
             "PSVersion=$($PSVersionTable.PSVersion)",
             "RawTrimmedEqual=$rawEqual",
             "PublishedTextNormalizedEqual=$normalizedEqual",
@@ -146,7 +141,6 @@ jobs:
           )
           $lines | Set-Content repair-lab/uninstaller-parity.md -Encoding UTF8
           $lines | ForEach-Object { Write-Host $_ }
-
           if (-not $normalizedEqual) {
             throw 'Canonical published-text normalization still reports real embedded-uninstaller drift.'
           }
@@ -156,7 +150,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $bad = 'C:\Temp\bad"path.ps1'
-          $lines = @('# Unsafe path rejection experiment','',"Runner=${{ matrix.runner }}","PSVersion=$($PSVersionTable.PSVersion)")
+          $lines = @('# Unsafe path rejection experiment','','Runner=${{ matrix.runner }}',"PSVersion=$($PSVersionTable.PSVersion)")
           try {
             [void][IO.Path]::GetFullPath($bad)
             $lines += 'Platform accepted invalid quoted path: TRUE'
@@ -196,6 +190,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path repair-preview | Out-Null
           ./tools/Encode-ChildExec.ps1
           ./tools/Prometheus-RepairGeneratedArtifacts.ps1
+          ./tools/Sync-InstallerChecksum.ps1
           git status --short | Tee-Object -FilePath repair-preview/git-status.txt
           git diff -- . | Set-Content repair-preview/repair.diff
 
@@ -272,9 +267,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           ./tools/Encode-ChildExec.ps1
           ./tools/Prometheus-RepairGeneratedArtifacts.ps1
+          ./tools/Sync-InstallerChecksum.ps1
           ./tools/Test-WindoReservedVariables.ps1
           ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'Repair PR reproduction'
-
           $changed = @(git status --porcelain)
           if ($changed.Count -eq 0) {
             'changed=false' >> $env:GITHUB_OUTPUT
@@ -287,44 +282,45 @@ jobs:
         if: steps.repair.outputs.changed == 'true'
         shell: pwsh
         run: |
-          $entry = @"
-
----
-
-## $(Get-Date -Format 'yyyy-MM-dd') — Deterministic generated-artifact repair run ${{ github.run_id }}
-
-**Category:** experiment / tooling  
-**Status:** proposed  
-**Related:** workflow run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-### Context / question
-
-Generated WINDO artifacts differed from their canonical source or a repair drill was requested against `${{ inputs.target_ref }}`.
-
-### Evidence / observations
-
-The repair laboratory reran `Encode-ChildExec.ps1` and `Prometheus-RepairGeneratedArtifacts.ps1`, then validated reserved-variable safety and the local pre-sign contract. A deterministic source diff remained after regeneration.
-
-### Alternatives considered
-
-- Manually edit generated payloads.
-- Accept generated drift.
-- Regenerate only from canonical source and review the exact resulting diff.
-
-### Decision / hypothesis
-
-Never hand-edit generated WINDO payloads. Regenerate deterministically from canonical source, validate the result, and review the repair as a normal PR. Private signing remains a separate post-review boundary.
-
-### Result
-
-This repair branch contains only the deterministic regeneration result plus this journal entry. It has not been signed or published.
-
-### Follow-up
-
-- Review the generated diff.
-- After merge-ready validation, regenerate release metadata as required and sign only in the private signing environment.
-"@
-          Add-Content -LiteralPath docs/ENGINEER_JOURNAL.md -Value $entry -Encoding UTF8
+          $lines = @(
+            '',
+            '---',
+            '',
+            "## $(Get-Date -Format 'yyyy-MM-dd') — Deterministic generated-artifact repair run ${{ github.run_id }}",
+            '',
+            '**Category:** experiment / tooling  ',
+            '**Status:** proposed  ',
+            '**Related:** workflow run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}',
+            '',
+            '### Context / question',
+            '',
+            'Generated WINDO artifacts differed from their canonical source or a repair drill was requested against `${{ inputs.target_ref }}`.',
+            '',
+            '### Evidence / observations',
+            '',
+            'The repair laboratory reran canonical generation and checksum synchronization, then validated reserved-variable safety and the local pre-sign contract. A deterministic source diff remained after regeneration.',
+            '',
+            '### Alternatives considered',
+            '',
+            '- Manually edit generated payloads.',
+            '- Accept generated drift.',
+            '- Regenerate only from canonical source and review the exact resulting diff.',
+            '',
+            '### Decision / hypothesis',
+            '',
+            'Never hand-edit generated WINDO payloads. Regenerate deterministically from canonical source, validate the result, and review the repair as a normal PR. Private signing remains a separate post-review boundary.',
+            '',
+            '### Result',
+            '',
+            'This repair branch contains only the deterministic regeneration result plus this journal entry. It has not been privately signed or published.',
+            '',
+            '### Follow-up',
+            '',
+            '- Review the generated diff.',
+            '- Sign only in the private signing environment after merge-ready validation.'
+          )
+          Add-Content -LiteralPath docs/ENGINEER_JOURNAL.md -Value ($lines -join "`n") -Encoding UTF8
+          Add-Content -LiteralPath docs/ENGINEER_JOURNAL.md -Value "`n" -Encoding UTF8
 
       - name: Commit, push, and open PR
         if: steps.repair.outputs.changed == 'true'
@@ -338,14 +334,13 @@ This repair branch contains only the deterministic regeneration result plus this
           git add -A
           git commit -m 'repair: regenerate WINDO derived artifacts'
           git push origin $branch
-
-          $body = @"
-          ## Deterministic WINDO generated-artifact repair
-
-          Created by `WINDO Repair Laboratory` from `${{ inputs.target_ref }}`.
-
-          The workflow regenerated artifacts only from canonical source, reran reserved-variable protection and the pre-sign validation contract, and appended the experiment to the Engineer Journal.
-
-          This PR does **not** contain or use the private release signing key and does not publish a release.
-          "@
+          $body = @(
+            '## Deterministic WINDO generated-artifact repair',
+            '',
+            'Created by WINDO Repair Laboratory from `${{ inputs.target_ref }}`.',
+            '',
+            'The workflow regenerated artifacts only from canonical source, synchronized the unsigned checksum candidate, reran reserved-variable protection and the pre-sign validation contract, and appended the experiment to the Engineer Journal.',
+            '',
+            'This PR does **not** contain or use the private release signing key and does not publish a release.'
+          ) -join "`n"
           gh pr create --repo '${{ github.repository }}' --base '${{ inputs.target_ref }}' --head $branch --title 'repair: regenerate WINDO derived artifacts' --body $body
