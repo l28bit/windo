@@ -1,0 +1,176 @@
+name: WINDO Engineer Journal Capture
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: Short journal entry title
+        required: true
+        type: string
+      category:
+        description: Engineering category
+        required: true
+        default: experiment
+        type: choice
+        options:
+          - decision
+          - experiment
+          - incident
+          - architecture
+          - release
+          - security
+          - tooling
+          - process
+      status:
+        description: Entry status
+        required: true
+        default: active
+        type: choice
+        options:
+          - proposed
+          - active
+          - validated
+          - resolved
+          - superseded
+      related:
+        description: PR / issue / run / commit references
+        required: false
+        type: string
+      context:
+        description: What question or problem were we addressing?
+        required: true
+        type: string
+      evidence:
+        description: Evidence and observations
+        required: true
+        type: string
+      alternatives:
+        description: Alternatives considered; separate items with semicolons
+        required: true
+        type: string
+      decision:
+        description: Decision or current hypothesis and why
+        required: true
+        type: string
+      result:
+        description: Result, including failed experiment outcome if applicable
+        required: true
+        type: string
+      follow_up:
+        description: Follow-up items; separate items with semicolons
+        required: true
+        type: string
+      base_ref:
+        description: Branch that should receive the journal PR
+        required: true
+        default: jonex/windo-production-ready
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  capture:
+    name: Create reviewed journal entry PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      JOURNAL_TITLE: ${{ inputs.title }}
+      JOURNAL_CATEGORY: ${{ inputs.category }}
+      JOURNAL_STATUS: ${{ inputs.status }}
+      JOURNAL_RELATED: ${{ inputs.related }}
+      JOURNAL_CONTEXT: ${{ inputs.context }}
+      JOURNAL_EVIDENCE: ${{ inputs.evidence }}
+      JOURNAL_ALTERNATIVES: ${{ inputs.alternatives }}
+      JOURNAL_DECISION: ${{ inputs.decision }}
+      JOURNAL_RESULT: ${{ inputs.result }}
+      JOURNAL_FOLLOW_UP: ${{ inputs.follow_up }}
+      BASE_REF: ${{ inputs.base_ref }}
+    steps:
+      - name: Checkout journal base
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.base_ref }}
+          fetch-depth: 0
+
+      - name: Append structured journal entry
+        shell: python
+        run: |
+          import datetime
+          import os
+          import pathlib
+
+          journal = pathlib.Path('docs/ENGINEER_JOURNAL.md')
+          if not journal.exists():
+              raise SystemExit('docs/ENGINEER_JOURNAL.md is missing on the selected base ref.')
+
+          def bullets(value):
+              items = [item.strip() for item in value.split(';') if item.strip()]
+              return '\n'.join(f'- {item}' for item in items) if items else '- None recorded.'
+
+          today = datetime.date.today().isoformat()
+          related = os.environ.get('JOURNAL_RELATED', '').strip() or f"workflow run {os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')}"
+
+          entry = f"""
+
+---
+
+## {today} — {os.environ['JOURNAL_TITLE'].strip()}
+
+**Category:** {os.environ['JOURNAL_CATEGORY']}  
+**Status:** {os.environ['JOURNAL_STATUS']}  
+**Related:** {related}
+
+### Context / question
+
+{os.environ['JOURNAL_CONTEXT'].strip()}
+
+### Evidence / observations
+
+{os.environ['JOURNAL_EVIDENCE'].strip()}
+
+### Alternatives considered
+
+{bullets(os.environ['JOURNAL_ALTERNATIVES'])}
+
+### Decision / hypothesis
+
+{os.environ['JOURNAL_DECISION'].strip()}
+
+### Result
+
+{os.environ['JOURNAL_RESULT'].strip()}
+
+### Follow-up
+
+{bullets(os.environ['JOURNAL_FOLLOW_UP'])}
+"""
+          with journal.open('a', encoding='utf-8', newline='\n') as handle:
+              handle.write(entry)
+          print(entry)
+
+      - name: Commit journal branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="journal/entry-${GITHUB_RUN_ID}"
+          git config user.name 'windo-journal-bot'
+          git config user.email 'windo-journal-bot@users.noreply.github.com'
+          git switch -c "$branch"
+          git add docs/ENGINEER_JOURNAL.md
+          git commit -m "docs: journal ${JOURNAL_TITLE}"
+          git push origin "$branch"
+          echo "JOURNAL_BRANCH=$branch" >> "$GITHUB_ENV"
+
+      - name: Open reviewable journal PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base "$BASE_REF" \
+            --head "$JOURNAL_BRANCH" \
+            --title "journal: $JOURNAL_TITLE" \
+            --body "Structured Engineer Journal entry captured by the WINDO Engineer Journal workflow. Review the reasoning and evidence exactly like any other engineering change before merge."
