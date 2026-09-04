@@ -1,0 +1,156 @@
+name: WINDO Flake Hunter
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Branch, tag, or SHA to exercise repeatedly
+        required: true
+        default: jonex/windo-production-ready
+        type: string
+      repetitions:
+        description: Number of repetitions per host (2-10)
+        required: true
+        default: '5'
+        type: string
+      probe:
+        description: Probe to repeat
+        required: true
+        default: logic
+        type: choice
+        options:
+          - logic
+          - release
+          - presign
+          - checksum-signature
+
+permissions:
+  contents: read
+
+jobs:
+  repeatability:
+    name: ${{ inputs.probe }} / ${{ matrix.shell }} / ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            shell: PS5.1
+            executable: powershell.exe
+          - runner: windows-2025
+            shell: PS5.1
+            executable: powershell.exe
+          - runner: windows-2022
+            shell: PS7
+            executable: pwsh.exe
+          - runner: windows-2025
+            shell: PS7
+            executable: pwsh.exe
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.target_ref }}
+          persist-credentials: false
+
+      - name: Validate repetition count
+        id: count
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $count = 0
+          if (-not [int]::TryParse('${{ inputs.repetitions }}', [ref]$count) -or $count -lt 2 -or $count -gt 10) {
+            throw 'repetitions must be an integer between 2 and 10.'
+          }
+          "count=$count" >> $env:GITHUB_OUTPUT
+
+      - name: Run repeated probe in fresh processes
+        id: hunt
+        shell: pwsh
+        env:
+          TARGET_EXE: ${{ matrix.executable }}
+          PROBE: ${{ inputs.probe }}
+          REPETITIONS: ${{ steps.count.outputs.count }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path flake-hunter | Out-Null
+
+          $probeScript = switch ($env:PROBE) {
+            'logic'              { '.\tools\Test-WindoLogic.ps1' }
+            'release'            { '.\tools\Validate-Windo.ps1 -RequireCurrentSnapshot' }
+            'presign'            { '.\tools\Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel "Flake Hunter"' }
+            'checksum-signature' { '.\tools\Test-WindoChecksumSignature.ps1' }
+            default              { throw "Unknown probe: $env:PROBE" }
+          }
+
+          $results = @()
+          for ($i = 1; $i -le [int]$env:REPETITIONS; $i++) {
+            $log = Join-Path flake-hunter ("run-{0:d2}.log" -f $i)
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            $output = & $env:TARGET_EXE -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $probeScript 2>&1
+            $code = $LASTEXITCODE
+            $sw.Stop()
+            @($output | ForEach-Object { [string]$_ }) | Set-Content -LiteralPath $log -Encoding UTF8
+            $results += [pscustomobject]@{
+              Iteration = $i
+              ExitCode = $code
+              Passed = ($code -eq 0)
+              DurationMs = $sw.ElapsedMilliseconds
+              Log = $log
+            }
+            Write-Host "iteration=$i exit=$code durationMs=$($sw.ElapsedMilliseconds)"
+          }
+
+          $passes = @($results | Where-Object Passed).Count
+          $failures = $results.Count - $passes
+          $classification = if ($passes -eq $results.Count) {
+            'NOT_REPRODUCED'
+          } elseif ($failures -eq $results.Count) {
+            'DETERMINISTIC_FAILURE'
+          } else {
+            'FLAKY_OR_STATEFUL'
+          }
+
+          $summary = @(
+            '# WINDO Flake Hunter',
+            '',
+            "Target: `${{ inputs.target_ref }}`",
+            "Probe: `$env:PROBE`",
+            "Runner: `${{ matrix.runner }}`",
+            "Shell: `${{ matrix.shell }}`",
+            "Repetitions: $($results.Count)",
+            "Passes: $passes",
+            "Failures: $failures",
+            "Classification: **$classification**",
+            '',
+            '| Iteration | Exit | Passed | Duration ms |',
+            '|---:|---:|:---:|---:|'
+          )
+          foreach ($row in $results) {
+            $summary += "| $($row.Iteration) | $($row.ExitCode) | $($row.Passed) | $($row.DurationMs) |"
+          }
+          $summary | Set-Content -LiteralPath flake-hunter/SUMMARY.md -Encoding UTF8
+          $summary | ForEach-Object { Write-Host $_ }
+
+          "classification=$classification" >> $env:GITHUB_OUTPUT
+          "passes=$passes" >> $env:GITHUB_OUTPUT
+          "failures=$failures" >> $env:GITHUB_OUTPUT
+
+      - name: Publish repeatability summary
+        shell: pwsh
+        run: Get-Content -LiteralPath flake-hunter/SUMMARY.md | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload repeatability evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: flake-${{ inputs.probe }}-${{ matrix.shell }}-${{ matrix.runner }}-${{ github.run_id }}
+          path: flake-hunter
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Mark flaky behavior as a diagnostic failure
+        if: steps.hunt.outputs.classification == 'FLAKY_OR_STATEFUL'
+        shell: pwsh
+        run: throw 'Repeated executions produced mixed outcomes. Treat this as flaky/stateful behavior and inspect the evidence artifact.'

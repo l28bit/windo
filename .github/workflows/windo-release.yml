@@ -1,0 +1,142 @@
+name: WINDO Release Factory
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to create or update, for example v8.5.9'
+        required: true
+        type: string
+      publish:
+        description: 'Publish/update the GitHub Release after all gates pass'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windo-release-factory
+  cancel-in-progress: false
+
+jobs:
+  certify:
+    name: Certify signed production source
+    runs-on: windows-2022
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact production-ready source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: jonex/windo-production-ready
+
+      - name: Lock certified source commit
+        id: source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $branch = git branch --show-current
+          if ($branch -ne 'jonex/windo-production-ready') {
+            throw "Release factory checked out unexpected branch: $branch"
+          }
+          $commit = (git rev-parse HEAD).Trim()
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+          Write-Host "Certified source commit: $commit"
+
+      - name: Full release validation
+        shell: pwsh
+        run: |
+          ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+          ./tools/Test-WindoLogic.ps1
+          ./tools/Test-WindoReservedVariables.ps1
+          ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode Full -Worker -WorkerLabel 'GitHub Release Factory'
+          ./tools/Test-WindoChecksumSignature.ps1
+
+      - name: Build immutable release bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          Copy-Item bootstrap.ps1 dist/WINDO-Install-Latest.ps1
+          Copy-Item windo_install.ps1 dist/windo_install.ps1
+          Copy-Item windo_uninstall.ps1 dist/windo_uninstall.ps1
+          Copy-Item checksums/installer.sha256 dist/installer.sha256
+          Copy-Item checksums/installer.sha256.sig dist/installer.sha256.sig
+          Copy-Item keys/windo-release-public.rsa.xml dist/windo-release-public.rsa.xml
+
+          git rev-parse HEAD | Set-Content -NoNewline dist/release-commit.txt
+          Get-FileHash dist/* -Algorithm SHA256 |
+            Sort-Object Path |
+            ForEach-Object { '{0}  {1}' -f $_.Hash.ToLowerInvariant(), (Split-Path $_.Path -Leaf) } |
+            Set-Content dist/SHA256SUMS.txt
+
+          Compress-Archive -Path dist/WINDO-Install-Latest.ps1,dist/windo_install.ps1,dist/windo_uninstall.ps1,dist/installer.sha256,dist/installer.sha256.sig,dist/windo-release-public.rsa.xml,dist/release-commit.txt,dist/SHA256SUMS.txt -DestinationPath dist/WINDO-Release-Bundle.zip
+
+      - name: Upload certified release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windo-release-${{ inputs.release_tag }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish stable human-facing installer
+    if: ${{ inputs.publish }}
+    needs: certify
+    runs-on: windows-2022
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout the exact certified commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.certify.outputs.commit }}
+
+      - name: Rebuild public assets from certified source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item bootstrap.ps1 dist/WINDO-Install-Latest.ps1
+          Copy-Item windo_install.ps1 dist/windo_install.ps1
+          Copy-Item windo_uninstall.ps1 dist/windo_uninstall.ps1
+          Copy-Item checksums/installer.sha256 dist/installer.sha256
+          Copy-Item checksums/installer.sha256.sig dist/installer.sha256.sig
+          Copy-Item keys/windo-release-public.rsa.xml dist/windo-release-public.rsa.xml
+          git rev-parse HEAD | Set-Content -NoNewline dist/release-commit.txt
+          Get-FileHash dist/* -Algorithm SHA256 |
+            Sort-Object Path |
+            ForEach-Object { '{0}  {1}' -f $_.Hash.ToLowerInvariant(), (Split-Path $_.Path -Leaf) } |
+            Set-Content dist/SHA256SUMS.txt
+          Compress-Archive -Path dist/* -DestinationPath dist/WINDO-Release-Bundle.zip
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $commit = (git rev-parse HEAD).Trim()
+          $title = "WINDO $env:TAG"
+          $notes = @"
+          WINDO certified release from commit $commit.
+
+          Stable installer:
+          https://github.com/l28bit/windo/releases/latest/download/WINDO-Install-Latest.ps1
+
+          The public installer asset is an exact copy of the release's canonical bootstrap.ps1. The bootstrap resolves immutable source and verifies the signed release contract before the privileged handoff.
+          "@
+
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG dist/* --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $env:TAG dist/* --target $commit --title $title --notes $notes --latest --repo $env:GITHUB_REPOSITORY
+          }

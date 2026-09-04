@@ -1,0 +1,80 @@
+name: WINDO Published Release Canary
+
+on:
+  schedule:
+    - cron: '17 11 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windo-published-release-canary
+  cancel-in-progress: true
+
+jobs:
+  public-install-entrypoint:
+    name: Public installer trust-chain canary
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout source for verifier
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Download the exact public-facing installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $uri = 'https://github.com/l28bit/windo/releases/latest/download/WINDO-Install-Latest.ps1'
+          Invoke-WebRequest -Uri $uri -UseBasicParsing -OutFile WINDO-Install-Latest.ps1
+          if ((Get-Item WINDO-Install-Latest.ps1).Length -lt 1000) {
+            throw 'Published installer entrypoint is unexpectedly small.'
+          }
+
+      - name: Parse public installer on PowerShell 7
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path WINDO-Install-Latest.ps1),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw 'Published installer failed PowerShell 7 parsing.'
+          }
+
+      - name: Parse public installer on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path WINDO-Install-Latest.ps1),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw 'Published installer failed Windows PowerShell 5.1 parsing.'
+          }
+
+      - name: Require release asset to equal canonical bootstrap
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $public = [IO.File]::ReadAllText((Resolve-Path WINDO-Install-Latest.ps1))
+          $canonical = [IO.File]::ReadAllText((Resolve-Path bootstrap.ps1))
+          $normalize = {
+            param([string]$Text)
+            ($Text -replace "`r`n","`n").TrimEnd("`n")
+          }
+          if ((& $normalize $public) -cne (& $normalize $canonical)) {
+            throw 'Published WINDO-Install-Latest.ps1 does not equal the canonical bootstrap.ps1 for the production branch.'
+          }
+
+      - name: Public entrypoint SHA256
+        shell: pwsh
+        run: Get-FileHash WINDO-Install-Latest.ps1 -Algorithm SHA256 | Format-List

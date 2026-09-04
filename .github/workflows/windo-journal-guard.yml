@@ -1,0 +1,70 @@
+name: WINDO Engineer Journal Guard
+
+on:
+  pull_request:
+    branches:
+      - jonex/windo-production-ready
+      - Exodus
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  journal-contract:
+    name: Engineer Journal contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout full comparison history
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Require journal update for material engineering changes
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          mapfile -t changed < <(git diff --name-only "$base" "$head")
+
+          printf '%s\n' "${changed[@]}" | tee /tmp/windo-changed-files.txt
+
+          material=0
+          for path in "${changed[@]}"; do
+            case "$path" in
+              .github/workflows/*|src/*|tools/*|checksums/*|versions/*|keys/*|bootstrap.ps1|windo_*.ps1)
+                material=1
+                ;;
+              docs/*architecture*|docs/*Architecture*|docs/*contract*|docs/*Contract*|docs/*security*|docs/*Security*|docs/*compatibility*|docs/*Compatibility*|docs/*release*|docs/*Release*)
+                material=1
+                ;;
+            esac
+          done
+
+          if [[ "$material" -eq 0 ]]; then
+            echo "No material engineering change detected; journal update is optional."
+            exit 0
+          fi
+
+          if ! printf '%s\n' "${changed[@]}" | grep -Fxq 'docs/ENGINEER_JOURNAL.md'; then
+            echo '::error file=docs/ENGINEER_JOURNAL.md::Material engineering changes require an Engineer Journal update.'
+            echo 'Record context, evidence, alternatives, decision, result, and follow-up.'
+            exit 1
+          fi
+
+          echo 'Engineer Journal updated with material engineering changes.'
+
+      - name: Validate journal structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s docs/ENGINEER_JOURNAL.md
+          grep -Fq '# WINDO Engineer Journal' docs/ENGINEER_JOURNAL.md
+          grep -Fq '### Alternatives considered' docs/ENGINEER_JOURNAL.md
+          grep -Fq '### Decision / hypothesis' docs/ENGINEER_JOURNAL.md
+          grep -Fq '### Result' docs/ENGINEER_JOURNAL.md
+          grep -Fq '### Follow-up' docs/ENGINEER_JOURNAL.md
