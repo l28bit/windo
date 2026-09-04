@@ -1,0 +1,202 @@
+name: WINDO Regression Bisect
+
+on:
+  workflow_dispatch:
+    inputs:
+      good_ref:
+        description: Known-good branch, tag, or commit
+        required: true
+        type: string
+      bad_ref:
+        description: Known-bad branch, tag, or commit
+        required: true
+        type: string
+      probe:
+        description: Stable probe used to classify each commit
+        required: true
+        default: logic
+        type: choice
+        options:
+          - parser
+          - logic
+          - release
+          - checksum-signature
+      runner:
+        description: Windows generation to reproduce on
+        required: true
+        default: windows-2022
+        type: choice
+        options:
+          - windows-2022
+          - windows-2025
+      powershell_host:
+        description: PowerShell host
+        required: true
+        default: PS7
+        type: choice
+        options:
+          - PS5.1
+          - PS7
+
+permissions:
+  contents: read
+
+jobs:
+  bisect:
+    name: ${{ inputs.probe }} / ${{ inputs.powershell_host }} / ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 60
+    steps:
+      - name: Checkout full repository history
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.bad_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve and validate bisection boundary
+        id: refs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git fetch --all --tags --prune
+          $good = (git rev-parse '${{ inputs.good_ref }}').Trim()
+          $bad = (git rev-parse '${{ inputs.bad_ref }}').Trim()
+          if (-not $good -or -not $bad) { throw 'Could not resolve good_ref or bad_ref.' }
+
+          git merge-base --is-ancestor $good $bad
+          if ($LASTEXITCODE -ne 0) {
+            throw "Known-good $good is not an ancestor of known-bad $bad. A linear ancestry boundary is required for deterministic bisection."
+          }
+
+          "good=$good" >> $env:GITHUB_OUTPUT
+          "bad=$bad" >> $env:GITHUB_OUTPUT
+          Write-Host "good=$good"
+          Write-Host "bad=$bad"
+
+      - name: Create stable commit probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path bisect-evidence | Out-Null
+          @'
+          param(
+            [Parameter(Mandatory=$true)][string]$HostExe,
+            [Parameter(Mandatory=$true)][string]$Probe
+          )
+
+          $ErrorActionPreference = 'Stop'
+
+          function Invoke-Child([string]$ScriptPath, [string[]]$Arguments = @()) {
+            if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) { exit 125 }
+            & $HostExe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $ScriptPath @Arguments *> $null
+            exit $LASTEXITCODE
+          }
+
+          switch ($Probe) {
+            'parser' {
+              $candidates = @('bootstrap.ps1','windo_install.ps1','windo_runner.ps1','windo_uninstall.ps1') |
+                Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+              if ($candidates.Count -eq 0) { exit 125 }
+              $script = @'
+          $failed = $false
+          foreach ($file in $args) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $file), [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
+          exit 0
+          '@
+              & $HostExe -NoLogo -NoProfile -NonInteractive -Command $script @candidates *> $null
+              exit $LASTEXITCODE
+            }
+            'logic' { Invoke-Child '.\tools\Test-WindoLogic.ps1' }
+            'release' { Invoke-Child '.\tools\Validate-Windo.ps1' @('-RequireCurrentSnapshot') }
+            'checksum-signature' { Invoke-Child '.\tools\Test-WindoChecksumSignature.ps1' }
+            default { exit 125 }
+          }
+          '@ | Set-Content -LiteralPath bisect-evidence/probe.ps1 -Encoding UTF8
+
+      - name: Bisect first bad commit
+        id: bisect
+        shell: pwsh
+        env:
+          GOOD_SHA: ${{ steps.refs.outputs.good }}
+          BAD_SHA: ${{ steps.refs.outputs.bad }}
+          PROBE: ${{ inputs.probe }}
+          POWERSHELL_HOST: ${{ inputs.powershell_host }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $hostExe = if ($env:POWERSHELL_HOST -eq 'PS5.1') { 'powershell.exe' } else { 'pwsh.exe' }
+          $probePath = (Resolve-Path 'bisect-evidence/probe.ps1').Path
+
+          git bisect reset 2>$null | Out-Null
+          git bisect start $env:BAD_SHA $env:GOOD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'git bisect start failed.' }
+
+          $output = & git bisect run $hostExe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePath -HostExe $hostExe -Probe $env:PROBE 2>&1
+          $bisectExit = $LASTEXITCODE
+          @($output | ForEach-Object { [string]$_ }) | Tee-Object -FilePath bisect-evidence/bisect-run.txt
+          git bisect log | Set-Content bisect-evidence/bisect-log.txt
+
+          $candidate = (git rev-parse HEAD).Trim()
+          "candidate=$candidate" >> $env:GITHUB_OUTPUT
+          "bisect_exit=$bisectExit" >> $env:GITHUB_OUTPUT
+
+          if ($bisectExit -eq 0) {
+            git show --no-ext-diff --stat --summary $candidate | Set-Content bisect-evidence/first-bad-summary.txt
+            git diff "$candidate^" $candidate --name-status | Set-Content bisect-evidence/first-bad-files.txt
+          } else {
+            "Bisection could not determine one first-bad commit. Exit=$bisectExit. Skipped historical commits or probe incompatibility may be responsible." |
+              Set-Content bisect-evidence/INDETERMINATE.txt
+          }
+
+          git bisect reset | Out-Null
+
+      - name: Build regression report
+        shell: pwsh
+        run: |
+          $candidate = '${{ steps.bisect.outputs.candidate }}'
+          $exitCode = '${{ steps.bisect.outputs.bisect_exit }}'
+          $status = if ($exitCode -eq '0') { 'FIRST_BAD_IDENTIFIED' } else { 'INDETERMINATE' }
+          $report = @(
+            '# WINDO Regression Bisect',
+            '',
+            "Good: `${{ steps.refs.outputs.good }}`",
+            "Bad: `${{ steps.refs.outputs.bad }}`",
+            "Probe: `${{ inputs.probe }}`",
+            "PowerShell: `${{ inputs.powershell_host }}`",
+            "Runner: `${{ inputs.runner }}`",
+            "Status: **$status**",
+            "Candidate: `$candidate`",
+            ''
+          )
+          if (Test-Path bisect-evidence/first-bad-summary.txt) {
+            $report += '## Candidate commit'
+            $report += ''
+            $report += '```text'
+            $report += Get-Content bisect-evidence/first-bad-summary.txt
+            $report += '```'
+            $report += ''
+          }
+          $report += '## Engineering Journal guidance'
+          $report += ''
+          $report += 'Record the candidate as evidence, not proof of root cause. Review the diff and reproduce the behavior directly before declaring the regression resolved.'
+          $report | Set-Content bisect-evidence/SUMMARY.md -Encoding UTF8
+          $report | ForEach-Object { Write-Host $_ }
+          $report | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload bisection evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: regression-bisect-${{ github.run_id }}
+          path: bisect-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail when bisection is indeterminate
+        if: steps.bisect.outputs.bisect_exit != '0'
+        shell: pwsh
+        run: throw 'Regression bisection was indeterminate. Inspect skipped commits and the evidence artifact.'
