@@ -389,3 +389,54 @@ Failure Triage now includes a common escalation path: preserve evidence → esta
 - Add new bisection probes only when they remain meaningful across historical repository states.
 - Treat mixed Flake Hunter outcomes as a state/timing investigation, not as permission to retry CI until green.
 - Use bisection candidates to improve classifier rules only after root cause is validated.
+
+---
+
+## 2026-09-04 — Issue #8 gets a strict no-waiver DPAPI runtime repair
+
+**Category:** incident / experiment / security  
+**Status:** active  
+**Related:** Issue #8, branch `fix/ps51-dpapi-resolution-20260904`, `WINDO Issue 8 DPAPI Certification`
+
+### Context / question
+
+PR #6 deliberately landed the CI, recovery, and Engineer Journal platform without pretending the known Windows PowerShell 5.1 DPAPI defect was repaired. The next clean development branch therefore needed a finish line that could not inherit the temporary Issue #8 baseline waiver.
+
+### Evidence / observations
+
+- The production baseline proved fresh Windows PowerShell 5.1 could not initially resolve `System.Security.Cryptography.ProtectedData` on Windows Server 2022 or 2025.
+- The temporary baseline also proved `Add-Type -AssemblyName System.Security` restores usable CurrentUser DPAPI in the same process.
+- A first repair experiment loaded `System.Security` and repeated the existing `Type.GetType(..., System.Security)` lookup. The assembly loaded successfully, but the short assembly-name lookup still returned null in a fresh PS5.1 process.
+- A second experiment loaded `System.Security` and resolved `ProtectedData` from the assemblies actually loaded into the current AppDomain. The strict shipping-helper probe then completed a real DPAPI protect/unprotect round-trip under Windows PowerShell 5.1.
+- PowerShell 7 passed the same strict shipping-helper probe without using the PS5.1 fallback.
+
+### Alternatives considered
+
+- Leave the temporary Issue #8 baseline in place and call the compatibility problem acceptable.
+- Add `System.Security` loading but continue relying on the same assembly-qualified lookup that the experiment proved ineffective.
+- Directly reference `ProtectedData` after the assembly load without verifying the exact shipping helper path.
+- Load the framework assembly only for PowerShell 5.x, resolve the type from the loaded AppDomain assemblies, and certify the actual helper through an extracted-AST runtime probe.
+
+### Decision / hypothesis
+
+Keep the existing PowerShell 7-friendly assembly-qualified lookup first. Only when running PowerShell 5.x and those lookups fail, explicitly load the .NET Framework `System.Security` assembly and search the current AppDomain assemblies for the exact `System.Security.Cryptography.ProtectedData` type.
+
+The repair is applied once to canonical `windo_runner.ps1`. `Prometheus-RepairGeneratedArtifacts.ps1` then propagates the canonical runner into the installer rather than allowing hand-edited embedded payloads.
+
+The strict Issue #8 certification intentionally has no known-baseline waiver: both Windows Server 2022 and 2025 must prove a real CurrentUser DPAPI round-trip under Windows PowerShell 5.1, with PowerShell 7 as a control.
+
+### Result
+
+The controlled repair demonstrated that the AppDomain-resolution approach restores the actual shipping helper under fresh Windows PowerShell 5.1 while preserving the PowerShell 7 path. The repair is materialized on an isolated automation branch so CI never races a moving source branch.
+
+The release is not yet considered publishable because changing the signed runtime requires refreshed release metadata and a new private signature outside hosted CI.
+
+### Follow-up
+
+- Run the complete PS5.1/PS7 × Windows Server 2022/2025 Issue #8 certification matrix on the reviewable repair PR.
+- Correct the two PS5.1 host-sensitive test assertions without weakening their security properties.
+- Remove the temporary `Test-WindoKnownPs51Baseline.ps1` waiver once strict PS5.1 validation is green without it.
+- Refresh release hashes/snapshot and sign only in the private signing environment.
+- Complete privileged Windows install/elevate/stdout/stderr/exit-code/Ctrl+C/uninstall certification before publication.
+
+
