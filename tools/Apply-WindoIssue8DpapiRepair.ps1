@@ -97,8 +97,12 @@ if ($parseErrors.Count -gt 0) {
 }
 
 # Prometheus-RepairGeneratedArtifacts.ps1 is PowerShell and reports failures by
-# throwing. Do not inspect $LASTEXITCODE here: that variable belongs to native
-# process execution and is not guaranteed to exist after invoking a .ps1 file.
+# throwing. It is also the canonical byte-generation boundary: it normalizes
+# generated release text to LF before writing so output is stable on Windows and
+# Linux while preserving the installer's required UTF-8 BOM.
+#
+# Do not inspect $LASTEXITCODE here: that variable belongs to native process
+# execution and is not guaranteed to exist after invoking a .ps1 file.
 & $generatorPath
 
 Write-Host 'Issue #8 source repair and generated-artifact propagation completed.' -ForegroundColor Green
