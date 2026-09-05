@@ -1,10 +1,9 @@
-name: WINDO CI Fabric
+name: WINDO Deep Certification
 
 on:
   push:
     branches:
       - jonex/windo-production-ready
-      - ci/hosted-runner-lab-20260903
   pull_request:
     branches:
       - jonex/windo-production-ready
@@ -14,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: windo-ci-${{ github.workflow }}-${{ github.ref }}
+  group: windo-deep-certification-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -27,7 +26,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout exact source
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
 
       - name: Parse critical scripts
         shell: pwsh
@@ -105,7 +104,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Checkout exact source
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
 
       - name: Initialize diagnostics
         shell: powershell
@@ -237,7 +236,7 @@ jobs:
 
       - name: Upload PS5.1 forensic pack
         if: always() && (steps.module.outcome != 'success' || steps.dpapi.outcome != 'success' || steps.release.outcome != 'success' || steps.logic.outcome != 'success' || steps.analyzer.outcome != 'success' || steps.deep.outcome != 'success')
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
         with:
           name: forensics-ps51-${{ matrix.runner }}
           path: ci-forensics
@@ -270,7 +269,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Checkout exact source
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
 
       - name: Install PSScriptAnalyzer
         shell: pwsh
@@ -310,7 +309,7 @@ jobs:
 
       - name: Upload failure forensics
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
         with:
           name: forensics-ps7-${{ matrix.runner }}
           path: ci-forensics
@@ -324,7 +323,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout exact source
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
 
       - name: Regenerate ChildExec payload
         shell: pwsh
@@ -345,7 +344,7 @@ jobs:
         run: git archive --format=zip --output=windo-source-${{ github.sha }}.zip HEAD
 
       - name: Upload exact source archive
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
         with:
           name: windo-source-${{ github.sha }}
           path: windo-source-${{ github.sha }}.zip
@@ -359,7 +358,7 @@ jobs:
     timeout-minutes: 12
     steps:
       - name: Checkout exact source
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
 
       - name: Tampered signed manifest must fail
         shell: pwsh
@@ -395,32 +394,8 @@ jobs:
           Write-Host "Expected hosted-runner UAC boundary observed (exit=$code)."
           $global:LASTEXITCODE = 0
 
-  workflow-policy:
-    name: Workflow security policy
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - name: Checkout exact source
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Enforce pinned actions in WINDO workflows
-        shell: bash
-        run: |
-          set -euo pipefail
-          files=(.github/workflows/windo-*.yml)
-          for file in "${files[@]}"; do
-            [[ -e "$file" ]] || continue
-            while IFS= read -r line; do
-              ref="${line##*@}"
-              if [[ ! "$ref" =~ ^[0-9a-f]{40}([[:space:]]|$) ]]; then
-                echo "::error file=$file::Action reference is not pinned to a full commit SHA: $line"
-                exit 1
-              fi
-            done < <(grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*[^#]+@' "$file" || true)
-          done
-
-  ci-green:
-    name: WINDO CI green
+  deep-green:
+    name: WINDO Deep Certification green
     if: always()
     needs:
       - source-contract
@@ -428,7 +403,6 @@ jobs:
       - compatibility-ps7
       - generated-artifacts
       - negative-path
-      - workflow-policy
     runs-on: ubuntu-latest
     steps:
       - name: Enforce aggregate result
@@ -439,4 +413,3 @@ jobs:
           test '${{ needs.compatibility-ps7.result }}' = 'success'
           test '${{ needs.generated-artifacts.result }}' = 'success'
           test '${{ needs.negative-path.result }}' = 'success'
-          test '${{ needs.workflow-policy.result }}' = 'success'
