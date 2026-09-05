@@ -10,10 +10,18 @@ $PayloadPath = Join-Path $Root 'tools\ChildExec.b64.txt'
 $RunnerPath = Join-Path $Root 'windo_runner.ps1'
 $InstallerPath = Join-Path $Root 'windo_install.ps1'
 $ReportPath = Join-Path $Root 'docs\prometheus-generated-repair-report.md'
+$Lf = "`n"
+
+function ConvertTo-CanonicalLfText {
+    param([AllowEmptyString()][string]$Content)
+    if ($null -eq $Content) { return $null }
+    return $Content.Replace("`r`n", "`n").Replace("`r", "`n")
+}
 
 function Write-Utf8BomFile {
     param([string]$Path, [string]$Content)
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
+    $canonical = ConvertTo-CanonicalLfText -Content $Content
+    [System.IO.File]::WriteAllText($Path, $canonical, (New-Object System.Text.UTF8Encoding($true)))
 }
 
 function Write-Utf8NoBomFile {
@@ -22,7 +30,8 @@ function Write-Utf8NoBomFile {
     if ($parent -and -not (Test-Path -LiteralPath $parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
+    $canonical = ConvertTo-CanonicalLfText -Content $Content
+    [System.IO.File]::WriteAllText($Path, $canonical, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Get-Sha256Hex {
@@ -90,10 +99,11 @@ function Set-CanonicalChildExecAssignment {
         throw 'The unique $cs assignment is not the expected UTF8/FromBase64String ChildExec loader.'
     }
 
-    $newline = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
+    # Release artifacts are explicitly LF-pinned in .gitattributes. Always build
+    # generated blocks with LF so regeneration is byte-stable on Windows and Linux.
     $replacement = '$cs = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(' +
-        $newline + "        '" + $CanonicalPayload + "'" +
-        $newline + '    ))'
+        $Lf + "        '" + $CanonicalPayload + "'" +
+        $Lf + '    ))'
 
     $start = [int]$assignment.Extent.StartOffset
     $end = [int]$assignment.Extent.EndOffset
@@ -102,6 +112,7 @@ function Set-CanonicalChildExecAssignment {
     }
 
     $updated = $Text.Substring(0, $start) + $replacement + $Text.Substring($end)
+    $updated = ConvertTo-CanonicalLfText -Content $updated
     Assert-PowerShellTextParses -Text $updated -Label 'windo_runner.ps1 after ChildExec synchronization'
 
     return [pscustomobject]@{
@@ -117,26 +128,26 @@ foreach ($required in @($SourcePath, $RunnerPath, $InstallerPath)) {
     }
 }
 
-$source = [System.IO.File]::ReadAllText($SourcePath)
+$source = ConvertTo-CanonicalLfText -Content ([System.IO.File]::ReadAllText($SourcePath))
 $canonicalPayload = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($source))
 [System.IO.File]::WriteAllText(
     $PayloadPath,
-    $canonicalPayload + [Environment]::NewLine,
+    $canonicalPayload + $Lf,
     [System.Text.Encoding]::ASCII
 )
 
-$runnerText = [System.IO.File]::ReadAllText($RunnerPath)
+$runnerText = ConvertTo-CanonicalLfText -Content ([System.IO.File]::ReadAllText($RunnerPath))
 $runnerSync = Set-CanonicalChildExecAssignment -Text $runnerText -CanonicalPayload $canonicalPayload
 Write-Utf8NoBomFile -Path $RunnerPath -Content $runnerSync.Text
 
 # The installer publishes the standalone runner from RunnerContent. Replace the
 # complete embedded block from the now-canonical standalone runner so the two
 # artifacts cannot drift.
-$installerText = [System.IO.File]::ReadAllText($InstallerPath)
+$installerText = ConvertTo-CanonicalLfText -Content ([System.IO.File]::ReadAllText($InstallerPath))
 $runnerContentPattern = '(?ms)^\$RunnerContent = @''\r?\n.*?^''@\r?\nWrite-Utf8NoBomFile -Path \$RunnerPath -Content \$RunnerContent'
-$runnerContentReplacement = '$RunnerContent = @''' + [Environment]::NewLine +
-    $runnerSync.Text.TrimEnd("`r", "`n") + [Environment]::NewLine +
-    '''@' + [Environment]::NewLine +
+$runnerContentReplacement = '$RunnerContent = @''' + $Lf +
+    $runnerSync.Text.TrimEnd("`r", "`n") + $Lf +
+    '''@' + $Lf +
     'Write-Utf8NoBomFile -Path $RunnerPath -Content $RunnerContent'
 $updatedInstaller = [regex]::Replace(
     $installerText,
@@ -215,6 +226,7 @@ $report = @(
     '## Windows PowerShell encoding',
     '',
     "- Installer has explicit UTF-8 BOM: **$installerHasBom**",
+    '- Generated release text uses canonical LF newlines independent of host OS.',
     '',
     '## Parser gate',
     ''
@@ -232,7 +244,7 @@ $report += @(
     '',
     'Release checksums are regenerated only after the complete Prometheus runtime is finalized. No private signing key is stored in the repository.'
 )
-Write-Utf8NoBomFile -Path $ReportPath -Content (($report -join [Environment]::NewLine) + [Environment]::NewLine)
+Write-Utf8NoBomFile -Path $ReportPath -Content (($report -join $Lf) + $Lf)
 
 if (-not $sourceParity -or -not $runnerParity -or -not $installerHasBom) {
     throw "Generated artifact parity failed. See $ReportPath"
