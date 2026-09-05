@@ -12,22 +12,35 @@ if ($files.Count -eq 0) {
     throw "No workflow definitions found beneath $WorkflowRoot"
 }
 
-# Workflows on this allow-list are intentionally capable of creating repository
-# state. Every other workflow is expected to remain read-only. Adding a writer is
-# a security-sensitive architecture decision and must update this policy + journal.
+# Only workflows that intentionally create repository state belong here.
+# Adding a writer is a security-sensitive architecture decision and must update
+# this policy plus the Engineer Journal.
 $writerAllowList = @(
-    'prometheus-repair-sync.yml',
-    'prometheus-stage-repair.yml',
-    'windo-issue8-apply-repair.yml',
     'windo-journal-entry.yml',
-    'windo-regression-bisect.yml',
     'windo-release.yml',
     'windo-repair-lab.yml'
 )
 
-# Direct branch mutation from a validation workflow is forbidden. Approved
-# writers may create isolated branches/PRs or release state, but the workflow text
-# must not contain the known unsafe source-branch mutation pattern.
+# Diagnostic tools are explicit/manual engineering instruments. They must never
+# become push-triggered background CI merely because they happen to be useful.
+$manualOnlyWorkflows = @(
+    'windo-flake-hunter.yml',
+    'windo-journal-entry.yml',
+    'windo-regression-bisect.yml',
+    'windo-repair-lab.yml'
+)
+
+# These immutable pins were valid when introduced but target the deprecated
+# Node 20 Action runtime. The workflow estate is moving to verified Node 24
+# releases; once this policy lands, old pins cannot drift back in unnoticed.
+$deprecatedActionPins = @(
+    'actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5',
+    'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
+)
+
+# Direct mutation of authoritative/source branches from automation is forbidden.
+# Approved writers may publish isolated branches or release state, but never push
+# validation results directly into development or release lineages.
 $forbiddenPushPatterns = @(
     'git push origin HEAD:fix/ps51-dpapi-resolution-20260904',
     'git push origin HEAD:jonex/windo-production-ready',
@@ -53,6 +66,10 @@ foreach ($file in $files) {
         if ($value.StartsWith('./')) { continue }
         if (-not $shaPattern.IsMatch($value)) {
             $violations.Add("$relative uses an external action without an immutable 40-character SHA: $value")
+            continue
+        }
+        if ($value -in $deprecatedActionPins) {
+            $violations.Add("$relative uses a deprecated Node-20 Action pin: $value")
         }
     }
 
@@ -71,15 +88,23 @@ foreach ($file in $files) {
         }
     }
 
-    # Workflows described as laboratories or capture tools should not run on every
-    # push. Their role is explicit/manual experimentation, not authoritative CI.
-    if ($file.Name -in @('windo-repair-lab.yml', 'windo-journal-entry.yml')) {
+    if ($file.Name -in $manualOnlyWorkflows) {
         if ([regex]::IsMatch($text, '(?m)^\s{2}push:\s*$')) {
             $violations.Add("$relative is intended to be manual-only but declares a push trigger.")
+        }
+        if ([regex]::IsMatch($text, '(?m)^\s{2}pull_request:\s*$')) {
+            $violations.Add("$relative is intended to be manual-only but declares a pull_request trigger.")
         }
         if (-not [regex]::IsMatch($text, '(?m)^\s{2}workflow_dispatch:\s*$')) {
             $violations.Add("$relative is intended to be manual-only but has no workflow_dispatch trigger.")
         }
+    }
+}
+
+$presentNames = @($files.Name)
+foreach ($writer in $writerAllowList) {
+    if ($writer -notin $presentNames) {
+        $violations.Add("Workflow writer allow-list contains a nonexistent workflow: $writer")
     }
 }
 
@@ -91,3 +116,4 @@ if ($violations.Count -gt 0) {
 
 Write-Host "WINDO workflow policy: PASS ($($files.Count) workflow definitions inspected)"
 Write-Host "Approved state-changing workflows: $($writerAllowList -join ', ')"
+Write-Host "Manual-only diagnostic/capture workflows: $($manualOnlyWorkflows -join ', ')"
