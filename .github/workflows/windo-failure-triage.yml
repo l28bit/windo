@@ -130,7 +130,7 @@ jobs:
               '',
               '**Category:** incident / experiment',
               '**Status:** active',
-              f"**Related:** {run.get('html_url', '')",
+              f"**Related:** {run.get('html_url', '')}",
               '',
               '### Context / question',
               '<what failed and what behavior was expected>',
