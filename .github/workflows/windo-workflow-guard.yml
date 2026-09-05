@@ -1,0 +1,59 @@
+name: WINDO Workflow Definition Guard
+
+on:
+  push:
+    branches:
+      - jonex/windo-production-ready
+      - ci/fabric-hardening-20260905
+    paths:
+      - '.github/workflows/**'
+      - 'tools/Test-WindoWorkflowPolicy.ps1'
+  pull_request:
+    branches:
+      - jonex/windo-production-ready
+    paths:
+      - '.github/workflows/**'
+      - 'tools/Test-WindoWorkflowPolicy.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windo-workflow-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  definitions:
+    name: Actions syntax + WINDO policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Run actionlint pinned to immutable upstream commit
+        shell: bash
+        env:
+          ACTIONLINT_COMMIT: 914e7df21a07ef503a81201c76d2b11c789d3fca
+        run: |
+          set -euo pipefail
+          go run "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_COMMIT}" -color
+
+      - name: Enforce WINDO workflow trust and side-effect policy
+        shell: pwsh
+        run: ./tools/Test-WindoWorkflowPolicy.ps1
+
+      - name: Guard summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## WINDO workflow definition guard'
+            echo
+            echo '- GitHub Actions syntax/expression lint: actionlint pinned to `914e7df21a07ef503a81201c76d2b11c789d3fca`'
+            echo '- External actions: immutable SHA policy enforced'
+            echo '- Write-capable workflows: explicit allow-list enforced'
+            echo '- Known direct source-branch self-mutation patterns: forbidden'
+            echo '- Repair Lab / Journal Capture: manual-only policy enforced'
+          } >> "$GITHUB_STEP_SUMMARY"
