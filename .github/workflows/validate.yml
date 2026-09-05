@@ -41,6 +41,7 @@ jobs:
             'tools/Test-WindoLogic.ps1',
             'tools/Test-WindoReservedVariables.ps1',
             'tools/Test-WindoJournalContract.ps1',
+            'tools/New-WindoJournalEntry.ps1',
             'tools/Validate-Windo.ps1'
           )
           foreach ($file in $files) {
