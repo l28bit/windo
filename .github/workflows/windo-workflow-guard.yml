@@ -46,14 +46,15 @@ jobs:
 
       - name: Guard summary
         if: always()
-        shell: bash
+        shell: pwsh
         run: |
-          {
-            echo '## WINDO workflow definition guard'
-            echo
-            echo '- GitHub Actions syntax/expression lint: actionlint pinned to `914e7df21a07ef503a81201c76d2b11c789d3fca`'
-            echo '- External actions: immutable SHA policy enforced'
-            echo '- Write-capable workflows: explicit allow-list enforced'
-            echo '- Known direct source-branch self-mutation patterns: forbidden'
-            echo '- Repair Lab / Journal Capture: manual-only policy enforced'
-          } >> "$GITHUB_STEP_SUMMARY"
+          $lines = @(
+            '## WINDO workflow definition guard',
+            '',
+            '- GitHub Actions syntax/expression lint: actionlint pinned to commit 914e7df21a07ef503a81201c76d2b11c789d3fca',
+            '- External actions: immutable SHA policy enforced',
+            '- Write-capable workflows: explicit allow-list enforced',
+            '- Known direct source-branch self-mutation patterns: forbidden',
+            '- Repair Lab / Journal Capture: manual-only policy enforced'
+          )
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($lines -join "`n") -Encoding UTF8
