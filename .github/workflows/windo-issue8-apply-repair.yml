@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: windo-issue8-repair-materializer
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   materialize:
@@ -189,11 +189,11 @@ jobs:
           $lines = @(
             '## WINDO Issue #8 repair materialization',
             '',
-            '- Source commit: `${{ github.sha }}`',
-            '- Source branch: `fix/ps51-dpapi-resolution-20260904`',
-            "- Materialized branch: `$branchText`",
-            '- Private signing key used: **No**',
-            '- Source branch mutated by this workflow: **No**',
-            '- Pull request creation attempted by this workflow: **No**'
+            '- Source commit: ${{ github.sha }}',
+            '- Source branch: fix/ps51-dpapi-resolution-20260904',
+            ('- Materialized branch: {0}' -f $branchText),
+            '- Private signing key used: No',
+            '- Source branch mutated by this workflow: No',
+            '- Pull request creation attempted by this workflow: No'
           )
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($lines -join "`n") -Encoding UTF8
