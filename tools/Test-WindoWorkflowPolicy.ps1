@@ -12,16 +12,15 @@ if ($files.Count -eq 0) {
     throw "No workflow definitions found beneath $WorkflowRoot"
 }
 
-# Only workflows that intentionally create repository state belong here.
-# Adding a writer is a security-sensitive architecture decision and must update
-# this policy plus the Engineer Journal.
+# Only workflows that intentionally create durable repository state belong here.
+# Journal Capture may create one isolated journal branch. Release Factory may
+# create/update GitHub Release state. Diagnostics and certification are read-only.
 $writerAllowList = @(
     'windo-journal-entry.yml',
-    'windo-release.yml',
-    'windo-repair-lab.yml'
+    'windo-release.yml'
 )
 
-# Diagnostic tools are explicit/manual engineering instruments. They must never
+# Diagnostic/capture tools are explicit manual instruments. They must never
 # become push-triggered background CI merely because they happen to be useful.
 $manualOnlyWorkflows = @(
     'windo-flake-hunter.yml',
@@ -31,8 +30,8 @@ $manualOnlyWorkflows = @(
 )
 
 # These immutable pins were valid when introduced but target the deprecated
-# Node 20 Action runtime. The workflow estate is moving to verified Node 24
-# releases; once this policy lands, old pins cannot drift back in unnoticed.
+# Node 20 Action runtime. The estate now standardizes on verified Node 24 action
+# releases and rejects regression to these older pins.
 $deprecatedActionPins = @(
     'actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5',
     'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
@@ -76,6 +75,10 @@ foreach ($file in $files) {
     $declaresWrite = [regex]::IsMatch($text, '(?m)^\s*[A-Za-z-]+:\s*write\s*(?:#.*)?$')
     if ($declaresWrite -and $file.Name -notin $writerAllowList) {
         $violations.Add("$relative declares write permission but is not in the explicit writer allow-list.")
+    }
+
+    if ([regex]::IsMatch($text, '(?m)^\s*pull-requests:\s*write\s*(?:#.*)?$')) {
+        $violations.Add("$relative requests pull-requests: write. WINDO workflows materialize review branches instead of opening PRs autonomously.")
     }
 
     if ($text -match '(?im)\bgit\s+push\b' -and $file.Name -notin $writerAllowList) {
