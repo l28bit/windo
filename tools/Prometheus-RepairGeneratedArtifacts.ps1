@@ -10,10 +10,18 @@ $PayloadPath = Join-Path $Root 'tools\ChildExec.b64.txt'
 $RunnerPath = Join-Path $Root 'windo_runner.ps1'
 $InstallerPath = Join-Path $Root 'windo_install.ps1'
 $ReportPath = Join-Path $Root 'docs\prometheus-generated-repair-report.md'
+$Lf = "`n"
+
+function ConvertTo-CanonicalLfText {
+    param([AllowEmptyString()][string]$Content)
+    if ($null -eq $Content) { return $null }
+    return $Content.Replace("`r`n", "`n").Replace("`r", "`n")
+}
 
 function Write-Utf8BomFile {
     param([string]$Path, [string]$Content)
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($true)))
+    $canonical = ConvertTo-CanonicalLfText -Content $Content
+    [System.IO.File]::WriteAllText($Path, $canonical, (New-Object System.Text.UTF8Encoding($true)))
 }
 
 function Write-Utf8NoBomFile {
@@ -22,7 +30,8 @@ function Write-Utf8NoBomFile {
     if ($parent -and -not (Test-Path -LiteralPath $parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
-    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
+    $canonical = ConvertTo-CanonicalLfText -Content $Content
+    [System.IO.File]::WriteAllText($Path, $canonical, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Get-Sha256Hex {
@@ -90,10 +99,11 @@ function Set-CanonicalChildExecAssignment {
         throw 'The unique $cs assignment is not the expected UTF8/FromBase64String ChildExec loader.'
     }
 
-    $newline = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
+    # Release artifacts are explicitly LF-pinned in .gitattributes. Always build
+    # generated blocks with LF so regeneration is byte-stable on Windows and Linux.
     $replacement = '$cs = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(' +
-        $newline + "        '" + $CanonicalPayload + "'" +
-        $newline + '    ))'
+        $Lf + "        '" + $CanonicalPayload + "'" +
+        $Lf + '    ))'
 
     $start = [int]$assignment.Extent.StartOffset
     $end = [int]$assignment.Extent.EndOffset
@@ -102,6 +112,7 @@ function Set-CanonicalChildExecAssignment {
     }
 
     $updated = $Text.Substring(0, $start) + $replacement + $Text.Substring($end)
+    $updated = ConvertTo-CanonicalLfText -Content $updated
     Assert-PowerShellTextParses -Text $updated -Label 'windo_runner.ps1 after ChildExec synchronization'
 
     return [pscustomobject]@{
@@ -111,43 +122,96 @@ function Set-CanonicalChildExecAssignment {
     }
 }
 
+function Set-CanonicalRunnerContentAssignment {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$CanonicalRunner
+    )
+
+    # RunnerContent is a large PowerShell here-string. Regex-based replacement
+    # proved sensitive to host newline representation and escaping. Parse the
+    # installer and replace only the unique assignment AST instead.
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput(
+        $Text,
+        [ref]$tokens,
+        [ref]$parseErrors
+    )
+    if ($parseErrors.Count -gt 0) {
+        $messages = @($parseErrors | ForEach-Object { $_.Message }) -join '; '
+        throw "windo_install.ps1 does not parse before RunnerContent synchronization: $messages"
+    }
+
+    $assignments = @($ast.FindAll({
+        param($node)
+        if ($node -isnot [System.Management.Automation.Language.AssignmentStatementAst]) { return $false }
+        if ($node.Left -isnot [System.Management.Automation.Language.VariableExpressionAst]) { return $false }
+        return ($node.Left.VariablePath.UserPath -ceq 'RunnerContent')
+    }, $true))
+
+    if ($assignments.Count -ne 1) {
+        throw "Expected exactly one `$RunnerContent assignment in windo_install.ps1; found $($assignments.Count)."
+    }
+
+    $assignment = $assignments[0]
+    $previousAssignment = [string]$assignment.Extent.Text
+    if (-not $previousAssignment.StartsWith("`$RunnerContent = @'", [StringComparison]::Ordinal)) {
+        throw 'The unique $RunnerContent assignment is not the expected single-quoted here-string.'
+    }
+
+    $writeMarker = 'Write-Utf8NoBomFile -Path $RunnerPath -Content $RunnerContent'
+    $writeCount = ([regex]::Matches($Text, [regex]::Escape($writeMarker))).Count
+    if ($writeCount -ne 1) {
+        throw "Expected exactly one installer RunnerContent write marker; found $writeCount."
+    }
+
+    $replacement = '$RunnerContent = @''' + $Lf +
+        (ConvertTo-CanonicalLfText -Content $CanonicalRunner).TrimEnd("`r", "`n") + $Lf +
+        '''@'
+
+    $start = [int]$assignment.Extent.StartOffset
+    $end = [int]$assignment.Extent.EndOffset
+    if ($start -lt 0 -or $end -le $start -or $end -gt $Text.Length) {
+        throw "RunnerContent assignment extent is invalid: start=$start end=$end length=$($Text.Length)."
+    }
+
+    $updated = $Text.Substring(0, $start) + $replacement + $Text.Substring($end)
+    $updated = ConvertTo-CanonicalLfText -Content $updated
+    Assert-PowerShellTextParses -Text $updated -Label 'windo_install.ps1 after RunnerContent synchronization'
+
+    return [pscustomobject]@{
+        Text = $updated
+        Replacements = 1
+        PreviousAssignmentLength = $previousAssignment.Length
+        WriteMarkerCount = $writeCount
+    }
+}
+
 foreach ($required in @($SourcePath, $RunnerPath, $InstallerPath)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Missing required file: $required"
     }
 }
 
-$source = [System.IO.File]::ReadAllText($SourcePath)
+$source = ConvertTo-CanonicalLfText -Content ([System.IO.File]::ReadAllText($SourcePath))
 $canonicalPayload = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($source))
 [System.IO.File]::WriteAllText(
     $PayloadPath,
-    $canonicalPayload + [Environment]::NewLine,
+    $canonicalPayload + $Lf,
     [System.Text.Encoding]::ASCII
 )
 
-$runnerText = [System.IO.File]::ReadAllText($RunnerPath)
+$runnerText = ConvertTo-CanonicalLfText -Content ([System.IO.File]::ReadAllText($RunnerPath))
 $runnerSync = Set-CanonicalChildExecAssignment -Text $runnerText -CanonicalPayload $canonicalPayload
 Write-Utf8NoBomFile -Path $RunnerPath -Content $runnerSync.Text
 
-# The installer publishes the standalone runner from RunnerContent. Replace the
-# complete embedded block from the now-canonical standalone runner so the two
-# artifacts cannot drift.
-$installerText = [System.IO.File]::ReadAllText($InstallerPath)
-$runnerContentPattern = '(?ms)^\$RunnerContent = @''\r?\n.*?^''@\r?\nWrite-Utf8NoBomFile -Path \$RunnerPath -Content \$RunnerContent'
-$runnerContentReplacement = '$RunnerContent = @''' + [Environment]::NewLine +
-    $runnerSync.Text.TrimEnd("`r", "`n") + [Environment]::NewLine +
-    '''@' + [Environment]::NewLine +
-    'Write-Utf8NoBomFile -Path $RunnerPath -Content $RunnerContent'
-$updatedInstaller = [regex]::Replace(
-    $installerText,
-    $runnerContentPattern,
-    [System.Text.RegularExpressions.MatchEvaluator]{ param($match) $runnerContentReplacement },
-    1
-)
-if ($updatedInstaller -ceq $installerText) {
-    throw 'Could not locate and synchronize the installer RunnerContent block.'
-}
-Write-Utf8BomFile -Path $InstallerPath -Content $updatedInstaller
+# The installer publishes the standalone runner from RunnerContent. Synchronize
+# the structural assignment from the now-canonical standalone runner so the two
+# artifacts cannot drift, independent of checkout host or newline convention.
+$installerText = ConvertTo-CanonicalLfText -Content ([System.IO.File]::ReadAllText($InstallerPath))
+$installerSync = Set-CanonicalRunnerContentAssignment -Text $installerText -CanonicalRunner $runnerSync.Text
+Write-Utf8BomFile -Path $InstallerPath -Content $installerSync.Text
 
 $parseFailures = New-Object 'System.Collections.Generic.List[string]'
 foreach ($relative in @(
@@ -192,6 +256,7 @@ $decodedPayload = [System.Text.Encoding]::UTF8.GetString(
 )
 $sourceParity = ($source -ceq $decodedPayload)
 $runnerParity = ([System.IO.File]::ReadAllText($RunnerPath) -ceq $runnerSync.Text)
+$installerParity = ([System.IO.File]::ReadAllText($InstallerPath) -ceq $installerSync.Text)
 $installerBytes = [System.IO.File]::ReadAllBytes($InstallerPath)
 $installerHasBom = $installerBytes.Length -ge 3 -and
     $installerBytes[0] -eq 0xEF -and
@@ -212,9 +277,17 @@ $report = @(
     ('- ChildExec source SHA256: `{0}`' -f (Get-Sha256Hex $SourcePath)),
     ('- Runner SHA256: `{0}`' -f (Get-Sha256Hex $RunnerPath)),
     '',
+    '## Installer embedding',
+    '',
+    "- Installer runner content synchronized: **$installerParity**",
+    "- Installer RunnerContent assignment replacements: **$($installerSync.Replacements)**",
+    "- Installer RunnerContent write markers: **$($installerSync.WriteMarkerCount)**",
+    "- Previous RunnerContent assignment length: **$($installerSync.PreviousAssignmentLength)**",
+    '',
     '## Windows PowerShell encoding',
     '',
     "- Installer has explicit UTF-8 BOM: **$installerHasBom**",
+    '- Generated release text uses canonical LF newlines independent of host OS.',
     '',
     '## Parser gate',
     ''
@@ -232,9 +305,9 @@ $report += @(
     '',
     'Release checksums are regenerated only after the complete Prometheus runtime is finalized. No private signing key is stored in the repository.'
 )
-Write-Utf8NoBomFile -Path $ReportPath -Content (($report -join [Environment]::NewLine) + [Environment]::NewLine)
+Write-Utf8NoBomFile -Path $ReportPath -Content (($report -join $Lf) + $Lf)
 
-if (-not $sourceParity -or -not $runnerParity -or -not $installerHasBom) {
+if (-not $sourceParity -or -not $runnerParity -or -not $installerParity -or -not $installerHasBom) {
     throw "Generated artifact parity failed. See $ReportPath"
 }
 if ($parseFailures.Count -gt 0) {

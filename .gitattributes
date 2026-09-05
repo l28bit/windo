@@ -11,6 +11,7 @@
 /checksums/installer.sha256.sig text eol=lf
 /keys/windo-release-public.rsa.xml text eol=lf
 /tools/*.ps1 text eol=lf
+/tools/ChildExec.b64.txt text eol=lf
 /src/windo/snippets/*.cs text eol=lf
 /extras/**/*.ps1 text eol=lf
 /versions/v*/bootstrap.ps1 text eol=lf

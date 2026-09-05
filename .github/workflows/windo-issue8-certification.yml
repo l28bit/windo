@@ -1,0 +1,116 @@
+name: WINDO Issue 8 DPAPI Certification
+
+on:
+  pull_request:
+    branches:
+      - jonex/windo-production-ready
+    paths:
+      - windo_runner.ps1
+      - windo_install.ps1
+      - tools/ChildExec.b64.txt
+      - tools/Test-WindoPs51DpapiRuntime.ps1
+      - tools/Test-WindoLogic.ps1
+      - tools/Prometheus-RepairGeneratedArtifacts.ps1
+      - tools/Sync-InstallerChecksum.ps1
+      - checksums/**
+      - versions/**
+      - docs/ENGINEER_JOURNAL.md
+      - .github/workflows/windo-issue8-certification.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ps51-runtime:
+    name: Strict PS5.1 DPAPI runtime / ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Prove shipping runtime resolves and uses DPAPI
+        shell: powershell
+        run: .\tools\Test-WindoPs51DpapiRuntime.ps1
+
+  ps7-control:
+    name: PS7 DPAPI control / ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Prove shipping runtime still resolves and uses DPAPI
+        shell: pwsh
+        run: .\tools\Test-WindoPs51DpapiRuntime.ps1
+
+  generated-runtime:
+    name: Generated runtime and pre-sign manifest stay reproducible
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Regenerate derived runtime artifacts and unsigned checksum candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tools/Encode-ChildExec.ps1
+          ./tools/Prometheus-RepairGeneratedArtifacts.ps1
+          ./tools/Sync-InstallerChecksum.ps1
+
+      - name: Require committed deterministic candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The repair report intentionally carries a generation timestamp, so it
+          # is diagnostic evidence rather than a reproducibility input. Measure
+          # only the actual derived runtime plus the unsigned checksum candidate.
+          $paths = @(
+            'tools/ChildExec.b64.txt',
+            'windo_runner.ps1',
+            'windo_install.ps1',
+            'checksums/installer.sha256'
+          )
+          $changed = @(git status --porcelain -- $paths)
+          if ($changed.Count -gt 0) {
+            git status --short -- $paths
+            git diff -- $paths
+            throw 'Canonical runtime or unsigned checksum candidate was regenerated but not committed.'
+          }
+
+      - name: Pre-sign validation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tools/Test-WindoReservedVariables.ps1
+          ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'Issue #8 generated runtime'
+
+  issue8-green:
+    name: WINDO Issue 8 runtime green
+    if: always()
+    needs:
+      - ps51-runtime
+      - ps7-control
+      - generated-runtime
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce certification result
+        shell: bash
+        run: |
+          test '${{ needs.ps51-runtime.result }}' = 'success'
+          test '${{ needs.ps7-control.result }}' = 'success'
+          test '${{ needs.generated-runtime.result }}' = 'success'

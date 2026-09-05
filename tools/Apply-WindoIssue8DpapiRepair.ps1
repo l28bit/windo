@@ -1,0 +1,108 @@
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$root = Split-Path -Parent $PSScriptRoot
+$runnerPath = Join-Path $root 'windo_runner.ps1'
+$generatorPath = Join-Path $PSScriptRoot 'Prometheus-RepairGeneratedArtifacts.ps1'
+
+$before = @'
+function Get-WindoProtectedDataType {
+    $typeName = "System.Security.Cryptography.ProtectedData"
+    foreach ($qualifiedName in @(
+        "$typeName, System.Security.Cryptography.ProtectedData",
+        "$typeName, System.Security"
+    )) {
+        try {
+            $resolved = [type]::GetType($qualifiedName, $false)
+            if ($null -ne $resolved) { return $resolved }
+        } catch { }
+    }
+    return $null
+}
+'@
+
+$after = @'
+function Get-WindoProtectedDataType {
+    $typeName = "System.Security.Cryptography.ProtectedData"
+    $qualifiedNames = @(
+        "$typeName, System.Security.Cryptography.ProtectedData",
+        "$typeName, System.Security"
+    )
+
+    foreach ($qualifiedName in $qualifiedNames) {
+        try {
+            $resolved = [type]::GetType($qualifiedName, $false)
+            if ($null -ne $resolved) { return $resolved }
+        } catch { }
+    }
+
+    # Windows PowerShell 5.1 starts with the .NET Framework System.Security
+    # assembly unloaded. Loading it is necessary, but Type.GetType with the
+    # short assembly name still returns null on a fresh host. Resolve from the
+    # assemblies actually loaded into this AppDomain after the explicit load.
+    if ($PSVersionTable.PSVersion.Major -le 5) {
+        try {
+            Add-Type -AssemblyName System.Security -ErrorAction Stop
+        } catch {
+            return $null
+        }
+
+        foreach ($assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
+            try {
+                $resolved = $assembly.GetType($typeName, $false, $false)
+                if ($null -ne $resolved) { return $resolved }
+            } catch { }
+        }
+    }
+
+    return $null
+}
+'@
+
+if (-not (Test-Path -LiteralPath $runnerPath -PathType Leaf)) {
+    throw "Missing canonical runner: $runnerPath"
+}
+if (-not (Test-Path -LiteralPath $generatorPath -PathType Leaf)) {
+    throw "Missing generated-artifact repair tool: $generatorPath"
+}
+
+$text = [IO.File]::ReadAllText($runnerPath)
+$oldCount = ([regex]::Matches($text, [regex]::Escape($before))).Count
+$newCount = ([regex]::Matches($text, [regex]::Escape($after))).Count
+
+if ($oldCount -eq 0 -and $newCount -eq 1) {
+    Write-Host 'Issue #8 canonical source repair is already present.'
+} elseif ($oldCount -ne 1 -or $newCount -ne 0) {
+    throw "Refusing Issue #8 repair: expected exactly one known pre-fix helper (old=$oldCount new=$newCount)."
+} else {
+    $updated = $text.Replace($before, $after)
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($runnerPath, $updated, $utf8NoBom)
+    Write-Host 'Applied the exact Issue #8 canonical source repair to windo_runner.ps1.'
+}
+
+$tokens = $null
+$parseErrors = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile(
+    (Resolve-Path -LiteralPath $runnerPath),
+    [ref]$tokens,
+    [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {
+    $parseErrors | ForEach-Object { Write-Error $_.Message }
+    throw 'Canonical runner does not parse after Issue #8 repair.'
+}
+
+# Prometheus-RepairGeneratedArtifacts.ps1 is PowerShell and reports failures by
+# throwing. It is also the canonical byte-generation boundary: it normalizes
+# generated release text to LF before writing so output is stable on Windows and
+# Linux while preserving the installer's required UTF-8 BOM.
+#
+# Do not inspect $LASTEXITCODE here: that variable belongs to native process
+# execution and is not guaranteed to exist after invoking a .ps1 file.
+& $generatorPath
+
+Write-Host 'Issue #8 source repair and generated-artifact propagation completed.' -ForegroundColor Green
