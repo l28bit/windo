@@ -2,71 +2,89 @@
 
 **Category:** incident / architecture / tooling / security  
 **Status:** active  
-**Related:** PR #12, PR #13, Issue #10, Issue #11, workflow runs 33960446561, 33960495724, 33960640317
+**Related:** PR #12, PR #13, Issue #10, Issue #11, workflow runs 33960446561, 33960495724, 33960640317, 33979447695, 33979527581, 33979646249, 33980171398
 
 ### Context / question
 
-The Actions history showed many consecutive failures across Repair Lab, Engineer Journal, and Issue #8 workflows. The visible result looked like WINDO itself was broadly broken, but several failures were occurring before any runner job existed. The CI system therefore could not reliably distinguish malformed orchestration, failed experiments, branch races, and actual product defects.
+The Actions history showed many consecutive failures across Repair Lab, Engineer Journal, and Issue #8 workflows. The visible result looked like WINDO itself was broadly broken, but several failures occurred before any runner job existed. The CI system therefore could not reliably distinguish malformed orchestration, failed experiments, branch races, generated-byte drift, private-signing boundaries, and actual product defects.
 
-The engineering question became broader than repairing individual YAML files: what properties must the WINDO CI platform enforce so that green and red signals remain trustworthy as the project grows?
+The engineering question became broader than repairing individual YAML files: what properties must the WINDO CI platform enforce so that green and red signals remain trustworthy as the project grows, while keeping the Actions surface small enough for a human to understand?
 
 ### Evidence / observations
 
-- Multiple historical Repair Lab and Engineer Journal runs completed as failures with zero jobs because malformed multiline script content escaped YAML `run: |` indentation.
-- The corrected production-ready definitions stopped producing automatic pseudo-runs for workflows intended to be manual-only.
-- `Validate PowerShell #180` completed successfully after the workflow-definition repairs, proving the previous wall of red was not equivalent to a broad WINDO runtime failure.
-- Issue #8 Controlled Repair #7 passed the canonical repair, strict PS5.1 DPAPI proof, PowerShell 7 control, unsigned checksum synchronization, PreSign validation, Journal append, and diff restriction, then failed only at the final push because the source branch moved while the job was running.
-- That non-fast-forward failure demonstrated that CI mutating the same branch it validates creates avoidable orchestration races.
-- Issue #8 Repair Materializer #8 replaced the self-mutation model with immutable-source validation and an isolated automation branch. All technical/materialization steps passed and the isolated repair branch was created successfully.
-- GitHub repository policy prevented the Actions `GITHUB_TOKEN` from creating a pull request. The workflow step had been intentionally made non-fatal, so its green status did not prove the PR existed. PR #9 was subsequently created through the authorized GitHub control plane and merged into the Issue #8 development branch.
-- The first `WINDO Workflow Definition Guard` run caught a ShellCheck defect in the guard's own summary code. The defect was fixed instead of suppressed.
-- The next guard run passed actionlint and exposed six mutable external Action references in legacy Prometheus workflows. Those dependencies were pinned to immutable commits.
-- The subsequent guard run passed both actionlint and the WINDO-specific workflow policy.
+- Multiple historical Repair Lab and Engineer Journal runs failed with zero jobs because malformed multiline script content escaped YAML `run: |` indentation.
+- Corrected manual-only workflow definitions stopped creating pseudo-runs on unrelated pushes.
+- `Validate PowerShell #180` succeeded after definition repairs, proving the wall of red was not equivalent to broad WINDO runtime failure.
+- Issue #8 Controlled Repair #7 passed canonical repair, strict PS5.1 DPAPI proof, PS7 control, checksum synchronization, PreSign, Journal append, and diff restriction, then lost only the final push because its source branch moved during the run.
+- Replacing self-mutation with immutable-source isolated materialization removed that race. Issue #8 Repair Materializer #12 later passed every substantive step, including structural generated-artifact synchronization and isolated branch materialization.
+- GitHub repository policy prevented Actions from creating a PR. A previously non-fatal PR-creation shell step could therefore be green without the PR existing. PR #9 was created through the authorized GitHub control plane instead. The materializer was subsequently changed to stop attempting PR creation entirely.
+- The first `WINDO Workflow Definition Guard` run caught a ShellCheck defect in the guard itself. The defect was fixed rather than suppressed.
+- The guard then discovered six historical mutable Action references and later identified nineteen remaining immutable-but-Node-20 Action references across the active estate.
+- Current verified Node-24-native Actions are `actions/checkout` v7.0.1 commit `3d3c42e5aac5ba805825da76410c181273ba90b1` and `actions/upload-artifact` v7.0.1 commit `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`.
+- After the full migration, Definition Guard run `33980171398` passed actionlint and every WINDO workflow-policy check. The policy now rejects regression to the superseded Node-20 pins.
+- The original workflow estate contained fourteen definitions on the hardening branch. Three superseded Prometheus orchestration workflows and the standalone Engineer Journal Guard were retired after equivalent/current coverage was proven, reducing the estate to ten definitions.
+- `validate.yml` had duplicated substantial runtime/release work from `windo-ci.yml`. It was replaced with a one-job `WINDO Fast Gate` rather than another matrix. Fast Gate run `33979527581` passed its first real PR proof, including PS5.1 parsing, reserved-variable safety, source logic, and the reusable Engineer Journal contract.
+- `windo-ci.yml` was reshaped into `WINDO Deep Certification`: Node-24-native dependencies, one stable aggregate, no duplicate workflow-security job, and no obsolete development-lab branch trigger.
+- Engineer Journal enforcement moved from YAML-only logic into `tools/Test-WindoJournalContract.ps1`. A reusable `tools/New-WindoJournalEntry.ps1` now creates modular entries under `docs/engineer-journal/`.
+- Journal Capture no longer requests `pull-requests: write` or claims to open PRs. It may only create one isolated journal branch.
+- Repair Laboratory was reduced from a mixed diagnostic/writer/PR workflow to a read-only laboratory that produces runtime, generated-patch, and trust evidence.
+- The workflow writer allow-list is now only Journal Capture and Release Factory. `pull-requests: write` is forbidden by repository workflow policy.
+- Issue #8 exposed two generated-byte defects unrelated to the DPAPI repair: host-sensitive installer newlines and an unpinned `tools/ChildExec.b64.txt` newline conversion. The generator is now LF-canonical and structurally synchronizes the large `RunnerContent` assignment through PowerShell AST rather than a giant regex; `.gitattributes` pins the generated payload to LF.
+- Issue #8 strict certification run `33979646249` passed PS5.1 on Server 2022/2025, PS7 on Server 2022/2025, generated runtime/checksum reproducibility, PreSign validation, and the aggregate `WINDO Issue 8 runtime green` check.
+- The remaining general CI red on Issue #8 is isolated to `Verify signed release manifest`. Parsing, source contract, reserved-variable checks, and ChildExec parity pass first; compatibility jobs are then skipped. This is the intended private-signature boundary after changing signed release bytes.
 - GitHub reports `jonex/windo-production-ready` as unprotected with required-status enforcement disabled.
-- GitHub hosted runners warn that the older pinned checkout action targets Node 20 and is being forced onto Node 24.
-- Current upstream `actions/checkout` v7.0.1 commit `3d3c42e5aac5ba805825da76410c181273ba90b1` and `actions/upload-artifact` v7.0.1 commit `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` explicitly declare Node 24 runtimes.
 
 ### Alternatives considered
 
 - Ignore historical zero-job failures because later runs eventually became green.
 - Delete or hide failed workflow history to make the Actions page look cleaner.
-- Continue allowing repair CI to push directly back into the branch under test and add retry/rebase logic for races.
-- Treat a successful shell step as proof an external side effect occurred without checking the resulting branch/PR/release.
+- Continue allowing repair CI to push directly into the branch under test and add retry/rebase logic around races.
+- Treat an attempted external side effect as success without proving the resulting state exists.
 - Keep workflow YAML as an unlinted configuration layer and rely on GitHub to reject malformed definitions after commit.
-- Allow mutable Action tags for convenience and depend on upstream maintainers not to move them unexpectedly.
-- Continue storing every future Engineer Journal entry in one monolithic file even as independent development lanes multiply.
+- Allow mutable tags or obsolete Action runtimes for convenience.
+- Keep both `validate.yml` and `windo-ci.yml` as overlapping runtime/release matrices.
+- Keep Repair Laboratory as a broad writer because deterministic regeneration sometimes produces a diff.
+- Continue storing every future Engineer Journal entry in one monolithic file even as concurrent engineering lanes multiply.
+- Remove security/reproducibility coverage merely to reduce the number of Actions boxes.
 
 ### Decision / hypothesis
 
-WINDO CI is treated as a product safety subsystem with explicit failure semantics.
+WINDO CI is a product safety subsystem with explicit workflow roles and explicit failure semantics.
 
-Ordinary validation must be read-only. Repair automation validates an immutable source SHA and materializes deterministic results to an isolated automation branch or other dedicated destination. It must not push back into the source branch it is certifying.
+The automatic PR path is intentionally three layers: **Workflow Definition Guard → Fast Gate → Deep Certification**. Fast Gate answers cheap questions quickly. Deep Certification owns expensive Windows/runtime/trust/reproducibility evidence. Definition Guard proves the CI platform itself before trusting either.
 
-Every external Action is pinned to an immutable 40-character commit SHA. Workflow definitions are validated by actionlint plus a WINDO-specific policy layer that inventories write-capable workflows, forbids known source-branch self-mutation and force pushes, and preserves manual-only roles for diagnostic workflows.
+Ordinary validation and laboratories are read-only. Repository mutation is exceptional: Journal Capture may create one isolated journal branch, and Release Factory may publish release state only from a certified exact commit. `pull-requests: write` is not granted to Actions.
 
-A green step that requests an external mutation is not sufficient evidence that the mutation occurred. The resulting branch, PR, release, or artifact must be independently observable or the workflow must report the side effect as unavailable.
+Every external Action is pinned to an immutable 40-character SHA and must use the approved runtime generation. Workflow definitions are validated by actionlint plus WINDO policy covering dependency pins, write authority, force/direct pushes, and manual-only roles.
 
-Meaningful failed experiments remain part of engineering history. Zero-job parser noise and preventable orchestration races are treated as CI defects to eliminate, not as product failures to normalize.
+Generated release bytes are canonical across operating systems. Generators own normalization and structural synchronization; tests do not excuse host-dependent differences. Large PowerShell generated blocks are synchronized by AST structure when feasible rather than regex spanning thousands of lines.
 
-The Engineer Journal is extended with one-file-per-entry records under `docs/engineer-journal/` so concurrent engineering lanes can remain append-only without turning the original journal into a chronic merge-conflict hotspot.
+A green step that requests an external mutation is not evidence that the mutation occurred. Either the durable result is observable or the workflow does not claim it.
+
+Meaningful failed experiments remain part of engineering history. Zero-job parser noise and preventable orchestration races are CI defects to eliminate, not product failures to normalize.
+
+The Engineer Journal uses append-only one-file-per-entry records under `docs/engineer-journal/` for concurrent work while preserving `docs/ENGINEER_JOURNAL.md` as historical memory.
 
 ### Result
 
-The Issue #8 repair path now uses immutable-source validation and isolated materialization. PR #9 carried the certified repair into the Issue #8 development branch, and PR #13 is the production-facing draft repair PR that triggers the strict PS5.1/PS7 × Windows Server 2022/2025 certification matrix.
+The hardening branch has moved from fourteen overlapping workflow definitions to ten clearer definitions without removing current coverage simply for visual cleanliness.
 
-PR #12 isolates CI-platform hardening from runtime repair work. The new Workflow Definition Guard has progressed from catching its own ShellCheck defect, to discovering six mutable dependencies, to passing the repaired workflow estate.
+The ordinary PR contract is now visibly shaped as Definition Guard, Fast Gate, and Deep Certification. Manual Flake Hunter, Regression Bisect, and Repair Laboratory remain separate because they answer different engineering questions without creating automatic PR noise.
 
-`docs/CI_ARCHITECTURE.md` now records workflow classes, failure semantics, signing boundaries, side-effect verification, branch-protection targets, privileged certification requirements, and the intended consolidation architecture.
+The active workflow estate is standardized on Node-24-native immutable Action commits, and Definition Guard has proven the resulting estate satisfies syntax and WINDO policy.
 
-Issue #10 tracks server-side protection for the production-ready lineage. Issue #11 tracks the privileged disposable-Windows certification lane required before public release.
+Repair Laboratory is read-only. Journal Capture is a narrow modular-entry branch writer. Release Factory remains the only release writer. Failure Triage follows the new steady-state workflow names on the production lineage.
+
+Issue #8 strict hosted certification is fully green through PreSign and deterministic regeneration. The normal signed-release contract stops exactly at the stale private signature, preserving the intended signing trust boundary.
+
+`docs/CI_ARCHITECTURE.md` now describes the proven architecture rather than the earlier consolidation roadmap. Issue #10 tracks repository-side branch protection. Issue #11 tracks privileged disposable-Windows certification before public release.
 
 ### Follow-up
 
-- Complete the Node-24-native Action migration and make the local workflow policy reject superseded Node-20 pins.
-- Audit `validate.yml` and `windo-ci.yml` for duplicated coverage; consolidate only after equivalent coverage is demonstrated.
-- Define a small stable set of aggregate required checks for branch protection.
-- Retire legacy Prometheus writer/recovery workflows after proving their recovery lineage is no longer required.
-- Complete Issue #8 strict matrix validation, then correct the two PS5.1 host-sensitive test assertions without weakening their security properties.
-- Remove the temporary Issue #8 baseline waiver only after main PS5.1 validation is genuinely green.
-- Configure and verify server-side branch protection under Issue #10.
+- Keep Issue #8 release bytes unchanged until the refreshed checksum manifest is privately signed outside hosted Actions.
+- After the Issue #8 signed runtime lands, absorb its strict shipping-helper DPAPI proof into Deep Certification and remove the temporary PS5.1 baseline waiver.
+- Retire Issue #8-specific certification/materializer workflows once their durable proof exists in the general platform.
+- Update the thin default-branch `Exodus` failure listener to subscribe to `WINDO Workflow Definition Guard`, `WINDO Fast Gate`, and `WINDO Deep Certification`; retire the duplicate when the default branch moves.
+- Make the tracked generated repair report deterministic or move volatile generation time into workflow evidence so timestamp-only branches cannot be materialized.
+- Configure and verify server-side branch protection under Issue #10 using the stable aggregate checks.
 - Build and prove the privileged disposable Windows certification lane under Issue #11 before publication.
