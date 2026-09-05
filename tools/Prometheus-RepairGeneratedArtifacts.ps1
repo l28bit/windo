@@ -140,11 +140,11 @@ $runnerText = ConvertTo-CanonicalLfText -Content ([System.IO.File]::ReadAllText(
 $runnerSync = Set-CanonicalChildExecAssignment -Text $runnerText -CanonicalPayload $canonicalPayload
 Write-Utf8NoBomFile -Path $RunnerPath -Content $runnerSync.Text
 
-# The installer publishes the standalone runner from RunnerContent. Replace the
-# complete embedded block from the now-canonical standalone runner so the two
-# artifacts cannot drift.
+# The installer publishes the standalone runner from RunnerContent. Normalize
+# input first, then match the structural LF form. Escape `$` exactly once so the
+# regex matches the literal PowerShell variable names rather than a backslash.
 $installerText = ConvertTo-CanonicalLfText -Content ([System.IO.File]::ReadAllText($InstallerPath))
-$runnerContentPattern = '(?ms)^\$RunnerContent = @''\r?\n.*?^''@\r?\nWrite-Utf8NoBomFile -Path \$RunnerPath -Content \$RunnerContent'
+$runnerContentPattern = '(?ms)^\$RunnerContent = @''\n.*?^''@\nWrite-Utf8NoBomFile -Path \$RunnerPath -Content \$RunnerContent'
 $runnerContentReplacement = '$RunnerContent = @''' + $Lf +
     $runnerSync.Text.TrimEnd("`r", "`n") + $Lf +
     '''@' + $Lf +
