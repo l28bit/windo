@@ -29,7 +29,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Checkout exact production-ready source
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
           ref: jonex/windo-production-ready
 
@@ -77,7 +77,7 @@ jobs:
           Compress-Archive -Path dist/WINDO-Install-Latest.ps1,dist/windo_install.ps1,dist/windo_uninstall.ps1,dist/installer.sha256,dist/installer.sha256.sig,dist/windo-release-public.rsa.xml,dist/release-commit.txt,dist/SHA256SUMS.txt -DestinationPath dist/WINDO-Release-Bundle.zip
 
       - name: Upload certified release candidate
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
         with:
           name: windo-release-${{ inputs.release_tag }}
           path: dist
@@ -94,7 +94,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout the exact certified commit
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
           ref: ${{ needs.certify.outputs.commit }}
 

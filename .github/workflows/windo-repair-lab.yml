@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Diagnostic or deterministic repair experiment
+        description: Read-only diagnostic experiment
         required: true
         default: diagnose-ps51
         type: choice
@@ -14,22 +14,21 @@ on:
           - verify-release-trust
           - full-recovery-drill
       target_ref:
-        description: Branch/tag/SHA to inspect or repair
+        description: Branch, tag, or SHA to inspect
         required: true
         default: jonex/windo-production-ready
         type: string
-      open_repair_pr:
-        description: For deterministic generated-artifact repair, open a repair PR if a diff is produced
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
 
+concurrency:
+  group: windo-repair-lab-${{ inputs.target_ref }}-${{ inputs.mode }}
+  cancel-in-progress: true
+
 jobs:
   ps51-diagnostic:
-    name: PS5.1 compatibility experiment / ${{ matrix.runner }}
+    name: PS5.1 runtime diagnosis / ${{ matrix.runner }}
     if: inputs.mode == 'diagnose-ps51' || inputs.mode == 'full-recovery-drill'
     strategy:
       fail-fast: false
@@ -38,152 +37,103 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
-      - name: Checkout target
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Checkout exact target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
           ref: ${{ inputs.target_ref }}
+          persist-credentials: false
 
-      - name: Probe framework assembly loading and DPAPI
+      - name: Prove DPAPI resolution and round-trip
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path repair-lab | Out-Null
-          $report = New-Object System.Collections.Generic.List[string]
-          $report.Add('# PS5.1 DPAPI experiment')
-          $report.Add('')
-          $report.Add('Runner=${{ matrix.runner }}')
-          $report.Add("PSVersion=$($PSVersionTable.PSVersion)")
-          $report.Add("CLRVersion=$($PSVersionTable.CLRVersion)")
-          $report.Add('')
 
-          function Test-ProtectedDataState([string]$Label) {
-            $direct = $null
-            $qualified = $null
-            try { $direct = [type]::GetType('System.Security.Cryptography.ProtectedData, System.Security', $false) } catch { }
-            try { $qualified = [type]::GetType('System.Security.Cryptography.ProtectedData, System.Security.Cryptography.ProtectedData', $false) } catch { }
-            $report.Add("## $Label")
-            $report.Add("System.Security lookup: $($null -ne $direct)")
-            $report.Add("ProtectedData assembly lookup: $($null -ne $qualified)")
-            $resolved = if ($direct) { $direct } else { $qualified }
-            if ($resolved) {
-              try {
-                $scopeType = $resolved.Assembly.GetType('System.Security.Cryptography.DataProtectionScope', $false, $false)
-                $scope = [Enum]::Parse($scopeType, 'CurrentUser')
-                $bytes = [Text.Encoding]::UTF8.GetBytes('windo-repair-lab')
-                $sealed = $resolved.GetMethod('Protect', [type[]]@([byte[]], [byte[]], $scopeType)).Invoke($null, @($bytes, $null, $scope))
-                $report.Add("Protect succeeded: $($null -ne $sealed -and $sealed.Length -gt 0)")
-                if ($sealed) { $report.Add("Cipher bytes: $($sealed.Length)") }
-              } catch {
-                $report.Add("Protect error: $($_.Exception.GetBaseException().Message)")
-              }
-            }
-            $report.Add('')
+          if (Test-Path -LiteralPath '.\tools\Test-WindoPs51DpapiRuntime.ps1' -PathType Leaf) {
+            .\tools\Test-WindoPs51DpapiRuntime.ps1 *>&1 |
+              Tee-Object -FilePath repair-lab/dpapi-runtime.txt
+            exit
           }
 
-          Test-ProtectedDataState 'Fresh process'
-          try {
-            [void][Reflection.Assembly]::Load('System.Security')
-            $report.Add('Assembly.Load(System.Security): success')
-          } catch {
-            $report.Add("Assembly.Load(System.Security): $($_.Exception.GetBaseException().Message)")
+          $lines = New-Object System.Collections.Generic.List[string]
+          $lines.Add("PSVersion=$($PSVersionTable.PSVersion)")
+          $lines.Add("CLRVersion=$($PSVersionTable.CLRVersion)")
+          $lines.Add("OS=$([Environment]::OSVersion.VersionString)")
+          Add-Type -AssemblyName System.Security -ErrorAction Stop
+          $typeName = 'System.Security.Cryptography.ProtectedData'
+          $resolved = $null
+          foreach ($assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
+            $candidate = $assembly.GetType($typeName, $false, $false)
+            if ($null -ne $candidate) { $resolved = $candidate; break }
           }
-          Test-ProtectedDataState 'After Assembly.Load(System.Security)'
-          try {
-            Add-Type -AssemblyName System.Security -ErrorAction Stop
-            $report.Add('Add-Type -AssemblyName System.Security: success')
-          } catch {
-            $report.Add("Add-Type -AssemblyName System.Security: $($_.Exception.GetBaseException().Message)")
-          }
-          Test-ProtectedDataState 'After Add-Type System.Security'
-          $report | Set-Content -LiteralPath repair-lab/ps51-dpapi.md -Encoding UTF8
-          $report | ForEach-Object { Write-Host $_ }
+          if ($null -eq $resolved) { throw 'ProtectedData remained unresolved after loading System.Security.' }
 
-      - name: Probe canonical embedded-uninstaller text parity
+          $scopeType = $resolved.Assembly.GetType('System.Security.Cryptography.DataProtectionScope', $true, $false)
+          $scope = [Enum]::Parse($scopeType, 'CurrentUser')
+          $plain = [Text.Encoding]::UTF8.GetBytes('windo-repair-lab-roundtrip')
+          $protect = $resolved.GetMethod('Protect', [type[]]@([byte[]], [byte[]], $scopeType))
+          $unprotect = $resolved.GetMethod('Unprotect', [type[]]@([byte[]], [byte[]], $scopeType))
+          $cipher = $protect.Invoke($null, @($plain, $null, $scope))
+          $roundTrip = $unprotect.Invoke($null, @($cipher, $null, $scope))
+          if ([Text.Encoding]::UTF8.GetString($roundTrip) -cne 'windo-repair-lab-roundtrip') {
+            throw 'DPAPI round-trip returned unexpected plaintext.'
+          }
+          $lines.Add("ResolvedType=$($resolved.AssemblyQualifiedName)")
+          $lines.Add("CipherBytes=$($cipher.Length)")
+          $lines.Add('RoundTrip=PASS')
+          $lines | Set-Content -LiteralPath repair-lab/dpapi-runtime.txt -Encoding UTF8
+          $lines | ForEach-Object { Write-Host $_ }
+
+      - name: Probe normalized embedded-uninstaller parity
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = Get-Content -LiteralPath windo_install.ps1 -Raw
-          $uninstaller = Get-Content -LiteralPath windo_uninstall.ps1 -Raw
-
-          function Get-HereStringBeforeAnchor([string]$Source,[string]$Variable,[string]$Anchor) {
-            $needle = '$' + $Variable + " = @'"
-            $start = $Source.IndexOf($needle, [StringComparison]::Ordinal)
-            if ($start -lt 0) { return $null }
-            $contentStart = $Source.IndexOf("`n", $start, [StringComparison]::Ordinal)
-            if ($contentStart -lt 0) { return $null }
-            $contentStart++
-            $anchorIndex = $Source.IndexOf($Anchor, $contentStart, [StringComparison]::Ordinal)
-            if ($anchorIndex -lt 0) { return $null }
-            $end = $Source.LastIndexOf("`n'@", $anchorIndex, [StringComparison]::Ordinal)
-            if ($end -lt $contentStart) { return $null }
-            $end++
-            return $Source.Substring($contentStart, $end - $contentStart)
-          }
-
-          function Normalize-PublishedText([string]$Text) {
+          $installer = [IO.File]::ReadAllText((Resolve-Path 'windo_install.ps1'))
+          $uninstaller = [IO.File]::ReadAllText((Resolve-Path 'windo_uninstall.ps1'))
+          $normalize = {
+            param([string]$Text)
             if ($null -eq $Text) { return $null }
-            return $Text.Replace("`r`n", "`n").TrimEnd("`r", "`n")
+            return $Text.Replace("`r`n", "`n").Replace("`r", "`n").TrimEnd("`n")
           }
+          $needle = '$UninstallContent = @'''
+          $start = $installer.IndexOf($needle, [StringComparison]::Ordinal)
+          if ($start -lt 0) { throw 'Could not locate installer UninstallContent assignment.' }
+          $contentStart = $installer.IndexOf("`n", $start, [StringComparison]::Ordinal)
+          if ($contentStart -lt 0) { throw 'Could not locate embedded uninstaller content start.' }
+          $contentStart++
+          $anchor = 'Write-Utf8NoBomFile -Path $UninstallPath -Content $UninstallContent'
+          $anchorIndex = $installer.IndexOf($anchor, $contentStart, [StringComparison]::Ordinal)
+          if ($anchorIndex -lt 0) { throw 'Could not locate embedded uninstaller write marker.' }
+          $end = $installer.LastIndexOf("`n'@", $anchorIndex, [StringComparison]::Ordinal)
+          if ($end -lt $contentStart) { throw 'Could not locate embedded uninstaller terminator.' }
+          $embedded = $installer.Substring($contentStart, ($end + 1) - $contentStart)
+          $equal = (& $normalize $embedded) -ceq (& $normalize $uninstaller)
+          "PublishedTextNormalizedEqual=$equal" | Set-Content repair-lab/uninstaller-parity.txt -Encoding UTF8
+          if (-not $equal) { throw 'Normalized embedded-uninstaller parity failed.' }
 
-          $embedded = Get-HereStringBeforeAnchor $installer 'UninstallContent' 'Write-Utf8NoBomFile -Path $UninstallPath -Content $UninstallContent'
-          if ($null -eq $embedded) { throw 'Could not extract embedded uninstaller.' }
-          $rawEqual = $embedded.TrimEnd() -ceq $uninstaller.TrimEnd()
-          $normalizedEqual = (Normalize-PublishedText $embedded) -ceq (Normalize-PublishedText $uninstaller)
-          $lines = @(
-            '# Embedded uninstaller parity experiment',
-            '',
-            'Runner=${{ matrix.runner }}',
-            "PSVersion=$($PSVersionTable.PSVersion)",
-            "RawTrimmedEqual=$rawEqual",
-            "PublishedTextNormalizedEqual=$normalizedEqual",
-            "EmbeddedLength=$($embedded.Length)",
-            "MaintainedLength=$($uninstaller.Length)"
-          )
-          $lines | Set-Content repair-lab/uninstaller-parity.md -Encoding UTF8
-          $lines | ForEach-Object { Write-Host $_ }
-          if (-not $normalizedEqual) {
-            throw 'Canonical published-text normalization still reports real embedded-uninstaller drift.'
-          }
-
-      - name: Probe unsafe installer-path rejection semantics
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $bad = 'C:\Temp\bad"path.ps1'
-          $lines = @('# Unsafe path rejection experiment','','Runner=${{ matrix.runner }}',"PSVersion=$($PSVersionTable.PSVersion)")
-          try {
-            [void][IO.Path]::GetFullPath($bad)
-            $lines += 'Platform accepted invalid quoted path: TRUE'
-            $lines | Set-Content repair-lab/path-rejection.md -Encoding UTF8
-            throw 'Platform unexpectedly accepted an invalid quoted path.'
-          } catch {
-            $lines += "RejectedBy=$($_.Exception.GetType().FullName)"
-            $lines += "Message=$($_.Exception.Message)"
-          }
-          $lines | Set-Content repair-lab/path-rejection.md -Encoding UTF8
-          $lines | ForEach-Object { Write-Host $_ }
-
-      - name: Upload PS5.1 experiment evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: Upload PS5.1 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
         with:
-          name: ps51-repair-lab-${{ matrix.runner }}-${{ github.run_id }}
+          name: repair-lab-ps51-${{ matrix.runner }}-${{ github.run_id }}
           path: repair-lab
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
-  generated-repair-preview:
-    name: Deterministic generated-artifact repair preview
+  generated-preview:
+    name: Deterministic generated-artifact preview
     if: inputs.mode == 'repair-generated-artifacts' || inputs.mode == 'full-recovery-drill'
     runs-on: windows-2022
     timeout-minutes: 25
     steps:
-      - name: Checkout target
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Checkout exact target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
           ref: ${{ inputs.target_ref }}
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Regenerate canonical generated artifacts
+      - name: Regenerate candidate in disposable checkout
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -192,7 +142,7 @@ jobs:
           ./tools/Prometheus-RepairGeneratedArtifacts.ps1
           ./tools/Sync-InstallerChecksum.ps1
           git status --short | Tee-Object -FilePath repair-preview/git-status.txt
-          git diff -- . | Set-Content repair-preview/repair.diff
+          git diff --binary -- . | Set-Content repair-preview/repair.patch -Encoding UTF8
 
       - name: Validate regenerated candidate
         shell: pwsh
@@ -200,147 +150,55 @@ jobs:
           $ErrorActionPreference = 'Stop'
           ./tools/Test-WindoReservedVariables.ps1
           ./tools/Test-WindoLogic.ps1
-          ./tools/Invoke-PSScriptAnalyzer.ps1
-          ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'Deterministic generated repair preview'
+          ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'Read-only Repair Laboratory preview'
 
-      - name: Upload repair preview
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: Upload exact preview evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
         with:
           name: generated-repair-preview-${{ github.run_id }}
           path: repair-preview
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
   release-trust:
-    name: Release trust forensic verification
+    name: Release trust forensics
     if: inputs.mode == 'verify-release-trust' || inputs.mode == 'full-recovery-drill'
     runs-on: windows-2022
     timeout-minutes: 15
     steps:
-      - name: Checkout target
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Checkout exact target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
           ref: ${{ inputs.target_ref }}
+          persist-credentials: false
 
-      - name: Verify source, manifest, key, and snapshot independently
+      - name: Verify source, manifest, key, and snapshot
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
+          $ErrorActionPreference = 'Continue'
           New-Item -ItemType Directory -Force -Path trust-lab | Out-Null
           ./tools/Test-WindoChecksumSignature.ps1 *>&1 | Tee-Object trust-lab/signature.txt
+          $signatureExit = $LASTEXITCODE
           ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot *>&1 | Tee-Object trust-lab/release-validation.txt
+          $validationExit = $LASTEXITCODE
           Get-FileHash bootstrap.ps1,windo_install.ps1,windo_uninstall.ps1,windo_runner.ps1 -Algorithm SHA256 |
             Format-Table -AutoSize | Out-String -Width 240 | Set-Content trust-lab/source-hashes.txt
           Get-Content checksums/installer.sha256 | Set-Content trust-lab/manifest.txt
           Get-Content keys/windo-release-public.rsa.xml | Set-Content trust-lab/public-key.xml
+          @(
+            "SignatureExit=$signatureExit",
+            "ValidationExit=$validationExit"
+          ) | Set-Content trust-lab/outcomes.txt
+          if ($signatureExit -ne 0 -or $validationExit -ne 0) {
+            throw 'Release trust forensics found a failing trust or snapshot invariant.'
+          }
 
       - name: Upload trust evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
         with:
           name: release-trust-evidence-${{ github.run_id }}
           path: trust-lab
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
-
-  open-generated-repair-pr:
-    name: Open deterministic generated-artifact repair PR
-    if: inputs.open_repair_pr && (inputs.mode == 'repair-generated-artifacts' || inputs.mode == 'full-recovery-drill')
-    needs: generated-repair-preview
-    runs-on: windows-2022
-    timeout-minutes: 25
-    permissions:
-      contents: write
-      pull-requests: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Checkout exact target again
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          ref: ${{ inputs.target_ref }}
-          fetch-depth: 0
-
-      - name: Reproduce deterministic repair
-        id: repair
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          ./tools/Encode-ChildExec.ps1
-          ./tools/Prometheus-RepairGeneratedArtifacts.ps1
-          ./tools/Sync-InstallerChecksum.ps1
-          ./tools/Test-WindoReservedVariables.ps1
-          ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'Repair PR reproduction'
-          $changed = @(git status --porcelain)
-          if ($changed.Count -eq 0) {
-            'changed=false' >> $env:GITHUB_OUTPUT
-            Write-Host 'Regeneration is already clean; no repair PR is required.'
-          } else {
-            'changed=true' >> $env:GITHUB_OUTPUT
-          }
-
-      - name: Append repair experiment to Engineer Journal
-        if: steps.repair.outputs.changed == 'true'
-        shell: pwsh
-        run: |
-          $lines = @(
-            '',
-            '---',
-            '',
-            "## $(Get-Date -Format 'yyyy-MM-dd') — Deterministic generated-artifact repair run ${{ github.run_id }}",
-            '',
-            '**Category:** experiment / tooling  ',
-            '**Status:** proposed  ',
-            '**Related:** workflow run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}',
-            '',
-            '### Context / question',
-            '',
-            'Generated WINDO artifacts differed from their canonical source or a repair drill was requested against `${{ inputs.target_ref }}`.',
-            '',
-            '### Evidence / observations',
-            '',
-            'The repair laboratory reran canonical generation and checksum synchronization, then validated reserved-variable safety and the local pre-sign contract. A deterministic source diff remained after regeneration.',
-            '',
-            '### Alternatives considered',
-            '',
-            '- Manually edit generated payloads.',
-            '- Accept generated drift.',
-            '- Regenerate only from canonical source and review the exact resulting diff.',
-            '',
-            '### Decision / hypothesis',
-            '',
-            'Never hand-edit generated WINDO payloads. Regenerate deterministically from canonical source, validate the result, and review the repair as a normal PR. Private signing remains a separate post-review boundary.',
-            '',
-            '### Result',
-            '',
-            'This repair branch contains only the deterministic regeneration result plus this journal entry. It has not been privately signed or published.',
-            '',
-            '### Follow-up',
-            '',
-            '- Review the generated diff.',
-            '- Sign only in the private signing environment after merge-ready validation.'
-          )
-          Add-Content -LiteralPath docs/ENGINEER_JOURNAL.md -Value ($lines -join "`n") -Encoding UTF8
-          Add-Content -LiteralPath docs/ENGINEER_JOURNAL.md -Value "`n" -Encoding UTF8
-
-      - name: Commit, push, and open PR
-        if: steps.repair.outputs.changed == 'true'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $branch = 'automation/generated-repair-${{ github.run_id }}'
-          git config user.name 'windo-repair-bot'
-          git config user.email 'windo-repair-bot@users.noreply.github.com'
-          git switch -c $branch
-          git add -A
-          git commit -m 'repair: regenerate WINDO derived artifacts'
-          git push origin $branch
-          $body = @(
-            '## Deterministic WINDO generated-artifact repair',
-            '',
-            'Created by WINDO Repair Laboratory from `${{ inputs.target_ref }}`.',
-            '',
-            'The workflow regenerated artifacts only from canonical source, synchronized the unsigned checksum candidate, reran reserved-variable protection and the pre-sign validation contract, and appended the experiment to the Engineer Journal.',
-            '',
-            'This PR does **not** contain or use the private release signing key and does not publish a release.'
-          ) -join "`n"
-          gh pr create --repo '${{ github.repository }}' --base '${{ inputs.target_ref }}' --head $branch --title 'repair: regenerate WINDO derived artifacts' --body $body

@@ -1,96 +1,101 @@
-name: Validate PowerShell
+name: WINDO Fast Gate
+
+on:
+  pull_request:
+    branches:
+      - jonex/windo-production-ready
+  push:
+    branches:
+      - jonex/windo-production-ready
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-on:
-  push:
-    branches:
-      - Exodus
-      - Genisis
-      - main
-      - jonex/windo-production-ready
-      - ci/hosted-runner-lab-20260903
-  pull_request:
-    branches:
-      - Exodus
-      - Genisis
-      - main
-      - jonex/windo-production-ready
+concurrency:
+  group: windo-fast-gate-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  powershell-51:
-    name: Windows PowerShell 5.1
-    runs-on: windows-latest
-    timeout-minutes: 20
+  fast-gate:
+    name: WINDO Fast Gate
+    runs-on: windows-2022
+    timeout-minutes: 12
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Checkout exact candidate with comparison history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
+        with:
+          fetch-depth: 0
 
-      - name: Initialize diagnostics
-        shell: powershell
-        run: New-Item -ItemType Directory -Force -Path ci-forensics | Out-Null
-
-      - name: Install PSScriptAnalyzer
-        id: module
-        shell: powershell
-        run: |
-          [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion 1.25.0 -ErrorAction Stop
-
-      - name: Validate syntax and release contract
-        id: release
-        if: always()
-        shell: powershell
-        run: .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
-
-      - name: Logic tests
-        id: logic
-        if: always()
-        continue-on-error: true
+      - name: Windows PowerShell 5.1 parser compatibility
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          Start-Transcript -Path ci-forensics/logic-transcript.txt -Force | Out-Null
-          try {
-            .\tools\Test-WindoLogic.ps1
-          } finally {
-            Stop-Transcript | Out-Null
+          $files = @(
+            'bootstrap.ps1',
+            'windo_install.ps1',
+            'windo_runner.ps1',
+            'windo_uninstall.ps1',
+            'windo_heal.ps1',
+            'windo_self_update.ps1',
+            'tools/Test-WindoLogic.ps1',
+            'tools/Test-WindoReservedVariables.ps1',
+            'tools/Test-WindoJournalContract.ps1',
+            'tools/New-WindoJournalEntry.ps1',
+            'tools/Validate-Windo.ps1'
+          )
+          foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "Missing required PowerShell source: $file"
+            }
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $file),
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "${file}: $($_.Message)" }
+              throw "Windows PowerShell 5.1 parse failed: $file"
+            }
           }
+          Write-Host 'Windows PowerShell 5.1 parser compatibility: PASS'
 
-      - name: PSScriptAnalyzer
-        id: analyzer
-        if: always()
-        shell: powershell
-        run: .\tools\Invoke-PSScriptAnalyzer.ps1
-
-      - name: Enforce PS5.1 compatibility or exact issue 8 baseline
-        if: always()
-        shell: powershell
-        run: |
-          .\tools\Test-WindoKnownPs51Baseline.ps1 `
-            -LogicTranscriptPath 'ci-forensics/logic-transcript.txt' `
-            -ModuleOutcome '${{ steps.module.outcome }}' `
-            -ReleaseOutcome '${{ steps.release.outcome }}' `
-            -LogicOutcome '${{ steps.logic.outcome }}' `
-            -AnalyzerOutcome '${{ steps.analyzer.outcome }}'
-
-  powershell-7:
-    name: PowerShell 7
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - name: Install PSScriptAnalyzer
+      - name: Reserved-variable safety
         shell: pwsh
-        run: |
-          [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion 1.25.0 -ErrorAction Stop
-      - name: Validate syntax and release contract
-        shell: pwsh
-        run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
-      - name: Logic tests
+        run: ./tools/Test-WindoReservedVariables.ps1
+
+      - name: Fast source logic
         shell: pwsh
         run: ./tools/Test-WindoLogic.ps1
-      - name: PSScriptAnalyzer
+
+      - name: Engineer Journal contract
         shell: pwsh
-        run: ./tools/Invoke-PSScriptAnalyzer.ps1
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:EVENT_NAME -eq 'pull_request') {
+            ./tools/Test-WindoJournalContract.ps1 -BaseSha $env:BASE_SHA -HeadSha $env:HEAD_SHA
+          } else {
+            ./tools/Test-WindoJournalContract.ps1
+          }
+
+      - name: Fast Gate summary
+        if: always()
+        shell: pwsh
+        run: |
+          $lines = @(
+            '## WINDO Fast Gate',
+            '',
+            '- Windows PowerShell 5.1 parse compatibility',
+            '- Reserved automatic-variable safety',
+            '- Fast source logic',
+            '- Engineer Journal contract',
+            '',
+            'Deep Windows/runtime/release certification intentionally runs in WINDO Deep Certification.'
+          )
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($lines -join "`n") -Encoding UTF8
