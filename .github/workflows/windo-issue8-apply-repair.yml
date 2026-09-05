@@ -6,12 +6,12 @@ on:
       - fix/ps51-dpapi-resolution-20260904
     paths:
       - tools/Apply-WindoIssue8DpapiRepair.ps1
+      - tools/Prometheus-RepairGeneratedArtifacts.ps1
       - .github/workflows/windo-issue8-apply-repair.yml
   workflow_dispatch:
 
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: windo-issue8-repair-materializer
@@ -24,10 +24,9 @@ jobs:
     timeout-minutes: 40
     env:
       REPAIR_BASE: fix/ps51-dpapi-resolution-20260904
-      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout exact triggering commit
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -176,52 +175,25 @@ jobs:
           git config user.email 'windo-repair-bot@users.noreply.github.com'
           git switch -c $branch
           git add -- windo_runner.ps1 windo_install.ps1 tools/ChildExec.b64.txt checksums/installer.sha256 docs/prometheus-generated-repair-report.md docs/ENGINEER_JOURNAL.md
-          git commit -m 'fix: restore PS5.1 DPAPI runtime resolution'
+          git commit -m 'fix: materialize certified Issue 8 runtime artifacts'
           git push origin "HEAD:refs/heads/$branch"
           "branch=$branch" >> $env:GITHUB_OUTPUT
           Write-Host "Materialized certified repair on $branch"
-
-      - name: Open reviewable materialization PR
-        if: steps.diff.outputs.changed == 'true'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Continue'
-          $branch = '${{ steps.branch.outputs.branch }}'
-          $body = @(
-            '## Issue #8 certified repair materialization',
-            '',
-            'This PR was generated from the immutable source commit `${{ github.sha }}`.',
-            '',
-            'Before materialization the workflow proved:',
-            '- the actual shipping DPAPI helper under Windows PowerShell 5.1;',
-            '- the PowerShell 7 control path;',
-            '- deterministic generated-runtime propagation;',
-            '- synchronized unsigned release hashes;',
-            '- the complete hosted PreSign contract.',
-            '',
-            'The private checksum signature is intentionally not generated or modified in hosted CI.',
-            '',
-            'This branch exists specifically to avoid CI mutating or racing the source branch it is validating.'
-          ) -join "`n"
-          $output = & gh pr create --repo '${{ github.repository }}' --base $env:REPAIR_BASE --head $branch --title 'Fix: restore native DPAPI resolution under Windows PowerShell 5.1' --body $body 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Warning "The certified repair branch was pushed successfully, but automatic PR creation was unavailable: $($output -join ' ')"
-            Write-Host "Open a PR from $branch into $env:REPAIR_BASE."
-            exit 0
-          }
-          $output | ForEach-Object { Write-Host $_ }
 
       - name: Materialization summary
         if: always()
         shell: pwsh
         run: |
+          $branch = '${{ steps.branch.outputs.branch }}'
+          $branchText = if ([string]::IsNullOrWhiteSpace($branch)) { 'No repair branch required' } else { $branch }
           $lines = @(
             '## WINDO Issue #8 repair materialization',
             '',
             '- Source commit: `${{ github.sha }}`',
             '- Source branch: `fix/ps51-dpapi-resolution-20260904`',
-            '- Repair branch: `${{ steps.branch.outputs.branch }}`',
+            "- Materialized branch: `$branchText`",
             '- Private signing key used: **No**',
-            '- Source branch mutated by this workflow: **No**'
+            '- Source branch mutated by this workflow: **No**',
+            '- Pull request creation attempted by this workflow: **No**'
           )
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($lines -join "`n") -Encoding UTF8
