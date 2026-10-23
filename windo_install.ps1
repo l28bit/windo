@@ -18494,6 +18494,91 @@ function __windo_complete_values([string[]]$Values, [string]$Word) {
     }
 }
 
+function __windo_invoke_original_tab_expansion2 {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet("ScriptInputSet", "AstInputSet")][string]$ParameterSet,
+        [AllowEmptyString()][string]$InputScript,
+        [int]$CursorColumn,
+        [System.Management.Automation.Language.Ast]$Ast,
+        [System.Management.Automation.Language.Token[]]$Tokens,
+        [System.Management.Automation.Language.IScriptPosition]$PositionOfCursor,
+        [hashtable]$Options
+    )
+    $original = $global:__WindoOriginalTabExpansion2
+    if ($null -eq $original) { return $null }
+    if ($ParameterSet -eq "AstInputSet") {
+        if ($null -ne $Options) { return (& $original -ast $Ast -tokens $Tokens -positionOfCursor $PositionOfCursor -options $Options) }
+        return (& $original -ast $Ast -tokens $Tokens -positionOfCursor $PositionOfCursor)
+    }
+    if ($null -ne $Options) { return (& $original -inputScript $InputScript -cursorColumn $CursorColumn -options $Options) }
+    return (& $original -inputScript $InputScript -cursorColumn $CursorColumn)
+}
+
+function Register-WindoTransparentTabExpansion {
+    $registered = Get-Variable -Name __WindoTransparentTabExpansionRegistered -Scope Global -ErrorAction SilentlyContinue
+    if ($null -ne $registered -and [bool]$registered.Value) { return }
+    $current = Get-Command TabExpansion2 -CommandType Function -ErrorAction SilentlyContinue
+    if ($null -eq $current -or $null -eq $current.ScriptBlock) {
+        Write-Warning "WINDO: TabExpansion2 not available; transparent completion skipped."
+        return
+    }
+
+    if ($null -eq (Get-Variable -Name __WindoOriginalTabExpansion2 -Scope Global -ErrorAction SilentlyContinue)) {
+        $global:__WindoOriginalTabExpansion2 = $current.ScriptBlock
+    }
+
+    function global:TabExpansion2 {
+        [CmdletBinding(DefaultParameterSetName = "ScriptInputSet")]
+        param(
+            [Parameter(Mandatory = $true, ParameterSetName = "ScriptInputSet", Position = 0)]
+            [AllowEmptyString()][string]$inputScript,
+            [Parameter(Mandatory = $true, ParameterSetName = "ScriptInputSet", Position = 1)]
+            [int]$cursorColumn,
+            [Parameter(Mandatory = $true, ParameterSetName = "AstInputSet", Position = 0)]
+            [System.Management.Automation.Language.Ast]$ast,
+            [Parameter(Mandatory = $true, ParameterSetName = "AstInputSet", Position = 1)]
+            [System.Management.Automation.Language.Token[]]$tokens,
+            [Parameter(Mandatory = $true, ParameterSetName = "AstInputSet", Position = 2)]
+            [System.Management.Automation.Language.IScriptPosition]$positionOfCursor,
+            [hashtable]$options
+        )
+
+        if ($PSCmdlet.ParameterSetName -eq "AstInputSet") {
+            return (__windo_invoke_original_tab_expansion2 -ParameterSet AstInputSet -Ast $ast -Tokens $tokens -PositionOfCursor $positionOfCursor -Options $options)
+        }
+
+        $mode = __windo_resolve_completion_mode
+        if ($mode -ne "native-first") {
+            return (__windo_invoke_original_tab_expansion2 -ParameterSet ScriptInputSet -InputScript $inputScript -CursorColumn $cursorColumn -Options $options)
+        }
+
+        # WINDO is a transparent prefix for completion. Only recognize WINDO as
+        # the first command token; do not rewrite quoted text, later pipeline
+        # elements, or command names that merely begin with "windo".
+        $prefix = [regex]::Match($inputScript, '^(?<lead>[ \t]*)windo(?:(?<sep>[ \t]+)|$)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if (-not $prefix.Success -or $cursorColumn -lt $prefix.Length) {
+            return (__windo_invoke_original_tab_expansion2 -ParameterSet ScriptInputSet -InputScript $inputScript -CursorColumn $cursorColumn -Options $options)
+        }
+
+        $delegate = $inputScript.Substring($prefix.Length)
+        $delegateCursor = [Math]::Max(0, [Math]::Min($delegate.Length, ($cursorColumn - $prefix.Length)))
+        $completion = __windo_invoke_original_tab_expansion2 -ParameterSet ScriptInputSet -InputScript $delegate -CursorColumn $delegateCursor -Options $options
+        if ($null -eq $completion) { return $null }
+
+        $matches = [System.Collections.ObjectModel.Collection[System.Management.Automation.CompletionResult]]::new()
+        foreach ($match in @($completion.CompletionMatches)) { [void]$matches.Add($match) }
+        return [System.Management.Automation.CommandCompletion]::new(
+            $matches,
+            [int]$completion.CurrentMatchIndex,
+            ([int]$completion.ReplacementIndex + [int]$prefix.Length),
+            [int]$completion.ReplacementLength
+        )
+    }
+
+    $global:__WindoTransparentTabExpansionRegistered = $true
+}
+Register-WindoTransparentTabExpansion
+
 function Register-WindoArgumentCompleter {
     if ($global:__WindoArgCompleterRegistered) { return }
     if (-not (Get-Command TabExpansion2 -ErrorAction SilentlyContinue)) {
@@ -18505,7 +18590,7 @@ function Register-WindoArgumentCompleter {
         $builtin = [string[]]@(__WINDO_BUILTIN_ARRAY__, '!!')
         try {
             $mode = __windo_resolve_completion_mode
-            if ($mode -eq "off") { return }
+            if ($mode -eq "off" -or $mode -eq "native-first") { return }
             if ($null -eq $commandAst) { return }
             $line = $commandAst.Extent.Text
             if ([string]::IsNullOrWhiteSpace($line)) { return }
