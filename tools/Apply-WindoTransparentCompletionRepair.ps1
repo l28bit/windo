@@ -35,7 +35,7 @@ if (-not $installerSource.Contains('function Register-WindoTransparentTabExpansi
         'function __windo_invoke_original_tab_expansion2 {',
         '    param(',
         '        [Parameter(Mandatory = $true)][ValidateSet("ScriptInputSet", "AstInputSet")][string]$ParameterSet,',
-        '        [AllowEmptyString()][string]$InputScript,',
+        '        [Parameter()][AllowEmptyString()][string]$InputScript,',
         '        [int]$CursorColumn,',
         '        [System.Management.Automation.Language.Ast]$Ast,',
         '        [System.Management.Automation.Language.Token[]]$Tokens,',
@@ -123,6 +123,17 @@ if (-not $installerSource.Contains('function Register-WindoTransparentTabExpansi
     Write-Host 'Inserted transparent TabExpansion2 completion layer.' -ForegroundColor Green
 } else {
     Write-Host 'Transparent TabExpansion2 completion layer is already present.' -ForegroundColor Yellow
+}
+
+# Windows PowerShell 5.1 requires an explicit Parameter attribute for AllowEmptyString
+# to be honored consistently on this helper. Migrate the first generated form exactly.
+$oldPs51InputMetadata = '        [AllowEmptyString()][string]$InputScript,'
+$newPs51InputMetadata = '        [Parameter()][AllowEmptyString()][string]$InputScript,'
+if ($installerSource.Contains($oldPs51InputMetadata)) {
+    $installerSource = $installerSource.Replace($oldPs51InputMetadata, $newPs51InputMetadata)
+    Write-Host 'Made empty delegated input explicit for Windows PowerShell 5.1.' -ForegroundColor Green
+} elseif (-not $installerSource.Contains($newPs51InputMetadata)) {
+    throw 'Known transparent-completion InputScript metadata was not found.'
 }
 
 $oldModeGate = '            if ($mode -eq "off") { return }'
