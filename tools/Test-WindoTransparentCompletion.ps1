@@ -7,7 +7,7 @@ $installerSource = Get-Content -LiteralPath $installerPath -Raw
 
 function Assert-WindoCompletionParity {
     param(
-        [Parameter(Mandatory = $true)][string]$NativeLine,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$NativeLine,
         [Parameter(Mandatory = $true)][int]$NativeCursor,
         [Parameter(Mandatory = $true)][string]$Case
     )
