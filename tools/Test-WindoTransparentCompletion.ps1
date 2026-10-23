@@ -37,11 +37,8 @@ function Assert-WindoCompletionParity {
 }
 
 # The shipping completer is generated into windo_runtime.ps1 from this installer block.
-$blockMatch = [regex]::Match(
-    $installerSource,
-    "(?s)\$WindoCompleterBlock\s*=\s*@'\r?\n(?<body>.*?)\r?\n'@\r?\n\$WindoCompleterBlock\s*=\s*\$WindoCompleterBlock\.Replace",
-    [System.Text.RegularExpressions.RegexOptions]::Singleline
-)
+$blockPattern = '(?s)\$WindoCompleterBlock\s*=\s*@''\r?\n(?<body>.*?)\r?\n''@\r?\n\$WindoCompleterBlock\s*=\s*\$WindoCompleterBlock\.Replace'
+$blockMatch = [regex]::Match($installerSource, $blockPattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
 if (-not $blockMatch.Success) {
     throw 'FAIL: unable to extract shipping WINDO completer block from installer.'
 }
@@ -58,7 +55,9 @@ function global:windo {
 }
 
 $oldMode = $env:WINDO_COMPLETION_MODE
-$oldFlag = $global:__WindoArgCompleterRegistered
+$oldFlagVariable = Get-Variable -Name __WindoArgCompleterRegistered -Scope Global -ErrorAction SilentlyContinue
+$hadOldFlag = $null -ne $oldFlagVariable
+$oldFlag = if ($hadOldFlag) { [bool]$oldFlagVariable.Value } else { $false }
 try {
     $env:WINDO_COMPLETION_MODE = 'native-first'
     $global:__WindoArgCompleterRegistered = $false
@@ -84,7 +83,9 @@ try {
 } finally {
     if ($null -eq $oldMode) { Remove-Item Env:\WINDO_COMPLETION_MODE -ErrorAction SilentlyContinue }
     else { $env:WINDO_COMPLETION_MODE = $oldMode }
-    $global:__WindoArgCompleterRegistered = $oldFlag
+
+    if ($hadOldFlag) { $global:__WindoArgCompleterRegistered = $oldFlag }
+    else { Remove-Variable -Name __WindoArgCompleterRegistered -Scope Global -ErrorAction SilentlyContinue }
     Remove-Item Function:\windo -ErrorAction SilentlyContinue
 }
 
