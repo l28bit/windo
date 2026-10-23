@@ -9,6 +9,7 @@ on:
       - fix/transparent-shell-semantics-20261023
     paths:
       - tools/Apply-WindoTransparentCompletionRepair.ps1
+      - tools/Test-WindoTransparentCompletion.ps1
       - .github/workflows/windo-transparent-completion-repair.yml
 
 jobs:
