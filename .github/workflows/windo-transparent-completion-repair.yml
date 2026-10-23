@@ -27,9 +27,13 @@ jobs:
         shell: pwsh
         run: ./tools/Apply-WindoTransparentCompletionRepair.ps1
 
-      - name: Prove transparent completion contract
+      - name: Prove transparent completion contract - PowerShell 7
         shell: pwsh
         run: ./tools/Test-WindoTransparentCompletion.ps1
+
+      - name: Prove transparent completion contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\tools\Test-WindoTransparentCompletion.ps1
 
       - name: Prove completion source assertions
         shell: pwsh
