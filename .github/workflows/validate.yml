@@ -57,6 +57,11 @@ jobs:
             Stop-Transcript | Out-Null
           }
 
+      - name: Transparent shell completion contract
+        if: always()
+        shell: powershell
+        run: .\tools\Test-WindoTransparentCompletion.ps1
+
       - name: PSScriptAnalyzer
         id: analyzer
         if: always()
@@ -91,6 +96,9 @@ jobs:
       - name: Logic tests
         shell: pwsh
         run: ./tools/Test-WindoLogic.ps1
+      - name: Transparent shell completion contract
+        shell: pwsh
+        run: ./tools/Test-WindoTransparentCompletion.ps1
       - name: PSScriptAnalyzer
         shell: pwsh
         run: ./tools/Invoke-PSScriptAnalyzer.ps1
