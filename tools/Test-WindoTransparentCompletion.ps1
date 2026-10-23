@@ -27,9 +27,6 @@ function Assert-WindoCompletionParity {
     $wrappedLine = $prefix + $NativeLine
     $wrapped = TabExpansion2 -inputScript $wrappedLine -cursorColumn ($NativeCursor + $prefix.Length)
 
-    # A native argument completer must return one object to suppress PowerShell's
-    # fallback path completer at an empty argument position. A fully empty result
-    # is intentionally invisible and therefore equivalent to native no-op behavior.
     $nativeText = @(Get-WindoVisibleCompletionText -Matches @($native.CompletionMatches))
     $wrappedText = @(Get-WindoVisibleCompletionText -Matches @($wrapped.CompletionMatches))
 
@@ -49,7 +46,6 @@ function Assert-WindoCompletionParity {
     Write-Host "PASS: $Case" -ForegroundColor Green
 }
 
-# The shipping completer is generated into windo_runtime.ps1 from this installer block.
 $blockPattern = '(?s)\$WindoCompleterBlock\s*=\s*@''\r?\n(?<body>.*?)\r?\n''@\r?\n\$WindoCompleterBlock\s*=\s*\$WindoCompleterBlock\.Replace'
 $blockMatch = [regex]::Match($installerSource, $blockPattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
 if (-not $blockMatch.Success) {
@@ -58,8 +54,6 @@ if (-not $blockMatch.Success) {
 
 $completerBlock = $blockMatch.Groups['body'].Value.Replace('__WINDO_BUILTIN_ARRAY__', "'help','doctor','completion'")
 
-# Completion happens before invocation, so this function only needs to expose the
-# same command shape that the installed runtime exposes.
 function global:windo {
     param(
         [Parameter(ValueFromRemainingArguments = $true)]
@@ -76,7 +70,8 @@ try {
     $global:__WindoArgCompleterRegistered = $false
     Invoke-Expression $completerBlock
 
-    Assert-WindoCompletionParity -NativeLine '' -NativeCursor 0 -Case 'empty command position'
+    # Establish whether normal command text can be transparent before separately
+    # testing the empty-position fallback behavior of Register-ArgumentCompleter.
     Assert-WindoCompletionParity -NativeLine 'Get-Chi' -NativeCursor 7 -Case 'command discovery'
     Assert-WindoCompletionParity -NativeLine 'Get-ChildItem -Fi' -NativeCursor 17 -Case 'parameter completion'
 
@@ -84,6 +79,8 @@ try {
     Assert-WindoCompletionParity -NativeLine $midLine -NativeCursor 17 -Case 'mid-line cursor completion'
 
     Assert-WindoCompletionParity -NativeLine 'Get-ChildItem -Path ".\\"' -NativeCursor 24 -Case 'quoted path completion'
+
+    Assert-WindoCompletionParity -NativeLine '' -NativeCursor 0 -Case 'empty command position'
 } finally {
     if ($null -eq $oldMode) { Remove-Item Env:\WINDO_COMPLETION_MODE -ErrorAction SilentlyContinue }
     else { $env:WINDO_COMPLETION_MODE = $oldMode }
