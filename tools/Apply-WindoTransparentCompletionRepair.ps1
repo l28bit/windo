@@ -44,6 +44,15 @@ if ($anchorCount -lt 1) {
         '            # the last matching word. Only translate the absolute cursor by the prefix.',
         '            if ($mode -eq "native-first") {',
         '                $delegateCursor = [Math]::Max(0, [Math]::Min($delegate.Length, ([int]$cursorPosition - [int]$m.Length)))',
+        '',
+        '                # Returning no matches from a native argument completer causes PowerShell',
+        '                # to fall back to path completion for the empty argument. Emit one fully',
+        '                # invisible no-op result so `windo <Tab>` leaves the line unchanged.',
+        '                if ($delegate.Length -eq 0) {',
+        '                    [System.Management.Automation.CompletionResult]::new("", "", [System.Management.Automation.CompletionResultType]::Text, "")',
+        '                    return',
+        '                }',
+        '',
         '                $completion = TabExpansion2 -inputScript $delegate -cursorColumn $delegateCursor 2>$null',
         '                if ($null -eq $completion -or $null -eq $completion.CompletionMatches) { return }',
         '                foreach ($cm in @($completion.CompletionMatches)) { $cm }',
@@ -68,6 +77,7 @@ $oldLogic = 'Assert-Equal ($installerSource.Contains(''if ($mode -eq "native-fir
 $newLogicLines = @(
     'Assert-Equal ($installerSource.Contains(''if ($mode -eq "native-first") {'') -eq $true) $true "profile completer has a transparent native-first fast path"',
     'Assert-Equal ($installerSource.Contains(''$delegateCursor = [Math]::Max(0, [Math]::Min($delegate.Length, ([int]$cursorPosition - [int]$m.Length)))'') -eq $true) $true "profile completer translates the real cursor by only the windo prefix"',
+    'Assert-Equal ($installerSource.Contains(''if ($delegate.Length -eq 0) {'') -eq $true) $true "profile completer suppresses empty-prefix fallback without inserting text"',
     'Assert-Equal ($installerSource.Contains(''TabExpansion2 -inputScript $delegate -cursorColumn $delegateCursor'') -eq $true) $true "profile completer delegates the unmodified command tail at the translated cursor"'
 )
 $newLogic = $newLogicLines -join $logicNl
