@@ -5,6 +5,16 @@ $root = Split-Path $PSScriptRoot -Parent
 $installerPath = Join-Path $root 'windo_install.ps1'
 $installerSource = Get-Content -LiteralPath $installerPath -Raw
 
+function Get-WindoVisibleCompletionText {
+    param([AllowNull()][object[]]$Matches)
+    return @(
+        @($Matches) |
+            Where-Object { -not ([string]::IsNullOrEmpty([string]$_.CompletionText) -and [string]::IsNullOrEmpty([string]$_.ListItemText)) } |
+            ForEach-Object { [string]$_.CompletionText } |
+            Sort-Object -Unique
+    )
+}
+
 function Assert-WindoCompletionParity {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$NativeLine,
@@ -17,8 +27,11 @@ function Assert-WindoCompletionParity {
     $wrappedLine = $prefix + $NativeLine
     $wrapped = TabExpansion2 -inputScript $wrappedLine -cursorColumn ($NativeCursor + $prefix.Length)
 
-    $nativeText = @($native.CompletionMatches | ForEach-Object { [string]$_.CompletionText } | Sort-Object -Unique)
-    $wrappedText = @($wrapped.CompletionMatches | ForEach-Object { [string]$_.CompletionText } | Sort-Object -Unique)
+    # A native argument completer must return one object to suppress PowerShell's
+    # fallback path completer at an empty argument position. A fully empty result
+    # is intentionally invisible and therefore equivalent to native no-op behavior.
+    $nativeText = @(Get-WindoVisibleCompletionText -Matches @($native.CompletionMatches))
+    $wrappedText = @(Get-WindoVisibleCompletionText -Matches @($wrapped.CompletionMatches))
 
     $nativeJoined = $nativeText -join "`n"
     $wrappedJoined = $wrappedText -join "`n"
@@ -63,22 +76,13 @@ try {
     $global:__WindoArgCompleterRegistered = $false
     Invoke-Expression $completerBlock
 
-    # Empty-prefix behavior is part of the contract. WINDO must not inject its own
-    # namespace into a command position that otherwise belongs to PowerShell.
     Assert-WindoCompletionParity -NativeLine '' -NativeCursor 0 -Case 'empty command position'
-
-    # Command discovery must remain native.
     Assert-WindoCompletionParity -NativeLine 'Get-Chi' -NativeCursor 7 -Case 'command discovery'
-
-    # Cmdlet parameter completion must remain native.
     Assert-WindoCompletionParity -NativeLine 'Get-ChildItem -Fi' -NativeCursor 17 -Case 'parameter completion'
 
-    # Completion must honor the actual cursor position rather than assuming the
-    # cursor is at the end of the line.
     $midLine = 'Get-ChildItem -Fi -Path .'
     Assert-WindoCompletionParity -NativeLine $midLine -NativeCursor 17 -Case 'mid-line cursor completion'
 
-    # Quoted/provider path completion must remain native too.
     Assert-WindoCompletionParity -NativeLine 'Get-ChildItem -Path ".\\"' -NativeCursor 24 -Case 'quoted path completion'
 } finally {
     if ($null -eq $oldMode) { Remove-Item Env:\WINDO_COMPLETION_MODE -ErrorAction SilentlyContinue }
