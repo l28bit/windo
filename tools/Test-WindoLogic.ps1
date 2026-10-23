@@ -2431,7 +2431,11 @@ Assert-Equal ($installerSource.Contains("function _windo_completion_repair") -eq
 Assert-Equal ($installerSource.Contains('if ($sub -eq "doctor")') -eq $true) $true "completion command handles doctor"
 Assert-Equal ($installerSource.Contains('if ($sub -eq "repair")') -eq $true) $true "completion command handles repair"
 Assert-Equal ($installerSource.Contains("trust = @('--online','--offline','--json')") -eq $true) $true "profile completer knows trust syntax"
-Assert-Equal ($installerSource.Contains('if ($mode -eq "native-first") { return }') -eq $false) $true "profile completer offers WINDO verbs at empty windo prefix"
+Assert-Equal ($installerSource.Contains('function Register-WindoTransparentTabExpansion {') -eq $true) $true "profile installs transparent TabExpansion2 completion layer"
+Assert-Equal ($installerSource.Contains('$global:__WindoOriginalTabExpansion2 = $current.ScriptBlock') -eq $true) $true "profile preserves the pre-WINDO TabExpansion2 implementation"
+Assert-Equal ($installerSource.Contains('$delegate = $inputScript.Substring($prefix.Length)') -eq $true) $true "profile removes only the WINDO prefix before native completion"
+Assert-Equal ($installerSource.Contains('([int]$completion.ReplacementIndex + [int]$prefix.Length)') -eq $true) $true "profile remaps native replacement index by only the WINDO prefix"
+Assert-Equal ($installerSource.Contains('if ($mode -eq "off" -or $mode -eq "native-first") { return }') -eq $true) $true "legacy WINDO argument completer stays out of native-first mode"
 $psReadLineBlockStart = $installerSource.IndexOf('$WindoPsReadLineBlock = @', [StringComparison]::Ordinal)
 $psReadLineBlockEnd = $installerSource.IndexOf('$WindoCompleterBlock = @', $psReadLineBlockStart, [StringComparison]::Ordinal)
 $psReadLineProfileBlock = if ($psReadLineBlockStart -ge 0 -and $psReadLineBlockEnd -gt $psReadLineBlockStart) { $installerSource.Substring($psReadLineBlockStart, $psReadLineBlockEnd - $psReadLineBlockStart) } else { "" }

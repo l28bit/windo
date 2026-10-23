@@ -1,0 +1,75 @@
+name: WINDO Transparent Completion Repair
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - fix/transparent-shell-semantics-20261023
+    paths:
+      - tools/Apply-WindoTransparentCompletionRepair.ps1
+      - tools/Test-WindoTransparentCompletion.ps1
+      - .github/workflows/windo-transparent-completion-repair.yml
+
+jobs:
+  repair:
+    name: Apply deterministic completion repair
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: fix/transparent-shell-semantics-20261023
+          fetch-depth: 0
+
+      - name: Apply bounded source repair
+        shell: pwsh
+        run: ./tools/Apply-WindoTransparentCompletionRepair.ps1
+
+      - name: Prove transparent completion contract - PowerShell 7
+        shell: pwsh
+        run: ./tools/Test-WindoTransparentCompletion.ps1
+
+      - name: Prove transparent completion contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\tools\Test-WindoTransparentCompletion.ps1
+
+      - name: Prove completion source assertions
+        shell: pwsh
+        run: ./tools/Test-WindoLogic.ps1
+
+      - name: Restrict generated diff
+        shell: pwsh
+        run: |
+          $allowed = @(
+            'windo_install.ps1',
+            'tools/Test-WindoLogic.ps1'
+          )
+          $changed = @(git diff --name-only)
+          $unexpected = @($changed | Where-Object { $_ -notin $allowed })
+          if ($unexpected.Count -gt 0) {
+            throw ('Unexpected repair paths: ' + ($unexpected -join ', '))
+          }
+          if ($changed.Count -eq 0) {
+            Write-Host 'No repair diff remains; branch is already repaired.'
+          } else {
+            git diff --check
+            git diff -- $allowed
+          }
+
+      - name: Commit deterministic repair
+        shell: pwsh
+        env:
+          BRANCH_NAME: fix/transparent-shell-semantics-20261023
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- windo_install.ps1 tools/Test-WindoLogic.ps1
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host 'Transparent completion repair already committed.'
+            exit 0
+          }
+          git commit -m 'fix: make WINDO completion transparent by default'
+          git push origin "HEAD:$env:BRANCH_NAME"
