@@ -408,3 +408,24 @@ Materialize the explicit `[Parameter()][AllowEmptyString()]` input metadata alre
 ### Acceptance and blockers
 
 Run the existing completion contract under fresh PS5.1 and PS7 hosts. Reconcile the independently staged DPAPI repair (#13), regenerate unsigned release hashes and derived snapshot using canonical tooling, and use the private signing boundary for the exact candidate. Do not waive checksum/signature or Issue #8 failures. Privileged real Windows UAC and execution parity remain Issue #11 gates. The default `Exodus` branch and production-ready lineage were not changed. Local clone failed because DNS/network was unavailable; no PowerShell execution or native installation is claimed.
+
+---
+
+## 2026-11-25 — Owner-directed feature freeze: fundamentals first
+
+**Status:** ACTIVE — corrective engineering only until fundamentals are sound again.
+
+Owner direction: “Feature expansion stopped until fundamentally sound again.”
+
+Allowed scope: reproducible defect correction, regression tests, existing runtime and installer recovery, CI reliability, security and integrity remediation, evidence and documentation. Defer new commands, modules, UI surfaces, integrations, branding campaigns and speculative architectural expansion. Do not disguise features as repair work.
+
+Release-readiness gates (all require evidence; none are satisfied merely by a commit or a merge):
+
+- [ ] Native completion parity in clean PS5.1 and PS7 sessions, including empty input, quoting and cursor position.
+- [ ] Elevated execution fidelity: arguments, working directory, stdout/stderr, native exit codes, cancellation and process-tree cleanup.
+- [ ] DPAPI audit round-trip and integrity checks in both supported hosts; resolve #8 without weakening trust.
+- [ ] Clean install, upgrade, self-repair and uninstall; preserved user profile and no false success on denied elevation.
+- [ ] Canonically generated artifacts, synchronized hashes, signed exact release candidate, green required checks and verified privileged Windows certification (#11).
+- [ ] Consolidate corrective branches through reviewed production-ready lineage; no publication before explicit approval and required evidence.
+
+PRs #12, #13 and #14 are the existing corrective lanes, not authorization for expansion. Preserve the signing and elevation boundaries, and retain exact test/commit evidence. Keep the freeze active until the owner reviews the demonstrated fundamental recovery; do not treat passage of time as clearance.
