@@ -18497,7 +18497,7 @@ function __windo_complete_values([string[]]$Values, [string]$Word) {
 function __windo_invoke_original_tab_expansion2 {
     param(
         [Parameter(Mandatory = $true)][ValidateSet("ScriptInputSet", "AstInputSet")][string]$ParameterSet,
-        [AllowEmptyString()][string]$InputScript,
+        [Parameter()][AllowEmptyString()][string]$InputScript,
         [int]$CursorColumn,
         [System.Management.Automation.Language.Ast]$Ast,
         [System.Management.Automation.Language.Token[]]$Tokens,
