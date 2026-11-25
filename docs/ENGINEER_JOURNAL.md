@@ -389,3 +389,22 @@ Failure Triage now includes a common escalation path: preserve evidence → esta
 - Add new bisection probes only when they remain meaningful across historical repository states.
 - Treat mixed Flake Hunter outcomes as a state/timing investigation, not as permission to retry CI until green.
 - Use bisection candidates to improve classifier rules only after root cause is validated.
+
+---
+
+## 2026-11-25 — Restore transparent completion repair continuity (PR #14)
+
+**Category:** runtime / corrective recovery  
+**Status:** source repair materialized; Windows acceptance and signing pending
+
+### Observed evidence
+
+The October 23 exact-head `f274cef7bbbf1b91de12bf645ee1b12488e22d5a` failed three PR workflows. Validate PowerShell run 39929222481, PS5.1 job 120333051439, reached the empty native command case and failed with `ParameterArgumentValidationErrorEmptyStringNotAllowed` in `__windo_invoke_original_tab_expansion2`. Both hosts reported installer SHA256/384/512 mismatches. PS5.1 also reproduced the independent Issue #8 DPAPI and host-sensitive assertions. Journal run 39929222479 rejected the material change because this journal was unchanged. CI Fabric run 39929222497 passed source/trust, workflow policy, generated reproducibility and fail-closed trust tests, but the release matrix failed.
+
+### Corrective action
+
+Materialize the explicit `[Parameter()][AllowEmptyString()]` input metadata already present in `tools/Apply-WindoTransparentCompletionRepair.ps1` into the shipping installer helper. Commit `69851cb6246fcc99a176b649818eb2cada43e7f7` changes only that metadata; original and resulting Git blobs were read back and compared, confirming exactly a 13-character insertion. The existing parity test covers the empty delegated command. This is a source-level candidate, not a verified PS5.1 runtime fix.
+
+### Acceptance and blockers
+
+Run the existing completion contract under fresh PS5.1 and PS7 hosts. Reconcile the independently staged DPAPI repair (#13), regenerate unsigned release hashes and derived snapshot using canonical tooling, and use the private signing boundary for the exact candidate. Do not waive checksum/signature or Issue #8 failures. Privileged real Windows UAC and execution parity remain Issue #11 gates. The default `Exodus` branch and production-ready lineage were not changed. Local clone failed because DNS/network was unavailable; no PowerShell execution or native installation is claimed.
