@@ -90,6 +90,30 @@ jobs:
             }
           }
 
+      - name: Generate unsigned candidate checksum manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidate = Join-Path $env:RUNNER_TEMP 'windo-unsigned-candidate'
+          New-Item -ItemType Directory -Force -Path $candidate | Out-Null
+          $env:WINDO_TRACKING_BRANCH = 'jonex/windo-production-ready'
+          & ./tools/Sync-InstallerChecksum.ps1 -ChecksumPath (Join-Path $candidate 'installer.sha256')
+          if (-not $?) { throw 'Canonical checksum generation failed.' }
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[a-f0-9]{40}$') { throw 'Cannot bind candidate to checkout SHA.' }
+          [IO.File]::WriteAllText((Join-Path $candidate 'checkout-sha.txt'), $head)
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'Checksum generation unexpectedly changed tracked source.' }
+          Write-Host 'UNSIGNED CANDIDATE ONLY: private signature and release acceptance required.'
+
+      - name: Retain unsigned candidate checksum evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-candidate-checksums
+          path: ${{ runner.temp }}/windo-unsigned-candidate
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Verify signed release manifest
         shell: pwsh
         run: ./tools/Test-WindoChecksumSignature.ps1
@@ -195,6 +219,11 @@ jobs:
             Stop-Transcript | Out-Null
           }
 
+      - name: Transparent shell completion contract
+        if: always()
+        shell: powershell
+        run: .\tools\Test-WindoTransparentCompletion.ps1
+
       - name: PSScriptAnalyzer
         id: analyzer
         if: always()
@@ -284,14 +313,22 @@ jobs:
         run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
 
       - name: Logic tests
+        if: always()
         shell: pwsh
         run: ./tools/Test-WindoLogic.ps1
 
+      - name: Transparent shell completion contract
+        if: always()
+        shell: pwsh
+        run: ./tools/Test-WindoTransparentCompletion.ps1
+
       - name: PSScriptAnalyzer
+        if: always()
         shell: pwsh
         run: ./tools/Invoke-PSScriptAnalyzer.ps1
 
       - name: Deep pre-sign contract
+        if: always()
         shell: pwsh
         run: ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'PowerShell 7 / ${{ matrix.runner }}'
 
