@@ -94,11 +94,14 @@ jobs:
         shell: pwsh
         run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
       - name: Logic tests
+        if: always()
         shell: pwsh
         run: ./tools/Test-WindoLogic.ps1
       - name: Transparent shell completion contract
+        if: always()
         shell: pwsh
         run: ./tools/Test-WindoTransparentCompletion.ps1
       - name: PSScriptAnalyzer
+        if: always()
         shell: pwsh
         run: ./tools/Invoke-PSScriptAnalyzer.ps1
