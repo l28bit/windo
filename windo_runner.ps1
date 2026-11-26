@@ -309,15 +309,37 @@ function _windo_get_member_value([object]$Object, [string]$Name) {
 
 function Get-WindoProtectedDataType {
     $typeName = "System.Security.Cryptography.ProtectedData"
-    foreach ($qualifiedName in @(
+    $qualifiedNames = @(
         "$typeName, System.Security.Cryptography.ProtectedData",
         "$typeName, System.Security"
-    )) {
+    )
+
+    foreach ($qualifiedName in $qualifiedNames) {
         try {
             $resolved = [type]::GetType($qualifiedName, $false)
             if ($null -ne $resolved) { return $resolved }
         } catch { }
     }
+
+    # Windows PowerShell 5.1 starts with the .NET Framework System.Security
+    # assembly unloaded. Loading it is necessary, but Type.GetType with the
+    # short assembly name still returns null on a fresh host. Resolve from the
+    # assemblies actually loaded into this AppDomain after the explicit load.
+    if ($PSVersionTable.PSVersion.Major -le 5) {
+        try {
+            Add-Type -AssemblyName System.Security -ErrorAction Stop
+        } catch {
+            return $null
+        }
+
+        foreach ($assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
+            try {
+                $resolved = $assembly.GetType($typeName, $false, $false)
+                if ($null -ne $resolved) { return $resolved }
+            } catch { }
+        }
+    }
+
     return $null
 }
 
