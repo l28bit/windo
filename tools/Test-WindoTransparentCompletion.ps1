@@ -23,7 +23,14 @@ function Assert-WindoCompletionParity {
     )
 
     $prefix = 'windo '
-    $native = TabExpansion2 -inputScript $NativeLine -cursorColumn $NativeCursor
+    # Compare to the pre-WINDO native function, not the installed wrapper.
+    # Empty input is compared to the underlying native completion API, since
+    # Windows PowerShell's function binder may reject an empty string.
+    $native = if ($NativeLine.Length -eq 0) {
+        [System.Management.Automation.CommandCompletion]::CompleteInput($NativeLine, $NativeCursor, $null)
+    } else {
+        & $script:NativeTabExpansion -inputScript $NativeLine -cursorColumn $NativeCursor
+    }
     $wrappedLine = $prefix + $NativeLine
     $wrapped = TabExpansion2 -inputScript $wrappedLine -cursorColumn ($NativeCursor + $prefix.Length)
 
@@ -36,8 +43,9 @@ function Assert-WindoCompletionParity {
         throw "FAIL: $Case completion set differs after WINDO prefix.`nNATIVE:`n$nativeJoined`nWINDO:`n$wrappedJoined"
     }
 
-    if ([int]$wrapped.ReplacementIndex -ne ([int]$native.ReplacementIndex + $prefix.Length)) {
-        throw "FAIL: $Case replacement index differs. native=$($native.ReplacementIndex) windo=$($wrapped.ReplacementIndex) expected=$([int]$native.ReplacementIndex + $prefix.Length)"
+    $expectedIndex = if ($native.ReplacementIndex -lt 0) { [int]$native.ReplacementIndex } else { [int]$native.ReplacementIndex + $prefix.Length }
+    if ([int]$wrapped.ReplacementIndex -ne $expectedIndex) {
+        throw "FAIL: $Case replacement index differs. native=$($native.ReplacementIndex) windo=$($wrapped.ReplacementIndex) expected=$expectedIndex"
     }
     if ([int]$wrapped.ReplacementLength -ne [int]$native.ReplacementLength) {
         throw "FAIL: $Case replacement length differs. native=$($native.ReplacementLength) windo=$($wrapped.ReplacementLength)"
@@ -61,6 +69,7 @@ function global:windo {
     )
 }
 
+$script:NativeTabExpansion = (Get-Command TabExpansion2 -CommandType Function -ErrorAction Stop).ScriptBlock
 $oldMode = $env:WINDO_COMPLETION_MODE
 $oldFlagVariable = Get-Variable -Name __WindoArgCompleterRegistered -Scope Global -ErrorAction SilentlyContinue
 $hadOldFlag = $null -ne $oldFlagVariable
