@@ -205,7 +205,7 @@ $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
 $moduleSource = Get-Content -Path (Join-Path $root "extras\samples\network-ops\Load.ps1") -Raw
 $moduleManifest = Get-Content -Path (Join-Path $root "extras\samples\network-ops\module.json") -Raw
-$uninstallSource = Get-Content -Path (Join-Path $root "windo_uninstall.ps1") -Raw
+$uninstallSource = [IO.File]::ReadAllText((Join-Path $root "windo_uninstall.ps1"), [Text.UTF8Encoding]::new($false, $true))
 $selfUpdateSource = Get-Content -Path (Join-Path $root "windo_self_update.ps1") -Raw
 $syncScript = Join-Path $root "tools\Sync-InstallerChecksum.ps1"
 
@@ -935,7 +935,9 @@ if ($installerArgumentLineFn -and $installerUacCancellationFn -and $startDownloa
     } catch {
         $quotedPathError = $_.Exception.Message
     }
-    Assert-Pattern $quotedPathError "unsupported quote" "installer handoff rejects a path that cannot be represented safely"
+    # .NET Framework may reject this input before the WINDO quote guard.
+    # Require rejection, and permit only the known equivalent error messages.
+    Assert-Pattern $quotedPathError "(?i)unsupported quote|illegal characters in path" "installer handoff rejects a path that cannot be represented safely"
 
     $uacInner = [System.ComponentModel.Win32Exception]::new(1223)
     $uacOuter = [System.InvalidOperationException]::new("Start-Process failed", $uacInner)
