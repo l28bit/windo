@@ -446,3 +446,25 @@ Corrections on PR #14:
 - 1dc0346c3dfb4f63e3e785afb7bc862a59cca5d5 compares wrapped completion against the captured original native function, using the native completion API for the empty case, not a second call to the WINDO wrapper.
 
 Readback verified the embedded runner equals the maintained runner (ignoring trailing whitespace), all three DPAPI definitions are identical, completion guard and sentinel handling are present, and the replacement workflow has read-only permissions and no push. These are source assertions, not fresh Windows execution results. Local git checkout remains unavailable due to DNS, and PowerShell is absent. Do not assert that the full logic suite or new matrix passed. The checksum manifest and signature must be regenerated/certified using the canonical toolchain and private signer; no signature, versioned snapshot, default branch, production branch, or published installer was altered. The remaining PR #13/#12 content has not been fully merged or superseded. Issue #8 and #11 remain open. No feature expansion.
+
+---
+
+## 2026-11-26 — Fundamental recovery: native empty completion and independent release evidence
+
+**Status:** SOURCE CANDIDATE; feature freeze active. No release promotion.
+
+### Fresh observed evidence
+
+At PR #14 head 42d8e7eb2fb83a7db76ed6de07d97be3a2a6dd19, Journal Guard 45742719649 passed. Validate PowerShell 45742719636 and CI Fabric 45742719626 failed. PS5.1 job 139651394914 reported only **one** Test-WindoLogic failure (stale literal source assertion for replacement-index remapping); the previous DPAPI sealing, UTF-8 parity and path-rejection failures did not recur. Four nonempty native completion cases passed. The empty baseline threw `CompleteInput: Sequence contains no elements`, establishing that calling the underlying API on an empty string was not a sound fix. PS7 release validation still failed on the three old installer digest values and skipped runtime tests. CI source/trust, workflow policy, generated reproducibility and fail-closed jobs passed. These observations apply to the old head, not this new candidate.
+
+### Corrective changes
+
+- 7c69fff775dcf6df0189ebd5120638ca3479f5bb: return an empty non-mutating CommandCompletion only for an entirely bare recognized WINDO prefix; do not invoke the failed zero-length API. Nonempty and unrelated native commands still follow native delegation. This intentionally specifies a no-op on both PowerShell versions, not a claim of native empty-input parity.
+- 6ab96f94c647cb215cad76284d2dc17fadfa0dc1: test three bare prefix forms, zero matches, unchanged buffer range and index, followed by a real command completion. Retain independent native parity tests for nonempty commands.
+- 593b3442f2b7b5d1d45dbd4a8853401486d3c80b: align the stale static assertion with the sentinel-preserving implementation and assert the no-op construction.
+- 60248b504330b1bcd0185cf352ffffadcee18b85: run PS7 logic, completion and analyzer after a failed release gate so runtime evidence is visible without changing overall failure semantics.
+- a942e0ffd0bdc4c5240d23fe9835b3715a652c5f: exercise completion in the existing PS5.1/PS7 x Windows 2022/2025 CI Fabric matrix, retain unsigned checksum output from the canonical Sync-InstallerChecksum.ps1 in the temporary runner directory, bind the output to the checked-out Git SHA, and require tracked source to remain unchanged. Preserve full release signature and hash gates. No signing material is needed or permitted in hosted CI. A PR checkout can be a synthetic merge; compare the recorded checkout SHA and file digests to the candidate before owner signing.
+
+### Verification / remaining gates
+
+GitHub readback verified the no-op guard, removal of the failed empty API call, embedded/maintained runner parity, three bare regression cases plus subsequent native parity, static assertion repair, independent PS7 and four-environment completion checks, canonical temporary checksum generation, SHA binding and preservation of the signature gate. Local clone still failed DNS resolution; no PowerShell executable was available. The new tests and workflow have not yet been shown to pass on Windows. The published checksum, signature, snapshot and public installer remain unchanged, and #12/#13 are not merged. Owner-local signing and privileged UAC, execution, cancellation and lifecycle certification remain mandatory. No new features.
