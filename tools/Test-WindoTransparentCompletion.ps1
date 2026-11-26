@@ -23,14 +23,8 @@ function Assert-WindoCompletionParity {
     )
 
     $prefix = 'windo '
-    # Compare to the pre-WINDO native function, not the installed wrapper.
-    # Empty input is compared to the underlying native completion API, since
-    # Windows PowerShell's function binder may reject an empty string.
-    $native = if ($NativeLine.Length -eq 0) {
-        [System.Management.Automation.CommandCompletion]::CompleteInput($NativeLine, $NativeCursor, $null)
-    } else {
-        & $script:NativeTabExpansion -inputScript $NativeLine -cursorColumn $NativeCursor
-    }
+    # Compare nonempty commands to the original native function.
+    $native = & $script:NativeTabExpansion -inputScript $NativeLine -cursorColumn $NativeCursor
     $wrappedLine = $prefix + $NativeLine
     $wrapped = TabExpansion2 -inputScript $wrappedLine -cursorColumn ($NativeCursor + $prefix.Length)
 
@@ -89,7 +83,19 @@ try {
 
     Assert-WindoCompletionParity -NativeLine 'Get-ChildItem -Path ".\\"' -NativeCursor 24 -Case 'quoted path completion'
 
-    Assert-WindoCompletionParity -NativeLine '' -NativeCursor 0 -Case 'empty command position'
+    # Native PS5.1 throws on zero-length input. A bare WINDO prefix must
+    # produce no suggestions and leave the original buffer intact instead.
+    foreach ($bare in @('windo ', 'WINDO', '  windo   ')) {
+        $empty = TabExpansion2 -inputScript $bare -cursorColumn $bare.Length
+        if ($null -eq $empty -or $empty.CompletionMatches.Count -ne 0 -or
+            $empty.ReplacementIndex -ne $bare.Length -or $empty.ReplacementLength -ne 0 -or
+            $empty.CurrentMatchIndex -ne -1) {
+            throw 'FAIL: bare WINDO prefix must return an empty, non-mutating completion.'
+        }
+    }
+    Write-Host 'PASS: bare command no-op (three prefixes)' -ForegroundColor Green
+    # The next real command must still complete normally after a bare prefix.
+    Assert-WindoCompletionParity -NativeLine 'Get-Pro' -NativeCursor 7 -Case 'completion after bare prefix'
 } finally {
     if ($null -eq $oldMode) { Remove-Item Env:\WINDO_COMPLETION_MODE -ErrorAction SilentlyContinue }
     else { $env:WINDO_COMPLETION_MODE = $oldMode }
