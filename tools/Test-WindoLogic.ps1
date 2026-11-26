@@ -2436,7 +2436,8 @@ Assert-Equal ($installerSource.Contains("trust = @('--online','--offline','--jso
 Assert-Equal ($installerSource.Contains('function Register-WindoTransparentTabExpansion {') -eq $true) $true "profile installs transparent TabExpansion2 completion layer"
 Assert-Equal ($installerSource.Contains('$global:__WindoOriginalTabExpansion2 = $current.ScriptBlock') -eq $true) $true "profile preserves the pre-WINDO TabExpansion2 implementation"
 Assert-Equal ($installerSource.Contains('$delegate = $inputScript.Substring($prefix.Length)') -eq $true) $true "profile removes only the WINDO prefix before native completion"
-Assert-Equal ($installerSource.Contains('([int]$completion.ReplacementIndex + [int]$prefix.Length)') -eq $true) $true "profile remaps native replacement index by only the WINDO prefix"
+Assert-Equal ($installerSource.Contains('$completion.ReplacementIndex -lt 0') -and $installerSource.Contains('[int]$completion.ReplacementIndex + [int]$prefix.Length')) $true "profile remaps native replacement index by only the WINDO prefix and preserves sentinels"
+Assert-Equal ($installerSource.Contains('::new($emptyMatches, -1, $prefix.Length, 0)')) $true "bare WINDO prefix returns no completion without buffer mutation"
 Assert-Equal ($installerSource.Contains('if ($mode -eq "off" -or $mode -eq "native-first") { return }') -eq $true) $true "legacy WINDO argument completer stays out of native-first mode"
 $psReadLineBlockStart = $installerSource.IndexOf('$WindoPsReadLineBlock = @', [StringComparison]::Ordinal)
 $psReadLineBlockEnd = $installerSource.IndexOf('$WindoCompleterBlock = @', $psReadLineBlockStart, [StringComparison]::Ordinal)
