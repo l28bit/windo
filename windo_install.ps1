@@ -18554,11 +18554,6 @@ function __windo_invoke_original_tab_expansion2 {
         if ($null -ne $Options) { return (& $original -ast $Ast -tokens $Tokens -positionOfCursor $PositionOfCursor -options $Options) }
         return (& $original -ast $Ast -tokens $Tokens -positionOfCursor $PositionOfCursor)
     }
-    # Native Windows PowerShell can reject empty strings at the TabExpansion2
-    # parameter binder. Use its underlying completion API for this one case.
-    if ($InputScript.Length -eq 0 -and $CursorColumn -eq 0) {
-        return [System.Management.Automation.CommandCompletion]::CompleteInput($InputScript, $CursorColumn, $Options)
-    }
     if ($null -ne $Options) { return (& $original -inputScript $InputScript -cursorColumn $CursorColumn -options $Options) }
     return (& $original -inputScript $InputScript -cursorColumn $CursorColumn)
 }
@@ -18610,6 +18605,13 @@ function Register-WindoTransparentTabExpansion {
         }
 
         $delegate = $inputScript.Substring($prefix.Length)
+        # An entirely empty WINDO command has no completion target. PS5.1
+        # rejects empty input in both TabExpansion2 and CompleteInput.
+        # Keep the prefix untouched; never inject a management command.
+        if ($delegate.Length -eq 0) {
+            $emptyMatches = [System.Collections.ObjectModel.Collection[System.Management.Automation.CompletionResult]]::new()
+            return [System.Management.Automation.CommandCompletion]::new($emptyMatches, -1, $prefix.Length, 0)
+        }
         $delegateCursor = [Math]::Max(0, [Math]::Min($delegate.Length, ($cursorColumn - $prefix.Length)))
         $completion = __windo_invoke_original_tab_expansion2 -ParameterSet ScriptInputSet -InputScript $delegate -CursorColumn $delegateCursor -Options $options
         if ($null -eq $completion) { return $null }
