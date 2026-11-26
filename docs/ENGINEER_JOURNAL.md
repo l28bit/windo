@@ -429,3 +429,20 @@ Release-readiness gates (all require evidence; none are satisfied merely by a co
 - [ ] Consolidate corrective branches through reviewed production-ready lineage; no publication before explicit approval and required evidence.
 
 PRs #12, #13 and #14 are the existing corrective lanes, not authorization for expansion. Preserve the signing and elevation boundaries, and retain exact test/commit evidence. Keep the freeze active until the owner reviews the demonstrated fundamental recovery; do not treat passage of time as clearance.
+
+---
+
+## 2026-11-25 — Corrective recovery: independent completion gate and DPAPI propagation
+
+**Status:** SOURCE CANDIDATE — feature freeze remains active; do not publish.
+
+Observed exact-head c0783e243387ecf2b2eb663f5b055f7fb1436800: Engineer Journal Guard passed (45716575966). Validate PowerShell (45716576043, PS5.1 job 139564050620) passed command discovery, parameter, mid-line and quoted-path parity, then failed on the empty-string binder. The earlier metadata-only change was insufficient. PS7 release validation stopped at three stale installer hashes, so its completion test did not run. CI Fabric (45716575981) passed source/trust, workflow policy, reproducibility and fail-closed checks but failed the release matrix. PR #13 DPAPI certification (33979646249) passed on Windows 2022/2025 with PS5.1 and PS7; its full validation still failed, including the separate generated-profile DPAPI helper and private signature gate.
+
+Corrections on PR #14:
+
+- 4dc75d2b92732bcdbdabc41124304a6b07b5ee1e replaces the automatic repair-branch writer with a read-only PR validation matrix across both hosts and both shells, independent of release-signing failures. No bot commit/push, no persisted checkout credentials.
+- 813d62952427646b34e485b560451c078d6bfc53 and 6874ddd90189fc5c003054c529c96f510f24dba5 transplant the exact previously certified resolver function from PR #13 into the maintained runner, its embedded copy and the separate profile runtime helper. The installer uses the underlying native completion API for empty input and preserves negative replacement-index sentinels.
+- d0af86d28afa1005613e354667d19d4f8f6dac39 makes the uninstaller parity test decode UTF-8 explicitly and permits the known equivalent .NET Framework rejection of an invalid quoted path; rejection is still required.
+- 1dc0346c3dfb4f63e3e785afb7bc862a59cca5d5 compares wrapped completion against the captured original native function, using the native completion API for the empty case, not a second call to the WINDO wrapper.
+
+Readback verified the embedded runner equals the maintained runner (ignoring trailing whitespace), all three DPAPI definitions are identical, completion guard and sentinel handling are present, and the replacement workflow has read-only permissions and no push. These are source assertions, not fresh Windows execution results. Local git checkout remains unavailable due to DNS, and PowerShell is absent. Do not assert that the full logic suite or new matrix passed. The checksum manifest and signature must be regenerated/certified using the canonical toolchain and private signer; no signature, versioned snapshot, default branch, production branch, or published installer was altered. The remaining PR #13/#12 content has not been fully merged or superseded. Issue #8 and #11 remain open. No feature expansion.
