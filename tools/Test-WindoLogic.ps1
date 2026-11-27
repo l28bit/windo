@@ -363,7 +363,7 @@ try {
     Assert-Equal ($decodedChildExec.TrimEnd() -ceq $childExecSource.TrimEnd()) $true "embedded ChildExec payload matches maintained C# helper"
     Assert-Equal ($decodedChildExec.Contains("RunPowerShell")) $true "ChildExec supports the caller PowerShell executable"
     Assert-Equal ($decodedChildExec.Contains('psi.FileName = "cmd.exe"')) $false "ChildExec does not route PowerShell commands through cmd.exe"
-    Assert-Equal ($decodedChildExec.Contains("psi.WorkingDirectory = ResolveWorkingDirectory")) $true "ChildExec applies a validated caller working directory"
+    Assert-Equal ($decodedChildExec.Contains("ResolveWorkingDirectory(workingDirectory)") -and $decodedChildExec.Contains("psi.WorkingDirectory = resolvedDirectory")) $true "ChildExec applies a validated caller working directory"
     Assert-Equal ($decodedChildExec.Contains("TerminateJobObject")) $true "ChildExec can terminate an assigned Windows process job"
     Assert-Equal ($decodedChildExec.Contains("JobObjectLimitKillOnJobClose")) $true "ChildExec kills contained descendants when the job handle closes"
     Assert-Equal ($decodedChildExec.Contains("BuildGatedScript")) $true "ChildExec gates user code until job containment succeeds"
@@ -416,6 +416,26 @@ try {
             $fallbackOutputPath = $childStdOut.Trim()
             Assert-Equal (Test-Path -LiteralPath $fallbackOutputPath -PathType Container) $true "ChildExec deleted-directory fallback is an existing directory"
             Assert-Equal ([System.IO.Path]::GetFullPath($fallbackOutputPath) -ceq [System.IO.Path]::GetFullPath($missingWorkingDir)) $false "ChildExec never uses a missing working directory"
+
+            if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+                # Call the actual gated-script builder with a nonexistent
+                # event. No user statement may execute after OpenExisting fails.
+                $gateBuilder = [WindoRunner.ChildExec].GetMethod(
+                    'BuildGatedScript', [Reflection.BindingFlags]'NonPublic,Static'
+                )
+                $missingGateName = 'Local\WindoRunner-missing-' + [Guid]::NewGuid().ToString('N')
+                $neverExecute = '[Console]::Out.Write("USER_CODE_EXECUTED"); exit 0'
+                $blockedScript = [string]$gateBuilder.Invoke($null, [object[]]@(
+                    $neverExecute, $missingGateName, $childExecWorkingDir
+                ))
+                $blockedEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($blockedScript))
+                $blockedOutput = @(& $childExecHost -NoProfile -NonInteractive -EncodedCommand $blockedEncoded 2>&1)
+                $blockedExit = $LASTEXITCODE
+                $blockedText = ($blockedOutput | ForEach-Object { [string]$_ }) -join "`n"
+                Assert-Equal $blockedExit 125 "missing child start gate returns explicit initialization failure"
+                Assert-Equal ($blockedText.Contains('USER_CODE_EXECUTED')) $false "missing child start gate prevents user command execution"
+                Assert-Equal ($blockedText.Contains('WINDO child initialization failed:')) $true "missing child start gate reports actionable error"
+            }
 
             # Exercise the shipping C# executor, not just its command spec.
             # Independent stdout/stderr pipes must drain without deadlocking,
