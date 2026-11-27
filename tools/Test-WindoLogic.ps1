@@ -417,6 +417,36 @@ try {
             Assert-Equal (Test-Path -LiteralPath $fallbackOutputPath -PathType Container) $true "ChildExec deleted-directory fallback is an existing directory"
             Assert-Equal ([System.IO.Path]::GetFullPath($fallbackOutputPath) -ceq [System.IO.Path]::GetFullPath($missingWorkingDir)) $false "ChildExec never uses a missing working directory"
 
+            # Exercise the shipping C# executor, not just its command spec.
+            # Independent stdout/stderr pipes must drain without deadlocking,
+            # and a nonzero native exit must not be mistaken for a timeout.
+            $fidelityScript = '[Console]::Out.Write(("O" * 65536)); [Console]::Error.Write(("E" * 65536)); exit 37'
+            [WindoRunner.ChildExec]::RunPowerShell(
+                $childExecHost, $fidelityScript, $childExecWorkingDir, 20000, 131072,
+                [ref]$childStdOut, [ref]$childStdErr, [ref]$childTimedOut,
+                [ref]$childTruncated, [ref]$childExitCode
+            )
+            Assert-Equal ($childStdOut -ceq ('O' * 65536)) $true "ChildExec preserves large stdout independently"
+            Assert-Equal ($childStdErr -ceq ('E' * 65536)) $true "ChildExec preserves large stderr independently"
+            Assert-Equal $childExitCode 37 "ChildExec preserves a nonzero process exit"
+            Assert-Equal $childTimedOut $false "ChildExec nonzero exit is not a timeout"
+            Assert-Equal $childTruncated $false "ChildExec below-cap dual streams are not truncated"
+
+            # The executor must not reinterpret a literal working directory
+            # containing whitespace, an apostrophe or wildcard-like brackets.
+            $literalChildDir = Join-Path $childExecWorkingDir "space [literal] apostrophe's"
+            [void][IO.Directory]::CreateDirectory($literalChildDir)
+            [WindoRunner.ChildExec]::RunPowerShell(
+                $childExecHost, '[Console]::Out.Write((Get-Location).Path); exit 0', $literalChildDir, 20000, 131072,
+                [ref]$childStdOut, [ref]$childStdErr, [ref]$childTimedOut,
+                [ref]$childTruncated, [ref]$childExitCode
+            )
+            Assert-Equal $childStdOut $literalChildDir "ChildExec preserves literal special-character working directory"
+            Assert-Equal $childStdErr "" "ChildExec resets stderr between independent invocations"
+            Assert-Equal $childExitCode 0 "ChildExec resets exit code after failed command"
+            Assert-Equal $childTimedOut $false "ChildExec subsequent request is not timed out"
+            Assert-Equal $childTruncated $false "ChildExec subsequent request is not truncated"
+
             $outputLimitStarted = [Diagnostics.Stopwatch]::StartNew()
             [WindoRunner.ChildExec]::RunPowerShell(
                 $childExecHost,
@@ -457,6 +487,7 @@ try {
             )
             $timeoutStarted.Stop()
             Assert-Equal $childTimedOut $true "ChildExec reports a timed-out child"
+            Assert-Equal $childExitCode -1 "ChildExec timeout never reports a successful exit"
             Assert-Equal ($timeoutStarted.ElapsedMilliseconds -lt ($processTreeTimeoutMs + 20000)) $true "ChildExec timeout and stream drain remain bounded"
             $descendantPidPath = Join-Path $childExecWorkingDir "descendant.pid"
             Assert-Equal (Test-Path -LiteralPath $descendantPidPath) $true "process-tree timeout fixture recorded its descendant"
@@ -1909,6 +1940,9 @@ post
     Remove-WindoProfileBlockFromPath -Path $profileCleanupFixture
     $cleanProfile = (Get-Content -Path $profileCleanupFixture -Raw).Replace("`r", "").TrimEnd("`n")
     Assert-Equal $cleanProfile "pre`npost" "uninstall removes WINDO block without touching adjacent lines"
+    $cleanBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($profileCleanupFixture))
+    Remove-WindoProfileBlockFromPath -Path $profileCleanupFixture
+    Assert-Equal ([Convert]::ToBase64String([IO.File]::ReadAllBytes($profileCleanupFixture))) $cleanBytes "repeated uninstall preserves already-clean profile bytes"
     $missingProfile = Join-Path $profileCleanupDir "profile-cleanup-missing.txt"
     New-Item -ItemType File -Path $missingProfile -Value "pre`r`npost" | Out-Null
     Remove-WindoProfileBlockFromPath -Path $missingProfile
@@ -2725,6 +2759,8 @@ if ($repairStart -ge 0 -and $repairEnd -gt $repairStart) {
     Assert-Equal (Repair-WindoProfileText -Text $brokenProfile) "pre`r`npost`r`n" "profile repair removes orphan payload before valid bracket block"
     $legacyBrokenProfile = "pre`r`n$WindoLegacyBeginMarker`r`nfunction windo { }`r`n$WindoLegacyEndMarker`r`npost`r`n"
     Assert-Equal (Repair-WindoProfileText -Text $legacyBrokenProfile) "pre`r`npost`r`n" "profile repair removes legacy >>> marker blocks"
+    $onceRepaired = Repair-WindoProfileText -Text $brokenProfile
+    Assert-Equal (Repair-WindoProfileText -Text $onceRepaired) $onceRepaired "profile repair is idempotent after orphan cleanup"
 }
 Assert-Equal ($installerSource.Contains("function _windo_verify_log_state") -eq $true) $true "installer has shared audit-chain verifier"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "dashboard")') -eq $true) $true "installer handles dashboard command"
