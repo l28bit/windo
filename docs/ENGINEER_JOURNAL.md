@@ -468,3 +468,20 @@ At PR #14 head 42d8e7eb2fb83a7db76ed6de07d97be3a2a6dd19, Journal Guard 457427196
 ### Verification / remaining gates
 
 GitHub readback verified the no-op guard, removal of the failed empty API call, embedded/maintained runner parity, three bare regression cases plus subsequent native parity, static assertion repair, independent PS7 and four-environment completion checks, canonical temporary checksum generation, SHA binding and preservation of the signature gate. Local clone still failed DNS resolution; no PowerShell executable was available. The new tests and workflow have not yet been shown to pass on Windows. The published checksum, signature, snapshot and public installer remain unchanged, and #12/#13 are not merged. Owner-local signing and privileged UAC, execution, cancellation and lifecycle certification remain mandatory. No new features.
+
+---
+
+## 2026-11-26 — Fundamental recovery: four-host runtime green; unsigned release reconciliation
+
+**Status:** VERIFIED RUNTIME TEST RESULTS for prior head; new corrective candidate pending CI and owner signing. Feature freeze remains active.
+
+PR #14 head ce9975a4d235e738955e243e079e897de5ccfedf: Journal Guard run 45862708037 passed. Validate PowerShell 45862707928 and CI Fabric 45862707960 failed overall but logic and transparent completion passed on all four PS5.1/PS7 x Windows 2022/2025 environments. Source/trust, generated reproducibility and negative path passed. Release/deep pre-sign checks rejected stale installer SHA256/384/512. The canonical generator succeeded and retained unsigned-candidate-checksums artifact 15137829119; its printed SHA256 agrees with all four independent validation job logs. All three installer digests agree across jobs 140057939493, 140057939600, 140057939619, 140057939751. Old direct DPAPI probe still deliberately reproduces pre-fix type lookup failure rather than exercising shipping helper.
+
+### Corrections
+
+- 643f31fe4973255a0c2fedbd30a8d206c6f9fd7b: reconcile exactly three installer hashes from matching Actions results. Installer blob 5b17897afdf6504878b97abd8dfe04fd192e2831 unchanged; uninstaller hashes retained. Current manifest is UNSIGNED until owner re-signs; existing signature intentionally remains stale and cannot authorize release.
+- 58a7d68ccb4d0d58ce014c914793f5b4f863e517: copy previously certified shipping DPAPI probe verbatim from PR #13, rather than certify the old failing direct lookup.
+- b8e04902b2a9814bc8c610fd30c21ebdb0877e05: move mandatory signature check into independent signed-release job, retain aggregate mandatory signature result, run actual shipping DPAPI round-trip, replace legacy Issue #8 waiver in this matrix with strict results, and test tamper rejection only after a valid signed historical snapshot positive control.
+- 7de0cf4fdabf799e7c942319fdf7a44a7e8db841: retire legacy waiver from Validate PowerShell too; strict PS5.1 outcomes now required.
+
+Readback verified unchanged installer blob, synchronized manifest SHA256, runtime probe, strict no-waiver gates, mandatory aggregate signature gate, signed positive control and read-only permissions. No new Windows execution for these edits yet. Published branches and historical signed snapshot are untouched. The existing signature is not a valid signature for the new manifest; do not merge/publish until owner signing, versioned release artifact reconciliation and privileged acceptance (Issue #11). PRs #12/#13 remain open; no claim that all their contents have been integrated. Public hosted Actions are appropriate for these nonprivileged checks; no owner signing key or personal credentials may be sent to them. No feature expansion.
