@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [switch]$RequireCurrentSnapshot,
-    [switch]$SkipCurrentSnapshot
+    [switch]$SkipCurrentSnapshot,
+    [switch]$DevelopmentPreSign
 )
 
 $ErrorActionPreference = "Stop"
@@ -286,9 +287,13 @@ try {
                 & $signatureCheck | Out-Null
                 Write-Host "OK   checksums/installer.sha256.sig" -ForegroundColor Green
             } catch {
-                Write-Host "FAIL checksums/installer.sha256.sig" -ForegroundColor Red
-                Write-Host "Published checksum manifest signature is invalid or missing. $_"
-                $ok = $false
+                if ($DevelopmentPreSign) {
+                    Write-Host "PENDING checksums/installer.sha256.sig: unsigned development candidate; not authorized for release." -ForegroundColor Yellow
+                } else {
+                    Write-Host "FAIL checksums/installer.sha256.sig" -ForegroundColor Red
+                    Write-Host "Published checksum manifest signature is invalid or missing. $_"
+                    $ok = $false
+                }
             }
         }
     }
@@ -348,4 +353,8 @@ try {
 }
 }
 if (-not $ok) { exit 1 }
-Write-Host "Validate-Windo: all checks passed." -ForegroundColor Cyan
+if ($DevelopmentPreSign) {
+    Write-Host "Validate-Windo: development pre-sign checks passed; NOT production release acceptance." -ForegroundColor Cyan
+} else {
+    Write-Host "Validate-Windo: all checks passed." -ForegroundColor Cyan
+}
