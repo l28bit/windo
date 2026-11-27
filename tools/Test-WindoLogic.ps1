@@ -434,12 +434,34 @@ try {
                     [string]$neverExecute, [string]$missingGateName, [string]$childExecWorkingDir
                 )
                 $blockedEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($blockedScript))
-                $blockedOutput = @(& $childExecHost -NoProfile -NonInteractive -EncodedCommand $blockedEncoded 2>&1)
-                $blockedExit = $LASTEXITCODE
-                $blockedText = ($blockedOutput | ForEach-Object { [string]$_ }) -join "`n"
-                Assert-Equal $blockedExit 125 "missing child start gate returns explicit initialization failure"
-                Assert-Equal ($blockedText.Contains('USER_CODE_EXECUTED')) $false "missing child start gate prevents user command execution"
-                Assert-Equal ($blockedText.Contains('WINDO child initialization failed:')) $true "missing child start gate reports actionable error"
+                # Inspect the actual native streams rather than letting PS5.1
+                # reinterpret the deliberately failing child's stderr as a
+                # terminating NativeCommandError in the test harness.
+                $blockedInfo = New-Object Diagnostics.ProcessStartInfo
+                $blockedInfo.FileName = $childExecHost
+                $blockedInfo.Arguments = "-NoProfile -NonInteractive -NoLogo -EncodedCommand $blockedEncoded"
+                $blockedInfo.UseShellExecute = $false
+                $blockedInfo.CreateNoWindow = $true
+                $blockedInfo.RedirectStandardOutput = $true
+                $blockedInfo.RedirectStandardError = $true
+                $blockedProcess = [Diagnostics.Process]::Start($blockedInfo)
+                try {
+                    $blockedOutTask = $blockedProcess.StandardOutput.ReadToEndAsync()
+                    $blockedErrTask = $blockedProcess.StandardError.ReadToEndAsync()
+                    if (-not $blockedProcess.WaitForExit(15000)) {
+                        $blockedProcess.Kill()
+                        throw 'Missing-gate fixture failed to terminate within 15 seconds.'
+                    }
+                    if (-not $blockedOutTask.Wait(5000) -or -not $blockedErrTask.Wait(5000)) {
+                        throw 'Missing-gate fixture did not close redirected streams.'
+                    }
+                    Assert-Equal $blockedProcess.ExitCode 125 "missing child start gate returns explicit initialization failure"
+                    Assert-Equal ($blockedOutTask.Result.Contains('USER_CODE_EXECUTED')) $false "missing child start gate prevents user command execution"
+                    Assert-Equal ($blockedErrTask.Result.Contains('WINDO child initialization failed:')) $true "missing child start gate reports actionable error"
+                } finally {
+                    if (-not $blockedProcess.HasExited) { $blockedProcess.Kill() }
+                    $blockedProcess.Dispose()
+                }
             }
 
             # Exercise the shipping C# executor, not just its command spec.
