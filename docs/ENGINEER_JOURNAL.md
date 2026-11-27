@@ -503,3 +503,17 @@ Prior head 751673c79047d5f7c4ead1b04dc4695dbd60ac5f: Actions run 45935542753 rep
 ### Boundaries
 
 No bootstrap, installer, runtime trust root, public branch, release tag or published artifact changed. Development source archives and unsigned checksum evidence are for engineering only; normal production installation still requires trusted release material. No production approval, signing-key rotation, key upload, or signed-release claim. Owner desktop certificate/private signing material location and access are not verified. At promotion, inspect the actual release signer on the trusted desktop, sign the exact qualified manifest, reconcile a new versioned snapshot as appropriate, re-run strict full validation and obtain privileged Windows UAC/lifecycle certification. Do not merge unsigned work into the production lineage. Branch-protection settings have not been changed or verified. New workflow execution remains to be observed.
+
+---
+
+## 2026-11-27 — Development qualification green; execution and release regression expansion
+
+**Status:** Prior candidate development-qualified. New corrective tests and strict release gate pending fresh Actions evidence. Feature freeze active.
+
+At head 9e2f167f68187a9217bf46cf57da98d9a5141f54, all three workflows passed: Journal Guard 46017515006, Validate PowerShell 46017515348, CI Fabric 46017515350. CI Fabric source/trust, workflow security, generated reproducibility, negative-path and all four compatibility jobs passed; development aggregate passed. Signed release and production aggregate were intentionally skipped for draft qualification, not certified. This confirms the owner-approved signing separation actually works.
+
+- b1d505983f9c8ac4a1ba48d46fcacbe4b45cea89 expands actual shipping ChildExec integration probes: 64 KiB per independent stdout/stderr stream below configured cap, exit 37 fidelity, state reset, literal working directory with spaces/apostrophe/brackets, timeout exit -1; profile uninstall byte-idempotence and repair idempotence.
+- 22343a3268e7cdda95b63833f4cdb513809b9152 closes a production validator gap: strict required current snapshot must match all six root candidate digest fields and current trust root, and unresolved version marker fails. Development continues checking historical snapshot authenticity without demanding parity with unsigned candidate. A new frozen release version is necessary at promotion rather than overwriting the published historical snapshot.
+- 34c8fe9ba25cc308be30612f3081b27b209b4666 adds mandatory CI negative-path proof: deliberately corrupt the current candidate digest inside the disposable runner checkout, require DevelopmentPreSign validation to reject specifically the hash mismatch, restore original bytes in finally, and demand clean tracked diff. No signature bypass in normal installation.
+
+Readback verified all changes and unchanged installer and checksum blobs. New probes are not yet executed; no production branch, historical snapshot or signing material changed. Actual interactive UAC, privileged install/upgrade/heal/uninstall and Ctrl+C remain owner-local certification work; these isolated execution and profile tests are not equivalent. Existing draft-only separation and owner signing remain in place. No feature expansion.
