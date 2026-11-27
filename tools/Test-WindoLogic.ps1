@@ -425,9 +425,14 @@ try {
                 )
                 $missingGateName = 'Local\WindoRunner-missing-' + [Guid]::NewGuid().ToString('N')
                 $neverExecute = '[Console]::Out.Write("USER_CODE_EXECUTED"); exit 0'
-                $blockedScript = [string]$gateBuilder.Invoke($null, [object[]]@(
-                    $neverExecute, $missingGateName, $childExecWorkingDir
-                ))
+                # A strongly typed delegate avoids the PSObject wrappers
+                # that MethodInfo.Invoke cannot bind to CLR string parameters.
+                $buildGate = [Delegate]::CreateDelegate(
+                    [Func[string,string,string,string]], $gateBuilder
+                )
+                $blockedScript = $buildGate.Invoke(
+                    [string]$neverExecute, [string]$missingGateName, [string]$childExecWorkingDir
+                )
                 $blockedEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($blockedScript))
                 $blockedOutput = @(& $childExecHost -NoProfile -NonInteractive -EncodedCommand $blockedEncoded 2>&1)
                 $blockedExit = $LASTEXITCODE
