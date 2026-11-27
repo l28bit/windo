@@ -6,6 +6,7 @@ on:
       - jonex/windo-production-ready
       - ci/hosted-runner-lab-20260903
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     branches:
       - jonex/windo-production-ready
   workflow_dispatch:
@@ -18,6 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  WINDO_DEVELOPMENT_PRESIGN: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
   PSSCRIPTANALYZER_VERSION: '1.25.0'
 
 jobs:
@@ -117,6 +119,7 @@ jobs:
 
   signed-release:
     name: Signed release manifest (mandatory)
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft == true) }}
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -168,7 +171,12 @@ jobs:
         id: release
         if: always()
         shell: powershell
-        run: .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
+        run: |
+          if ($env:WINDO_DEVELOPMENT_PRESIGN -eq 'true') {
+            .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot -DevelopmentPreSign
+          } else {
+            .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
+          }
 
       - name: Logic tests
         id: logic
@@ -276,7 +284,12 @@ jobs:
 
       - name: Release validation
         shell: pwsh
-        run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+        run: |
+          if ($env:WINDO_DEVELOPMENT_PRESIGN -eq 'true') {
+            ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot -DevelopmentPreSign
+          } else {
+            ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+          }
 
       - name: Logic tests
         if: always()
@@ -430,9 +443,32 @@ jobs:
             done < <(grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*[^#]+@' "$file" || true)
           done
 
+  development-green:
+    name: WINDO development qualified (unsigned)
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
+    needs:
+      - source-contract
+      - compatibility-ps51
+      - compatibility-ps7
+      - generated-artifacts
+      - negative-path
+      - workflow-policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every development gate
+        shell: bash
+        run: |
+          test '${{ needs.source-contract.result }}' = 'success'
+          test '${{ needs.compatibility-ps51.result }}' = 'success'
+          test '${{ needs.compatibility-ps7.result }}' = 'success'
+          test '${{ needs.generated-artifacts.result }}' = 'success'
+          test '${{ needs.negative-path.result }}' = 'success'
+          test '${{ needs.workflow-policy.result }}' = 'success'
+          echo 'Development qualification only. No production release authorization.'
+
   ci-green:
     name: WINDO CI green
-    if: always()
+    if: ${{ always() && !(github.event_name == 'pull_request' && github.event.pull_request.draft == true) }}
     needs:
       - source-contract
       - signed-release
