@@ -12,11 +12,15 @@ on:
       - jonex/windo-production-ready
       - ci/hosted-runner-lab-20260903
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     branches:
       - Exodus
       - Genisis
       - main
       - jonex/windo-production-ready
+
+env:
+  WINDO_DEVELOPMENT_PRESIGN: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
 
 jobs:
   powershell-51:
@@ -41,7 +45,12 @@ jobs:
         id: release
         if: always()
         shell: powershell
-        run: .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
+        run: |
+          if ($env:WINDO_DEVELOPMENT_PRESIGN -eq 'true') {
+            .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot -DevelopmentPreSign
+          } else {
+            .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
+          }
 
       - name: Logic tests
         id: logic
@@ -95,7 +104,12 @@ jobs:
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion 1.25.0 -ErrorAction Stop
       - name: Validate syntax and release contract
         shell: pwsh
-        run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+        run: |
+          if ($env:WINDO_DEVELOPMENT_PRESIGN -eq 'true') {
+            ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot -DevelopmentPreSign
+          } else {
+            ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+          }
       - name: Logic tests
         if: always()
         shell: pwsh
