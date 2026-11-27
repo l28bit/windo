@@ -68,16 +68,19 @@ jobs:
         shell: powershell
         run: .\tools\Invoke-PSScriptAnalyzer.ps1
 
-      - name: Enforce PS5.1 compatibility or exact issue 8 baseline
+      - name: Enforce strict PS5.1 results (no issue 8 waiver)
         if: always()
         shell: powershell
         run: |
-          .\tools\Test-WindoKnownPs51Baseline.ps1 `
-            -LogicTranscriptPath 'ci-forensics/logic-transcript.txt' `
-            -ModuleOutcome '${{ steps.module.outcome }}' `
-            -ReleaseOutcome '${{ steps.release.outcome }}' `
-            -LogicOutcome '${{ steps.logic.outcome }}' `
-            -AnalyzerOutcome '${{ steps.analyzer.outcome }}'
+          $outcomes = @(
+            '${{ steps.module.outcome }}',
+            '${{ steps.release.outcome }}',
+            '${{ steps.logic.outcome }}',
+            '${{ steps.analyzer.outcome }}'
+          )
+          if (@($outcomes | Where-Object { $_ -ne 'success' }).Count -ne 0) {
+            throw ('PS5.1 required checks failed or did not execute: ' + ($outcomes -join ', '))
+          }
 
   powershell-7:
     name: PowerShell 7
