@@ -401,6 +401,31 @@ jobs:
           Write-Host "Expected signature rejection observed (exit=$code)."
           $global:LASTEXITCODE = 0
 
+      - name: Unsigned development mode must reject corrupted candidate hashes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifestPath = (Resolve-Path 'checksums/installer.sha256').Path
+          $originalBytes = [IO.File]::ReadAllBytes($manifestPath)
+          try {
+            $text = [Text.Encoding]::UTF8.GetString($originalBytes)
+            $pattern = '(?m)^installerSha256=[A-Fa-f0-9]{64}\r?$'
+            if ([regex]::Matches($text, $pattern).Count -ne 1) { throw 'Expected exactly one installer SHA256 field.' }
+            $corrupt = [regex]::Replace($text, $pattern, ('installerSha256=' + ('0' * 64)))
+            [IO.File]::WriteAllText($manifestPath, $corrupt, [Text.UTF8Encoding]::new($false))
+            $result = (& pwsh -NoLogo -NoProfile -File ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot -DevelopmentPreSign 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+            Write-Host $result
+            if ($code -eq 0 -or $result -notmatch 'installerSha256 does not match windo_install\.ps1') {
+              throw 'Development validator did not reject the deliberately corrupted installer digest.'
+            }
+          } finally {
+            [IO.File]::WriteAllBytes($manifestPath, $originalBytes)
+          }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'Negative test left tracked source modifications.' }
+          Write-Host 'PASS: development signature deferral cannot bypass installer integrity.'
+
       - name: Hosted elevated bootstrap boundary must fail cleanly
         shell: pwsh
         run: |
