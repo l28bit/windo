@@ -485,3 +485,21 @@ PR #14 head ce9975a4d235e738955e243e079e897de5ccfedf: Journal Guard run 45862708
 - 7de0cf4fdabf799e7c942319fdf7a44a7e8db841: retire legacy waiver from Validate PowerShell too; strict PS5.1 outcomes now required.
 
 Readback verified unchanged installer blob, synchronized manifest SHA256, runtime probe, strict no-waiver gates, mandatory aggregate signature gate, signed positive control and read-only permissions. No new Windows execution for these edits yet. Published branches and historical signed snapshot are untouched. The existing signature is not a valid signature for the new manifest; do not merge/publish until owner signing, versioned release artifact reconciliation and privileged acceptance (Issue #11). PRs #12/#13 remain open; no claim that all their contents have been integrated. Public hosted Actions are appropriate for these nonprivileged checks; no owner signing key or personal credentials may be sent to them. No feature expansion.
+
+---
+
+## 2026-11-27 — Development qualification independent of owner signing
+
+**Owner direction:** Continue corrective development without requiring the dedicated desktop signing material for every iteration. Production certification and final signing are deferred to the owner-local release stage, not eliminated. Feature freeze remains active.
+
+Prior head 751673c79047d5f7c4ead1b04dc4695dbd60ac5f: Actions run 45935542753 reported logic, transparent completion and deep PreSign contract success across Windows Server 2022/2025 and PS5.1/PS7; the shipping DPAPI round-trip probe passed on both PS5.1 hosts. Source/trust, generated artifacts, security policy and negative-path jobs passed. Full release validation and mandatory candidate signature failed as expected for the unsigned candidate. Journal Guard passed (45935542905).
+
+### Implementation
+
+- 564785468aa1c2d186cd0e3bb24e4759bd38d61d adds an explicit DevelopmentPreSign switch to the repository validator. Only the current candidate manifest signature may be pending; parse, checksums, embedded public key, required historical snapshot and snapshot signature checks remain unchanged. Default validation is strict.
+- c70b2ccafd21bb30f6a68c86814ac6e11572a724 separates the CI Fabric draft-PR development aggregate from its strict production aggregate. Development requires every non-signing job to pass; signature deferral is restricted to draft pull requests. All pushes, manual dispatches and ready-for-review PRs use strict release validation. Ready-for-review and converted-to-draft events explicitly re-evaluate the gates.
+- 2cf634c54075efb5f90a511cd3bf9d74931590ca applies the same draft-only policy to Validate PowerShell, with no Issue #8 waiver restored.
+
+### Boundaries
+
+No bootstrap, installer, runtime trust root, public branch, release tag or published artifact changed. Development source archives and unsigned checksum evidence are for engineering only; normal production installation still requires trusted release material. No production approval, signing-key rotation, key upload, or signed-release claim. Owner desktop certificate/private signing material location and access are not verified. At promotion, inspect the actual release signer on the trusted desktop, sign the exact qualified manifest, reconcile a new versioned snapshot as appropriate, re-run strict full validation and obtain privileged Windows UAC/lifecycle certification. Do not merge unsigned work into the production lineage. Branch-protection settings have not been changed or verified. New workflow execution remains to be observed.
