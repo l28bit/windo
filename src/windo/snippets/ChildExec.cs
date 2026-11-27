@@ -228,11 +228,19 @@ namespace WindoRunner
             return sb.ToString();
         }
 
-        private static string BuildGatedScript(string scriptText, string gateName)
+        private static string BuildGatedScript(string scriptText, string gateName, string workingDirectory)
         {
             var safeGateName = (gateName ?? "").Replace("'", "''");
-            return "$windoGate=[System.Threading.EventWaitHandle]::OpenExisting('" + safeGateName + "');" +
-                   "try{if(-not $windoGate.WaitOne(30000)){exit 124}}finally{$windoGate.Dispose()};" +
+            var safeDirectory = (workingDirectory ?? "").Replace("'", "''");
+            // A missing/failed gate must never fall through to the user script.
+            // Scope bootstrap preferences and variables so user commands keep
+            // their own PowerShell error/progress behavior.
+            return "try{&{$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';" +
+                   "$windoGate=$null;try{$windoGate=[System.Threading.EventWaitHandle]::OpenExisting('" + safeGateName + "');" +
+                   "if(-not $windoGate.WaitOne(30000)){throw 'WINDO child start gate timed out.'};" +
+                   "Set-Location -LiteralPath '" + safeDirectory + "' -ErrorAction Stop;" +
+                   "}finally{if($null -ne $windoGate){$windoGate.Dispose()}}}}" +
+                   "catch{[Console]::Error.WriteLine('WINDO child initialization failed: '+$_.Exception.Message);exit 125};" +
                    Environment.NewLine + (scriptText ?? "");
         }
 
@@ -255,36 +263,37 @@ namespace WindoRunner
             stderr = "";
             if (string.IsNullOrWhiteSpace(executablePath))
                 executablePath = "powershell.exe";
+            string resolvedDirectory = ResolveWorkingDirectory(workingDirectory);
             EventWaitHandle startGate = null;
-            string commandText = scriptText ?? "";
-            if (IsWindows())
-            {
-                var gateName = "Local\\WindoRunner-" + Guid.NewGuid().ToString("N");
-                bool createdNew;
-                startGate = new EventWaitHandle(false, EventResetMode.ManualReset, gateName, out createdNew);
-                if (!createdNew)
-                {
-                    startGate.Dispose();
-                    throw new InvalidOperationException("Unable to create a unique child-process start gate.");
-                }
-                commandText = BuildGatedScript(commandText, gateName);
-            }
-            var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(commandText));
-            var psi = new ProcessStartInfo();
-            psi.FileName = executablePath;
-            psi.Arguments = "-NoProfile -NonInteractive -NoLogo -EncodedCommand " + encodedCommand;
-            if (psi.Arguments.Length > 32000)
-                throw new ArgumentException("The gated PowerShell command exceeds the Windows process command-line limit.", "scriptText");
-            psi.WorkingDirectory = ResolveWorkingDirectory(workingDirectory);
-            psi.RedirectStandardOutput = true;
-            psi.RedirectStandardError = true;
-            psi.UseShellExecute = false;
-            psi.CreateNoWindow = true;
             Process p = null;
             IntPtr job = IntPtr.Zero;
             bool disposeProcessSynchronously = true;
             try
             {
+                string commandText = scriptText ?? "";
+                if (IsWindows())
+                {
+                    var gateName = "Local\\WindoRunner-" + Guid.NewGuid().ToString("N");
+                    bool createdNew;
+                    startGate = new EventWaitHandle(false, EventResetMode.ManualReset, gateName, out createdNew);
+                    if (!createdNew)
+                    {
+                        startGate.Dispose();
+                        throw new InvalidOperationException("Unable to create a unique child-process start gate.");
+                    }
+                    commandText = BuildGatedScript(commandText, gateName, resolvedDirectory);
+                }
+                var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(commandText));
+                var psi = new ProcessStartInfo();
+                psi.FileName = executablePath;
+                psi.Arguments = "-NoProfile -NonInteractive -NoLogo -EncodedCommand " + encodedCommand;
+                if (psi.Arguments.Length > 32000)
+                    throw new ArgumentException("The gated PowerShell command exceeds the Windows process command-line limit.", "scriptText");
+                psi.WorkingDirectory = resolvedDirectory;
+                psi.RedirectStandardOutput = true;
+                psi.RedirectStandardError = true;
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
                 p = Process.Start(psi);
                 if (p == null)
                     throw new InvalidOperationException("The PowerShell child process did not start.");
@@ -297,9 +306,10 @@ namespace WindoRunner
                         try { if (!p.HasExited) p.Kill(); } catch { }
                         throw new InvalidOperationException("Unable to establish child-process job containment; command was not executed.");
                     }
-                    startGate.Set();
-                    startGate.Dispose();
-                    startGate = null;
+                    // Keep the named event alive until the child has finished.
+                    // Closing the last handle here races the child's OpenExisting.
+                    if (!startGate.Set())
+                        throw new InvalidOperationException("Unable to signal child-process start gate.");
                 }
 
                 try
