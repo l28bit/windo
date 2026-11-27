@@ -44,6 +44,7 @@ jobs:
             'tools/Test-WindoLogic.ps1',
             'tools/Test-WindoKnownPs51Baseline.ps1',
             'tools/Test-WindoPs51DpapiRuntime.ps1',
+            'tools/Test-WindoChildExecStress.ps1',
             'tools/Validate-Windo.ps1',
             'tools/Test-WindoReservedVariables.ps1',
             'tools/Invoke-PrometheusLocalValidation.ps1',
@@ -197,6 +198,12 @@ jobs:
         shell: powershell
         run: .\tools\Test-WindoTransparentCompletion.ps1
 
+      - name: Concurrent shipping executor stress
+        id: stress
+        if: always()
+        shell: powershell
+        run: .\tools\Test-WindoChildExecStress.ps1
+
       - name: PSScriptAnalyzer
         id: analyzer
         if: always()
@@ -234,11 +241,12 @@ jobs:
             'release=${{ steps.release.outcome }}',
             'logic=${{ steps.logic.outcome }}',
             'analyzer=${{ steps.analyzer.outcome }}',
-            'deep=${{ steps.deep.outcome }}'
+            'deep=${{ steps.deep.outcome }}',
+            'stress=${{ steps.stress.outcome }}'
           ) | Set-Content ci-forensics/step-outcomes.txt
 
       - name: Upload PS5.1 forensic pack
-        if: always() && (steps.module.outcome != 'success' || steps.dpapi.outcome != 'success' || steps.release.outcome != 'success' || steps.logic.outcome != 'success' || steps.analyzer.outcome != 'success' || steps.deep.outcome != 'success')
+        if: always() && (steps.module.outcome != 'success' || steps.dpapi.outcome != 'success' || steps.release.outcome != 'success' || steps.logic.outcome != 'success' || steps.analyzer.outcome != 'success' || steps.deep.outcome != 'success' || steps.stress.outcome != 'success')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: forensics-ps51-${{ matrix.runner }}
@@ -256,7 +264,8 @@ jobs:
             '${{ steps.release.outcome }}',
             '${{ steps.logic.outcome }}',
             '${{ steps.analyzer.outcome }}',
-            '${{ steps.deep.outcome }}'
+            '${{ steps.deep.outcome }}',
+            '${{ steps.stress.outcome }}'
           )
           if (@($outcomes | Where-Object { $_ -ne 'success' }).Count -ne 0) {
             throw ('PS5.1 required checks failed or did not execute: ' + ($outcomes -join ', '))
@@ -300,6 +309,11 @@ jobs:
         if: always()
         shell: pwsh
         run: ./tools/Test-WindoTransparentCompletion.ps1
+
+      - name: Concurrent shipping executor stress
+        if: always()
+        shell: pwsh
+        run: ./tools/Test-WindoChildExecStress.ps1
 
       - name: PSScriptAnalyzer
         if: always()
