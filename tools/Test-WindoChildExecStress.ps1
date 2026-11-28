@@ -55,7 +55,91 @@ namespace WindoRunner
                 if (!Task.WaitAll(tasks, 90000))
                     throw new TimeoutException("Concurrent ChildExec wave exceeded its bound.");
             }
-            return "PASS: 8 independent commands in two four-way concurrent waves.";
+            // Establish a warmed-up process handle baseline. The .NET runtime
+            // can retain a small number of worker-thread and diagnostic handles.
+            int baseline = GetHandleCount();
+            for (int wave = 0; wave < 2; wave++)
+            {
+                var mixed = new Task[4];
+                for (int slot = 0; slot < mixed.Length; slot++)
+                {
+                    int id = wave * mixed.Length + slot;
+                    mixed[slot] = Task.Factory.StartNew(() => RunMixed(host, root, id),
+                        CancellationToken.None, TaskCreationOptions.LongRunning,
+                        TaskScheduler.Default);
+                }
+                if (!Task.WaitAll(mixed, 90000))
+                    throw new TimeoutException("Mixed-failure wave exceeded its bound.");
+            }
+            // Reuse the same process after timeout and output-cap termination.
+            // A fresh request must not inherit either failure or stale output.
+            for (int id = 0; id < 8; id++)
+            {
+                string token = "WINDO-RECOVERY-" + id;
+                string stdout, stderr;
+                bool timedOut, truncated;
+                int exitCode;
+                ChildExec.RunPowerShell(host, "[Console]::Out.Write('" + token + "');exit 0",
+                    root, 30000, 65536, out stdout, out stderr, out timedOut, out truncated, out exitCode);
+                if (stdout != token || stderr != "" || timedOut || truncated || exitCode != 0)
+                    throw new InvalidOperationException("Recovery request " + id + " failed.");
+            }
+            int final = GetHandleCount();
+            // This is a gross retained-handle regression guard, not proof of
+            // zero leaks. Allow bounded CLR/runtime variation after warm-up.
+            if (final - baseline > 24)
+                throw new InvalidOperationException("Retained process handle growth exceeded 24: " +
+                    baseline + " -> " + final);
+            return "PASS: 24 commands; 8 concurrent normal, 8 concurrent mixed, 8 recovery. " +
+                "Retained handles after warm-up: " + baseline + " -> " + final + ".";
+        }
+
+        private static int GetHandleCount()
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            using (var process = Process.GetCurrentProcess())
+            {
+                process.Refresh();
+                return process.HandleCount;
+            }
+        }
+
+        private static void RunMixed(string host, string root, int id)
+        {
+            string dir = Path.Combine(root, "mixed-" + id);
+            Directory.CreateDirectory(dir);
+            string token = "WINDO-MIXED-" + id;
+            int mode = id % 4;
+            int cap = mode == 1 ? 4096 : 65536;
+            int timeout = mode == 0 ? 12000 : 30000;
+            string script;
+            if (mode == 0)
+                script = "[Console]::Out.Write('" + token + "');Start-Sleep -Seconds 90";
+            else if (mode == 1)
+                script = "[Console]::Error.Write(('X' * 1000000));Start-Sleep -Seconds 90";
+            else
+                script = "[Console]::Out.Write('" + token + "');[Console]::Error.Write('" +
+                    token + "-ERR');exit " + (30 + id);
+            string stdout, stderr;
+            bool timedOut, truncated;
+            int exitCode;
+            ChildExec.RunPowerShell(host, script, dir, timeout, cap,
+                out stdout, out stderr, out timedOut, out truncated, out exitCode);
+            bool valid;
+            if (mode == 0)
+                valid = timedOut && !truncated && exitCode == -1 && stdout == token && stderr == "";
+            else if (mode == 1)
+                valid = truncated && !timedOut && stdout == "" && stderr == new string('X', cap);
+            else
+                valid = !timedOut && !truncated && exitCode == 30 + id &&
+                    stdout == token && stderr == token + "-ERR";
+            if (!valid)
+                throw new InvalidOperationException("Mixed case " + id + " failed: exit=" + exitCode +
+                    " timeout=" + timedOut + " truncated=" + truncated +
+                    " stdout length=" + stdout.Length + " stderr length=" + stderr.Length);
+
         }
     }
 }
