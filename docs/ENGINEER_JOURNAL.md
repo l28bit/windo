@@ -544,3 +544,17 @@ At 7de01f1947c13d7f0049a018a850686b4f7d4270, CI Fabric 46054043097 and Validate 
 - 2dabef98eb4edc7f17432dd8f94acba4b6571732: capture intentional missing-gate failure using redirected native process pipes and bounded waits rather than PS5.1 NativeCommandError redirection semantics.
 
 Readback verified all edits and unchanged shipping installer/manifest blobs. New tests require fresh Actions execution. Hosted Windows runners provide genuine native command execution, not owner-local interactive UAC or signing authority. Production and historical snapshot untouched, no private key use, no feature expansion.
+
+---
+
+## 2026-11-28 — Four-environment execution certified; mixed-failure and qualification evidence expansion
+
+**Status:** Prior exact head 353878ece83e1f86bb9e30741e66907dc513aa5d is development-qualified. New regression expansion awaits fresh Actions results. Feature freeze active.
+
+CI Fabric 46081833176, Validate PowerShell 46081833180 and Journal Guard 46081833181 all passed. CI job logs 140782828703, 140782828721, 140782828742, 140782828766 explicitly report Test-WindoLogic OK, eight independent commands in two four-way concurrent waves, and deep PreSign PASS. All 32 concurrent commands passed. Shipping start-gate rejection, stderr fidelity, literal working directory, profile repair/uninstall idempotence and timeout probes now passed within the existing logic suite. Signed release and production aggregate were intentionally skipped on the draft PR. This is hosted Windows development evidence, not interactive UAC or production certification.
+
+- 5f139e9f9ce3fe46ef8fee972f01df24bbd8d3ab expands the isolated canonical executor stress test to 24 commands per environment (96 planned total): eight existing normal concurrent invocations, eight mixed concurrent invocations including two timeouts and two stderr-cap terminations, then eight sequential successful recovery requests in the same process. Require exact output and exit isolation, bounded waves and no false timeout/truncation classifications. Measure retained process handles after the initial warm-up and after mixed/recovery execution, with a conservative 24-handle growth ceiling. This detects gross retained-handle growth only; not proof of zero leaks, and the ceiling is an engineering default awaiting runner calibration.
+- ca5aabe1d93416b5bd7be0f8d620c9d9a67e2078 adds an unsigned qualification receipt to the development aggregate after every required gate passes. Bind checkout SHA, PR head/base, run ID/attempt, manifest byte hash and matrix; require checkout SHA equal workflow SHA; explicitly deny production authorization. Upload receipt plus manifest for 14 days. This is workflow evidence, not cryptographic attestation or release signing.
+- d3d1b14bf9401283759486ff0a5d986a8f960078 uses .NET Thread.Sleep in mixed timeout/output cap fixtures to isolate actual native pipe behavior from module autoload progress messages.
+
+Readback verified source changes and unchanged installer and checksum blobs. New tests are not yet executed. No production branch change, signing-key access, release publication, or feature expansion. Owner-local interactive UAC, Ctrl+C and complete privileged install/upgrade/heal/uninstall remain uncertified. Existing production signature gate remains mandatory.
