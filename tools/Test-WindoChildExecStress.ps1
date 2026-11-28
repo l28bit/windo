@@ -116,9 +116,9 @@ namespace WindoRunner
             int timeout = mode == 0 ? 12000 : 30000;
             string script;
             if (mode == 0)
-                script = "[Console]::Out.Write('" + token + "');Start-Sleep -Seconds 90";
+                script = "[Console]::Out.Write('" + token + "');[Threading.Thread]::Sleep(90000)";
             else if (mode == 1)
-                script = "[Console]::Error.Write(('X' * 1000000));Start-Sleep -Seconds 90";
+                script = "[Console]::Error.Write(('X' * 1000000));[Threading.Thread]::Sleep(90000)";
             else
                 script = "[Console]::Out.Write('" + token + "');[Console]::Error.Write('" +
                     token + "-ERR');exit " + (30 + id);
