@@ -505,6 +505,66 @@ jobs:
           test '${{ needs.workflow-policy.result }}' = 'success'
           echo 'Development qualification only. No production release authorization.'
 
+      - name: Checkout qualified candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Record unsigned development qualification receipt
+        shell: bash
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+
+          checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          for sha in (checkout, os.environ["PR_HEAD_SHA"], os.environ["PR_BASE_SHA"]):
+              if not re.fullmatch(r"[0-9a-f]{40}", sha):
+                  raise RuntimeError("Invalid qualification commit identity")
+          if checkout != os.environ["GITHUB_SHA"]:
+              raise RuntimeError("Qualification checkout does not match the tested workflow SHA")
+          manifest = pathlib.Path("checksums/installer.sha256").read_bytes()
+          output = pathlib.Path(os.environ["RUNNER_TEMP"]) / "windo-development-qualification"
+          output.mkdir()
+          receipt = {
+              "schemaVersion": 1,
+              "classification": "UNSIGNED_DEVELOPMENT_ONLY",
+              "productionReleaseAuthorized": False,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "checkoutSha": checkout,
+              "prHeadSha": os.environ["PR_HEAD_SHA"],
+              "prBaseSha": os.environ["PR_BASE_SHA"],
+              "workflowRunId": os.environ["GITHUB_RUN_ID"],
+              "workflowRunAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "manifestFileSha256": hashlib.sha256(manifest).hexdigest(),
+              "requiredJobs": ["source-contract", "compatibility-ps51", "compatibility-ps7",
+                               "generated-artifacts", "negative-path", "workflow-policy"],
+              "windowsMatrix": ["windows-2022/PS5.1", "windows-2025/PS5.1",
+                                "windows-2022/PS7", "windows-2025/PS7"],
+              "limitations": ["Not a cryptographic release attestation",
+                              "No interactive UAC or owner-local lifecycle certification",
+                              "No production signing or publication authority"]
+          }
+          (output / "qualification.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+          (output / "installer.sha256").write_bytes(manifest)
+          PY
+
+      - name: Retain development qualification receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-development-qualification
+          path: ${{ runner.temp }}/windo-development-qualification
+          if-no-files-found: error
+          retention-days: 14
+
   ci-green:
     name: WINDO CI green
     if: ${{ always() && !(github.event_name == 'pull_request' && github.event.pull_request.draft == true) }}
