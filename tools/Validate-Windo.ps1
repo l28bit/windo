@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [switch]$RequireCurrentSnapshot,
-    [switch]$SkipCurrentSnapshot
+    [switch]$SkipCurrentSnapshot,
+    [switch]$DevelopmentPreSign
 )
 
 $ErrorActionPreference = "Stop"
@@ -286,9 +287,13 @@ try {
                 & $signatureCheck | Out-Null
                 Write-Host "OK   checksums/installer.sha256.sig" -ForegroundColor Green
             } catch {
-                Write-Host "FAIL checksums/installer.sha256.sig" -ForegroundColor Red
-                Write-Host "Published checksum manifest signature is invalid or missing. $_"
-                $ok = $false
+                if ($DevelopmentPreSign) {
+                    Write-Host "PENDING checksums/installer.sha256.sig: unsigned development candidate; not authorized for release." -ForegroundColor Yellow
+                } else {
+                    Write-Host "FAIL checksums/installer.sha256.sig" -ForegroundColor Red
+                    Write-Host "Published checksum manifest signature is invalid or missing. $_"
+                    $ok = $false
+                }
             }
         }
     }
@@ -323,6 +328,23 @@ try {
             if (-not (Test-WindoChecksumManifestMetadata -Manifest $snapshotManifest -Label $snapshotLabel -ExpectedBranch $releaseTarget.Branch -ExpectedCommit $releaseTarget.Commit)) { $ok = $false }
             if (-not (Test-WindoManifestArtifactHashes -Manifest $snapshotManifest -InstallerPath $snapshotInstaller -UninstallerPath $snapshotUninstall -Label $snapshotLabel)) { $ok = $false }
             if (-not (Test-WindoEmbeddedReleasePublicKey -InstallerPath $snapshotInstaller -PublicKeyPath $snapshotPublicKey)) { $ok = $false }
+            # A valid historical snapshot is sufficient for development, but
+            # production must not advertise a version whose frozen bytes differ
+            # from the signed root candidate. Check every manifest digest and
+            # the trust root, not just the snapshot's internal consistency.
+            if ($RequireCurrentSnapshot -and -not $DevelopmentPreSign) {
+                foreach ($digestKey in @('installerSha256','installerSha384','installerSha512','uninstallerSha256','uninstallerSha384','uninstallerSha512')) {
+                    if ([string]$snapshotManifest[$digestKey] -cne [string]$checksumManifest[$digestKey]) {
+                        Write-Host "FAIL $snapshotLabel ($digestKey): snapshot differs from current release candidate." -ForegroundColor Red
+                        $ok = $false
+                    }
+                }
+                $rootPublicKey = [IO.File]::ReadAllText((Join-Path $root "keys\windo-release-public.rsa.xml")).Trim()
+                if ([IO.File]::ReadAllText($snapshotPublicKey).Trim() -cne $rootPublicKey) {
+                    Write-Host "FAIL versions/v$version trust root differs from current release." -ForegroundColor Red
+                    $ok = $false
+                }
+            }
             try {
                 & (Join-Path $root "tools\Test-WindoChecksumSignature.ps1") -ManifestPath $snapshotChecksum -SignaturePath $snapshotSignature -PublicKeyPath $snapshotPublicKey | Out-Null
                 Write-Host "OK   versions/v$version/checksums/installer.sha256.sig" -ForegroundColor Green
@@ -339,6 +361,9 @@ try {
             Write-Host "Create it with ./tools/Sync-VersionSnapshot.ps1 -Version $version so future releases can validate installer payload parity."
             if ($RequireCurrentSnapshot) { $ok = $false }
         }
+    } elseif ($RequireCurrentSnapshot) {
+        Write-Host "FAIL current release version marker could not be resolved." -ForegroundColor Red
+        $ok = $false
     }
 } catch {
     Write-Host "FAIL version snapshot checksum validation" -ForegroundColor Red
@@ -348,4 +373,8 @@ try {
 }
 }
 if (-not $ok) { exit 1 }
-Write-Host "Validate-Windo: all checks passed." -ForegroundColor Cyan
+if ($DevelopmentPreSign) {
+    Write-Host "Validate-Windo: development pre-sign checks passed; NOT production release acceptance." -ForegroundColor Cyan
+} else {
+    Write-Host "Validate-Windo: all checks passed." -ForegroundColor Cyan
+}

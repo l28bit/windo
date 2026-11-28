@@ -12,11 +12,15 @@ on:
       - jonex/windo-production-ready
       - ci/hosted-runner-lab-20260903
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     branches:
       - Exodus
       - Genisis
       - main
       - jonex/windo-production-ready
+
+env:
+  WINDO_DEVELOPMENT_PRESIGN: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
 
 jobs:
   powershell-51:
@@ -41,7 +45,12 @@ jobs:
         id: release
         if: always()
         shell: powershell
-        run: .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
+        run: |
+          if ($env:WINDO_DEVELOPMENT_PRESIGN -eq 'true') {
+            .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot -DevelopmentPreSign
+          } else {
+            .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
+          }
 
       - name: Logic tests
         id: logic
@@ -57,22 +66,30 @@ jobs:
             Stop-Transcript | Out-Null
           }
 
+      - name: Transparent shell completion contract
+        if: always()
+        shell: powershell
+        run: .\tools\Test-WindoTransparentCompletion.ps1
+
       - name: PSScriptAnalyzer
         id: analyzer
         if: always()
         shell: powershell
         run: .\tools\Invoke-PSScriptAnalyzer.ps1
 
-      - name: Enforce PS5.1 compatibility or exact issue 8 baseline
+      - name: Enforce strict PS5.1 results (no issue 8 waiver)
         if: always()
         shell: powershell
         run: |
-          .\tools\Test-WindoKnownPs51Baseline.ps1 `
-            -LogicTranscriptPath 'ci-forensics/logic-transcript.txt' `
-            -ModuleOutcome '${{ steps.module.outcome }}' `
-            -ReleaseOutcome '${{ steps.release.outcome }}' `
-            -LogicOutcome '${{ steps.logic.outcome }}' `
-            -AnalyzerOutcome '${{ steps.analyzer.outcome }}'
+          $outcomes = @(
+            '${{ steps.module.outcome }}',
+            '${{ steps.release.outcome }}',
+            '${{ steps.logic.outcome }}',
+            '${{ steps.analyzer.outcome }}'
+          )
+          if (@($outcomes | Where-Object { $_ -ne 'success' }).Count -ne 0) {
+            throw ('PS5.1 required checks failed or did not execute: ' + ($outcomes -join ', '))
+          }
 
   powershell-7:
     name: PowerShell 7
@@ -87,10 +104,21 @@ jobs:
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion 1.25.0 -ErrorAction Stop
       - name: Validate syntax and release contract
         shell: pwsh
-        run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+        run: |
+          if ($env:WINDO_DEVELOPMENT_PRESIGN -eq 'true') {
+            ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot -DevelopmentPreSign
+          } else {
+            ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+          }
       - name: Logic tests
+        if: always()
         shell: pwsh
         run: ./tools/Test-WindoLogic.ps1
+      - name: Transparent shell completion contract
+        if: always()
+        shell: pwsh
+        run: ./tools/Test-WindoTransparentCompletion.ps1
       - name: PSScriptAnalyzer
+        if: always()
         shell: pwsh
         run: ./tools/Invoke-PSScriptAnalyzer.ps1

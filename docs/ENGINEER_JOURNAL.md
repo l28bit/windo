@@ -389,3 +389,172 @@ Failure Triage now includes a common escalation path: preserve evidence → esta
 - Add new bisection probes only when they remain meaningful across historical repository states.
 - Treat mixed Flake Hunter outcomes as a state/timing investigation, not as permission to retry CI until green.
 - Use bisection candidates to improve classifier rules only after root cause is validated.
+
+---
+
+## 2026-11-25 — Restore transparent completion repair continuity (PR #14)
+
+**Category:** runtime / corrective recovery  
+**Status:** source repair materialized; Windows acceptance and signing pending
+
+### Observed evidence
+
+The October 23 exact-head `f274cef7bbbf1b91de12bf645ee1b12488e22d5a` failed three PR workflows. Validate PowerShell run 39929222481, PS5.1 job 120333051439, reached the empty native command case and failed with `ParameterArgumentValidationErrorEmptyStringNotAllowed` in `__windo_invoke_original_tab_expansion2`. Both hosts reported installer SHA256/384/512 mismatches. PS5.1 also reproduced the independent Issue #8 DPAPI and host-sensitive assertions. Journal run 39929222479 rejected the material change because this journal was unchanged. CI Fabric run 39929222497 passed source/trust, workflow policy, generated reproducibility and fail-closed trust tests, but the release matrix failed.
+
+### Corrective action
+
+Materialize the explicit `[Parameter()][AllowEmptyString()]` input metadata already present in `tools/Apply-WindoTransparentCompletionRepair.ps1` into the shipping installer helper. Commit `69851cb6246fcc99a176b649818eb2cada43e7f7` changes only that metadata; original and resulting Git blobs were read back and compared, confirming exactly a 13-character insertion. The existing parity test covers the empty delegated command. This is a source-level candidate, not a verified PS5.1 runtime fix.
+
+### Acceptance and blockers
+
+Run the existing completion contract under fresh PS5.1 and PS7 hosts. Reconcile the independently staged DPAPI repair (#13), regenerate unsigned release hashes and derived snapshot using canonical tooling, and use the private signing boundary for the exact candidate. Do not waive checksum/signature or Issue #8 failures. Privileged real Windows UAC and execution parity remain Issue #11 gates. The default `Exodus` branch and production-ready lineage were not changed. Local clone failed because DNS/network was unavailable; no PowerShell execution or native installation is claimed.
+
+---
+
+## 2026-11-25 — Owner-directed feature freeze: fundamentals first
+
+**Status:** ACTIVE — corrective engineering only until fundamentals are sound again.
+
+Owner direction: “Feature expansion stopped until fundamentally sound again.”
+
+Allowed scope: reproducible defect correction, regression tests, existing runtime and installer recovery, CI reliability, security and integrity remediation, evidence and documentation. Defer new commands, modules, UI surfaces, integrations, branding campaigns and speculative architectural expansion. Do not disguise features as repair work.
+
+Release-readiness gates (all require evidence; none are satisfied merely by a commit or a merge):
+
+- [ ] Native completion parity in clean PS5.1 and PS7 sessions, including empty input, quoting and cursor position.
+- [ ] Elevated execution fidelity: arguments, working directory, stdout/stderr, native exit codes, cancellation and process-tree cleanup.
+- [ ] DPAPI audit round-trip and integrity checks in both supported hosts; resolve #8 without weakening trust.
+- [ ] Clean install, upgrade, self-repair and uninstall; preserved user profile and no false success on denied elevation.
+- [ ] Canonically generated artifacts, synchronized hashes, signed exact release candidate, green required checks and verified privileged Windows certification (#11).
+- [ ] Consolidate corrective branches through reviewed production-ready lineage; no publication before explicit approval and required evidence.
+
+PRs #12, #13 and #14 are the existing corrective lanes, not authorization for expansion. Preserve the signing and elevation boundaries, and retain exact test/commit evidence. Keep the freeze active until the owner reviews the demonstrated fundamental recovery; do not treat passage of time as clearance.
+
+---
+
+## 2026-11-25 — Corrective recovery: independent completion gate and DPAPI propagation
+
+**Status:** SOURCE CANDIDATE — feature freeze remains active; do not publish.
+
+Observed exact-head c0783e243387ecf2b2eb663f5b055f7fb1436800: Engineer Journal Guard passed (45716575966). Validate PowerShell (45716576043, PS5.1 job 139564050620) passed command discovery, parameter, mid-line and quoted-path parity, then failed on the empty-string binder. The earlier metadata-only change was insufficient. PS7 release validation stopped at three stale installer hashes, so its completion test did not run. CI Fabric (45716575981) passed source/trust, workflow policy, reproducibility and fail-closed checks but failed the release matrix. PR #13 DPAPI certification (33979646249) passed on Windows 2022/2025 with PS5.1 and PS7; its full validation still failed, including the separate generated-profile DPAPI helper and private signature gate.
+
+Corrections on PR #14:
+
+- 4dc75d2b92732bcdbdabc41124304a6b07b5ee1e replaces the automatic repair-branch writer with a read-only PR validation matrix across both hosts and both shells, independent of release-signing failures. No bot commit/push, no persisted checkout credentials.
+- 813d62952427646b34e485b560451c078d6bfc53 and 6874ddd90189fc5c003054c529c96f510f24dba5 transplant the exact previously certified resolver function from PR #13 into the maintained runner, its embedded copy and the separate profile runtime helper. The installer uses the underlying native completion API for empty input and preserves negative replacement-index sentinels.
+- d0af86d28afa1005613e354667d19d4f8f6dac39 makes the uninstaller parity test decode UTF-8 explicitly and permits the known equivalent .NET Framework rejection of an invalid quoted path; rejection is still required.
+- 1dc0346c3dfb4f63e3e785afb7bc862a59cca5d5 compares wrapped completion against the captured original native function, using the native completion API for the empty case, not a second call to the WINDO wrapper.
+
+Readback verified the embedded runner equals the maintained runner (ignoring trailing whitespace), all three DPAPI definitions are identical, completion guard and sentinel handling are present, and the replacement workflow has read-only permissions and no push. These are source assertions, not fresh Windows execution results. Local git checkout remains unavailable due to DNS, and PowerShell is absent. Do not assert that the full logic suite or new matrix passed. The checksum manifest and signature must be regenerated/certified using the canonical toolchain and private signer; no signature, versioned snapshot, default branch, production branch, or published installer was altered. The remaining PR #13/#12 content has not been fully merged or superseded. Issue #8 and #11 remain open. No feature expansion.
+
+---
+
+## 2026-11-26 — Fundamental recovery: native empty completion and independent release evidence
+
+**Status:** SOURCE CANDIDATE; feature freeze active. No release promotion.
+
+### Fresh observed evidence
+
+At PR #14 head 42d8e7eb2fb83a7db76ed6de07d97be3a2a6dd19, Journal Guard 45742719649 passed. Validate PowerShell 45742719636 and CI Fabric 45742719626 failed. PS5.1 job 139651394914 reported only **one** Test-WindoLogic failure (stale literal source assertion for replacement-index remapping); the previous DPAPI sealing, UTF-8 parity and path-rejection failures did not recur. Four nonempty native completion cases passed. The empty baseline threw `CompleteInput: Sequence contains no elements`, establishing that calling the underlying API on an empty string was not a sound fix. PS7 release validation still failed on the three old installer digest values and skipped runtime tests. CI source/trust, workflow policy, generated reproducibility and fail-closed jobs passed. These observations apply to the old head, not this new candidate.
+
+### Corrective changes
+
+- 7c69fff775dcf6df0189ebd5120638ca3479f5bb: return an empty non-mutating CommandCompletion only for an entirely bare recognized WINDO prefix; do not invoke the failed zero-length API. Nonempty and unrelated native commands still follow native delegation. This intentionally specifies a no-op on both PowerShell versions, not a claim of native empty-input parity.
+- 6ab96f94c647cb215cad76284d2dc17fadfa0dc1: test three bare prefix forms, zero matches, unchanged buffer range and index, followed by a real command completion. Retain independent native parity tests for nonempty commands.
+- 593b3442f2b7b5d1d45dbd4a8853401486d3c80b: align the stale static assertion with the sentinel-preserving implementation and assert the no-op construction.
+- 60248b504330b1bcd0185cf352ffffadcee18b85: run PS7 logic, completion and analyzer after a failed release gate so runtime evidence is visible without changing overall failure semantics.
+- a942e0ffd0bdc4c5240d23fe9835b3715a652c5f: exercise completion in the existing PS5.1/PS7 x Windows 2022/2025 CI Fabric matrix, retain unsigned checksum output from the canonical Sync-InstallerChecksum.ps1 in the temporary runner directory, bind the output to the checked-out Git SHA, and require tracked source to remain unchanged. Preserve full release signature and hash gates. No signing material is needed or permitted in hosted CI. A PR checkout can be a synthetic merge; compare the recorded checkout SHA and file digests to the candidate before owner signing.
+
+### Verification / remaining gates
+
+GitHub readback verified the no-op guard, removal of the failed empty API call, embedded/maintained runner parity, three bare regression cases plus subsequent native parity, static assertion repair, independent PS7 and four-environment completion checks, canonical temporary checksum generation, SHA binding and preservation of the signature gate. Local clone still failed DNS resolution; no PowerShell executable was available. The new tests and workflow have not yet been shown to pass on Windows. The published checksum, signature, snapshot and public installer remain unchanged, and #12/#13 are not merged. Owner-local signing and privileged UAC, execution, cancellation and lifecycle certification remain mandatory. No new features.
+
+---
+
+## 2026-11-26 — Fundamental recovery: four-host runtime green; unsigned release reconciliation
+
+**Status:** VERIFIED RUNTIME TEST RESULTS for prior head; new corrective candidate pending CI and owner signing. Feature freeze remains active.
+
+PR #14 head ce9975a4d235e738955e243e079e897de5ccfedf: Journal Guard run 45862708037 passed. Validate PowerShell 45862707928 and CI Fabric 45862707960 failed overall but logic and transparent completion passed on all four PS5.1/PS7 x Windows 2022/2025 environments. Source/trust, generated reproducibility and negative path passed. Release/deep pre-sign checks rejected stale installer SHA256/384/512. The canonical generator succeeded and retained unsigned-candidate-checksums artifact 15137829119; its printed SHA256 agrees with all four independent validation job logs. All three installer digests agree across jobs 140057939493, 140057939600, 140057939619, 140057939751. Old direct DPAPI probe still deliberately reproduces pre-fix type lookup failure rather than exercising shipping helper.
+
+### Corrections
+
+- 643f31fe4973255a0c2fedbd30a8d206c6f9fd7b: reconcile exactly three installer hashes from matching Actions results. Installer blob 5b17897afdf6504878b97abd8dfe04fd192e2831 unchanged; uninstaller hashes retained. Current manifest is UNSIGNED until owner re-signs; existing signature intentionally remains stale and cannot authorize release.
+- 58a7d68ccb4d0d58ce014c914793f5b4f863e517: copy previously certified shipping DPAPI probe verbatim from PR #13, rather than certify the old failing direct lookup.
+- b8e04902b2a9814bc8c610fd30c21ebdb0877e05: move mandatory signature check into independent signed-release job, retain aggregate mandatory signature result, run actual shipping DPAPI round-trip, replace legacy Issue #8 waiver in this matrix with strict results, and test tamper rejection only after a valid signed historical snapshot positive control.
+- 7de0cf4fdabf799e7c942319fdf7a44a7e8db841: retire legacy waiver from Validate PowerShell too; strict PS5.1 outcomes now required.
+
+Readback verified unchanged installer blob, synchronized manifest SHA256, runtime probe, strict no-waiver gates, mandatory aggregate signature gate, signed positive control and read-only permissions. No new Windows execution for these edits yet. Published branches and historical signed snapshot are untouched. The existing signature is not a valid signature for the new manifest; do not merge/publish until owner signing, versioned release artifact reconciliation and privileged acceptance (Issue #11). PRs #12/#13 remain open; no claim that all their contents have been integrated. Public hosted Actions are appropriate for these nonprivileged checks; no owner signing key or personal credentials may be sent to them. No feature expansion.
+
+---
+
+## 2026-11-27 — Development qualification independent of owner signing
+
+**Owner direction:** Continue corrective development without requiring the dedicated desktop signing material for every iteration. Production certification and final signing are deferred to the owner-local release stage, not eliminated. Feature freeze remains active.
+
+Prior head 751673c79047d5f7c4ead1b04dc4695dbd60ac5f: Actions run 45935542753 reported logic, transparent completion and deep PreSign contract success across Windows Server 2022/2025 and PS5.1/PS7; the shipping DPAPI round-trip probe passed on both PS5.1 hosts. Source/trust, generated artifacts, security policy and negative-path jobs passed. Full release validation and mandatory candidate signature failed as expected for the unsigned candidate. Journal Guard passed (45935542905).
+
+### Implementation
+
+- 564785468aa1c2d186cd0e3bb24e4759bd38d61d adds an explicit DevelopmentPreSign switch to the repository validator. Only the current candidate manifest signature may be pending; parse, checksums, embedded public key, required historical snapshot and snapshot signature checks remain unchanged. Default validation is strict.
+- c70b2ccafd21bb30f6a68c86814ac6e11572a724 separates the CI Fabric draft-PR development aggregate from its strict production aggregate. Development requires every non-signing job to pass; signature deferral is restricted to draft pull requests. All pushes, manual dispatches and ready-for-review PRs use strict release validation. Ready-for-review and converted-to-draft events explicitly re-evaluate the gates.
+- 2cf634c54075efb5f90a511cd3bf9d74931590ca applies the same draft-only policy to Validate PowerShell, with no Issue #8 waiver restored.
+
+### Boundaries
+
+No bootstrap, installer, runtime trust root, public branch, release tag or published artifact changed. Development source archives and unsigned checksum evidence are for engineering only; normal production installation still requires trusted release material. No production approval, signing-key rotation, key upload, or signed-release claim. Owner desktop certificate/private signing material location and access are not verified. At promotion, inspect the actual release signer on the trusted desktop, sign the exact qualified manifest, reconcile a new versioned snapshot as appropriate, re-run strict full validation and obtain privileged Windows UAC/lifecycle certification. Do not merge unsigned work into the production lineage. Branch-protection settings have not been changed or verified. New workflow execution remains to be observed.
+
+---
+
+## 2026-11-27 — Development qualification green; execution and release regression expansion
+
+**Status:** Prior candidate development-qualified. New corrective tests and strict release gate pending fresh Actions evidence. Feature freeze active.
+
+At head 9e2f167f68187a9217bf46cf57da98d9a5141f54, all three workflows passed: Journal Guard 46017515006, Validate PowerShell 46017515348, CI Fabric 46017515350. CI Fabric source/trust, workflow security, generated reproducibility, negative-path and all four compatibility jobs passed; development aggregate passed. Signed release and production aggregate were intentionally skipped for draft qualification, not certified. This confirms the owner-approved signing separation actually works.
+
+- b1d505983f9c8ac4a1ba48d46fcacbe4b45cea89 expands actual shipping ChildExec integration probes: 64 KiB per independent stdout/stderr stream below configured cap, exit 37 fidelity, state reset, literal working directory with spaces/apostrophe/brackets, timeout exit -1; profile uninstall byte-idempotence and repair idempotence.
+- 22343a3268e7cdda95b63833f4cdb513809b9152 closes a production validator gap: strict required current snapshot must match all six root candidate digest fields and current trust root, and unresolved version marker fails. Development continues checking historical snapshot authenticity without demanding parity with unsigned candidate. A new frozen release version is necessary at promotion rather than overwriting the published historical snapshot.
+- 34c8fe9ba25cc308be30612f3081b27b209b4666 adds mandatory CI negative-path proof: deliberately corrupt the current candidate digest inside the disposable runner checkout, require DevelopmentPreSign validation to reject specifically the hash mismatch, restore original bytes in finally, and demand clean tracked diff. No signature bypass in normal installation.
+
+Readback verified all changes and unchanged installer and checksum blobs. New probes are not yet executed; no production branch, historical snapshot or signing material changed. Actual interactive UAC, privileged install/upgrade/heal/uninstall and Ctrl+C remain owner-local certification work; these isolated execution and profile tests are not equivalent. Existing draft-only separation and owner signing remain in place. No feature expansion.
+
+---
+
+## 2026-11-27 — Execution start-gate race correction and literal working-directory fidelity
+
+**Status:** SOURCE CANDIDATE; fresh Windows certification pending. Feature freeze active.
+
+At e2c4eb90482cba77dcfe66b27dd1a416d5c74b2e, CI Fabric 46022516355 and Validate PowerShell 46022516339 failed after the expanded regression suite. Negative-path checksum corruption proof passed, as did source/trust, workflow policy and reproducibility. The two shells exposed stderr contamination; PS5.1 also returned the engine directory rather than the requested path with brackets/apostrophe. Job 140585473312 and 140585472817 logs contain OpenExisting: No handle of the given name exists, followed by null-valued expression errors. The parent signaled and immediately disposed its named start gate; child initialization errors were nonterminating and execution continued. This is a real fail-closed and correctness defect, not a test to waive. The working-directory failure is separately observed; explicit literal location initialization addresses it but awaits execution proof.
+
+Corrections: dd795660b0e671ec0c0879123ced2de7e8871409 retains the event until final cleanup, checks Set success, scopes initialization preferences, sets location with LiteralPath, and exits 125 if initialization fails. 79f7843e9900bf4bfc40fd80605ff852bc64d781, 733fb71e8fc70dfc9fb1a06534a01fcc7a09293c and cc77b6f27f35e7e3a896ee0b448e7725342e94d4 propagate exact canonical ASCII C# bytes through Base64, runner and embedded installer. 07f223e7022a289ae174896863a9139b97d2d1cc tests missing gate using the real script builder and requires exit 125, no user marker and actionable error. Existing strict stdout/stderr, path, timeout and lifecycle tests remain. b16757abd4ea95a827f062dc13909fd9adcfe40a refreshes three unsigned installer hashes using independently implemented SHA-2 over the exact UTF-8/LF domain, including BOM; each algorithm passed standard abc test vector and reproduced the prior known installer hash before calculating the new hash. Canonical Actions generator must corroborate. Uninstaller digests unchanged.
+
+GitHub readback confirmed exact source/payload parity and embedded runner parity, explicit failure exit and literal-path initialization. Local git ls-remote failed DNS resolution and pwsh is absent; no C# compile or Windows execution here. New workflow results pending. No production signing or publication, no historical snapshot change, no feature expansion. Privileged acceptance remains separate.
+
+---
+
+## 2026-11-27 — Hosted Windows execution qualification and concurrent stress coverage
+
+**Status:** New source candidate; no claim of full green runtime or production certification. Feature freeze active.
+
+At 7de01f1947c13d7f0049a018a850686b4f7d4270, CI Fabric 46054043097 and Validate PowerShell 46054043093 failed; Journal Guard 46054043201 passed. Source/trust, generated reproducibility, workflow security and negative trust boundaries passed. Canonical checksum generator printed installer SHA256 078063823DA8F38A614F8FBCC0D8857D7FC31C3FE6A6CFF9DFC9F91756D6FAE1, exactly matching the preceding independent checksum correction; release development validation accepted all manifest digests. The fresh C# compiled and execution reached the missing-gate probe, but MethodInfo.Invoke rejected a PSObject wrapper as a CLR string (logs 140692098872, 140692099209, 140692853072, 140692853124). Subsequent strict stream and literal-path probes in that try block did not execute. Do not infer their success from the absence of individual failures. PS5.1 continue-on-error displayed step conclusion success despite actual logic outcome failure; strict aggregate correctly rejected it.
+
+- f5497ad35b6629c9cf0e0ad7583249b3f92fbed8: bind private shipping gate builder to strongly typed Func delegate; preserve explicit exit 125, no execution marker, actionable error assertions.
+- 76c9d2817450eb1d90f67e745aecec9609243b71: add standalone ChildExec stress fixture compiling the canonical C# after checking encoded shipping parity. Two waves of four concurrent invocations, distinct directories, exact stdout/stderr, nonzero exit codes and no timeout/truncation, bounded wave deadline; temporary files cleaned. This is a test of same-process concurrent executor calls, not elevated cross-user request scheduling or interactive cancellation.
+- c2b58a1cffc69ac683133ea34cf516cc42fdab31: run stress in all four hosted Windows compatibility leaves even if another step fails, preserve mandatory aggregate result and PS5.1 forensic outcomes.
+- 2dabef98eb4edc7f17432dd8f94acba4b6571732: capture intentional missing-gate failure using redirected native process pipes and bounded waits rather than PS5.1 NativeCommandError redirection semantics.
+
+Readback verified all edits and unchanged shipping installer/manifest blobs. New tests require fresh Actions execution. Hosted Windows runners provide genuine native command execution, not owner-local interactive UAC or signing authority. Production and historical snapshot untouched, no private key use, no feature expansion.
+
+---
+
+## 2026-11-28 — Four-environment execution certified; mixed-failure and qualification evidence expansion
+
+**Status:** Prior exact head 353878ece83e1f86bb9e30741e66907dc513aa5d is development-qualified. New regression expansion awaits fresh Actions results. Feature freeze active.
+
+CI Fabric 46081833176, Validate PowerShell 46081833180 and Journal Guard 46081833181 all passed. CI job logs 140782828703, 140782828721, 140782828742, 140782828766 explicitly report Test-WindoLogic OK, eight independent commands in two four-way concurrent waves, and deep PreSign PASS. All 32 concurrent commands passed. Shipping start-gate rejection, stderr fidelity, literal working directory, profile repair/uninstall idempotence and timeout probes now passed within the existing logic suite. Signed release and production aggregate were intentionally skipped on the draft PR. This is hosted Windows development evidence, not interactive UAC or production certification.
+
+- 5f139e9f9ce3fe46ef8fee972f01df24bbd8d3ab expands the isolated canonical executor stress test to 24 commands per environment (96 planned total): eight existing normal concurrent invocations, eight mixed concurrent invocations including two timeouts and two stderr-cap terminations, then eight sequential successful recovery requests in the same process. Require exact output and exit isolation, bounded waves and no false timeout/truncation classifications. Measure retained process handles after the initial warm-up and after mixed/recovery execution, with a conservative 24-handle growth ceiling. This detects gross retained-handle growth only; not proof of zero leaks, and the ceiling is an engineering default awaiting runner calibration.
+- ca5aabe1d93416b5bd7be0f8d620c9d9a67e2078 adds an unsigned qualification receipt to the development aggregate after every required gate passes. Bind checkout SHA, PR head/base, run ID/attempt, manifest byte hash and matrix; require checkout SHA equal workflow SHA; explicitly deny production authorization. Upload receipt plus manifest for 14 days. This is workflow evidence, not cryptographic attestation or release signing.
+- d3d1b14bf9401283759486ff0a5d986a8f960078 uses .NET Thread.Sleep in mixed timeout/output cap fixtures to isolate actual native pipe behavior from module autoload progress messages.
+
+Readback verified source changes and unchanged installer and checksum blobs. New tests are not yet executed. No production branch change, signing-key access, release publication, or feature expansion. Owner-local interactive UAC, Ctrl+C and complete privileged install/upgrade/heal/uninstall remain uncertified. Existing production signature gate remains mandatory.

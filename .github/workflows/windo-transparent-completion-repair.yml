@@ -1,0 +1,39 @@
+name: WINDO Transparent Completion Repair
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches:
+      - jonex/windo-production-ready
+    paths:
+      - windo_install.ps1
+      - tools/Test-WindoTransparentCompletion.ps1
+      - .github/workflows/windo-transparent-completion-repair.yml
+
+jobs:
+  completion:
+    name: Transparent completion / ${{ matrix.shell }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Prove shipping completion contract without source mutation
+        shell: ${{ matrix.shell }}
+        run: ./tools/Test-WindoTransparentCompletion.ps1
+      - name: Verify validation did not modify tracked source
+        shell: pwsh
+        if: always()
+        run: |
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'Completion validation changed tracked files.' }
+          git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'Completion validation staged tracked files.' }

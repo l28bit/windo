@@ -205,7 +205,7 @@ $bootstrapSource = Get-Content -Path (Join-Path $root "bootstrap.ps1") -Raw
 $readmeSource = Get-Content -Path (Join-Path $root "README.md") -Raw
 $moduleSource = Get-Content -Path (Join-Path $root "extras\samples\network-ops\Load.ps1") -Raw
 $moduleManifest = Get-Content -Path (Join-Path $root "extras\samples\network-ops\module.json") -Raw
-$uninstallSource = Get-Content -Path (Join-Path $root "windo_uninstall.ps1") -Raw
+$uninstallSource = [IO.File]::ReadAllText((Join-Path $root "windo_uninstall.ps1"), [Text.UTF8Encoding]::new($false, $true))
 $selfUpdateSource = Get-Content -Path (Join-Path $root "windo_self_update.ps1") -Raw
 $syncScript = Join-Path $root "tools\Sync-InstallerChecksum.ps1"
 
@@ -363,7 +363,7 @@ try {
     Assert-Equal ($decodedChildExec.TrimEnd() -ceq $childExecSource.TrimEnd()) $true "embedded ChildExec payload matches maintained C# helper"
     Assert-Equal ($decodedChildExec.Contains("RunPowerShell")) $true "ChildExec supports the caller PowerShell executable"
     Assert-Equal ($decodedChildExec.Contains('psi.FileName = "cmd.exe"')) $false "ChildExec does not route PowerShell commands through cmd.exe"
-    Assert-Equal ($decodedChildExec.Contains("psi.WorkingDirectory = ResolveWorkingDirectory")) $true "ChildExec applies a validated caller working directory"
+    Assert-Equal ($decodedChildExec.Contains("ResolveWorkingDirectory(workingDirectory)") -and $decodedChildExec.Contains("psi.WorkingDirectory = resolvedDirectory")) $true "ChildExec applies a validated caller working directory"
     Assert-Equal ($decodedChildExec.Contains("TerminateJobObject")) $true "ChildExec can terminate an assigned Windows process job"
     Assert-Equal ($decodedChildExec.Contains("JobObjectLimitKillOnJobClose")) $true "ChildExec kills contained descendants when the job handle closes"
     Assert-Equal ($decodedChildExec.Contains("BuildGatedScript")) $true "ChildExec gates user code until job containment succeeds"
@@ -417,6 +417,83 @@ try {
             Assert-Equal (Test-Path -LiteralPath $fallbackOutputPath -PathType Container) $true "ChildExec deleted-directory fallback is an existing directory"
             Assert-Equal ([System.IO.Path]::GetFullPath($fallbackOutputPath) -ceq [System.IO.Path]::GetFullPath($missingWorkingDir)) $false "ChildExec never uses a missing working directory"
 
+            if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+                # Call the actual gated-script builder with a nonexistent
+                # event. No user statement may execute after OpenExisting fails.
+                $gateBuilder = [WindoRunner.ChildExec].GetMethod(
+                    'BuildGatedScript', [Reflection.BindingFlags]'NonPublic,Static'
+                )
+                $missingGateName = 'Local\WindoRunner-missing-' + [Guid]::NewGuid().ToString('N')
+                $neverExecute = '[Console]::Out.Write("USER_CODE_EXECUTED"); exit 0'
+                # A strongly typed delegate avoids the PSObject wrappers
+                # that MethodInfo.Invoke cannot bind to CLR string parameters.
+                $buildGate = [Delegate]::CreateDelegate(
+                    [Func[string,string,string,string]], $gateBuilder
+                )
+                $blockedScript = $buildGate.Invoke(
+                    [string]$neverExecute, [string]$missingGateName, [string]$childExecWorkingDir
+                )
+                $blockedEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($blockedScript))
+                # Inspect the actual native streams rather than letting PS5.1
+                # reinterpret the deliberately failing child's stderr as a
+                # terminating NativeCommandError in the test harness.
+                $blockedInfo = New-Object Diagnostics.ProcessStartInfo
+                $blockedInfo.FileName = $childExecHost
+                $blockedInfo.Arguments = "-NoProfile -NonInteractive -NoLogo -EncodedCommand $blockedEncoded"
+                $blockedInfo.UseShellExecute = $false
+                $blockedInfo.CreateNoWindow = $true
+                $blockedInfo.RedirectStandardOutput = $true
+                $blockedInfo.RedirectStandardError = $true
+                $blockedProcess = [Diagnostics.Process]::Start($blockedInfo)
+                try {
+                    $blockedOutTask = $blockedProcess.StandardOutput.ReadToEndAsync()
+                    $blockedErrTask = $blockedProcess.StandardError.ReadToEndAsync()
+                    if (-not $blockedProcess.WaitForExit(15000)) {
+                        $blockedProcess.Kill()
+                        throw 'Missing-gate fixture failed to terminate within 15 seconds.'
+                    }
+                    if (-not $blockedOutTask.Wait(5000) -or -not $blockedErrTask.Wait(5000)) {
+                        throw 'Missing-gate fixture did not close redirected streams.'
+                    }
+                    Assert-Equal $blockedProcess.ExitCode 125 "missing child start gate returns explicit initialization failure"
+                    Assert-Equal ($blockedOutTask.Result.Contains('USER_CODE_EXECUTED')) $false "missing child start gate prevents user command execution"
+                    Assert-Equal ($blockedErrTask.Result.Contains('WINDO child initialization failed:')) $true "missing child start gate reports actionable error"
+                } finally {
+                    if (-not $blockedProcess.HasExited) { $blockedProcess.Kill() }
+                    $blockedProcess.Dispose()
+                }
+            }
+
+            # Exercise the shipping C# executor, not just its command spec.
+            # Independent stdout/stderr pipes must drain without deadlocking,
+            # and a nonzero native exit must not be mistaken for a timeout.
+            $fidelityScript = '[Console]::Out.Write(("O" * 65536)); [Console]::Error.Write(("E" * 65536)); exit 37'
+            [WindoRunner.ChildExec]::RunPowerShell(
+                $childExecHost, $fidelityScript, $childExecWorkingDir, 20000, 131072,
+                [ref]$childStdOut, [ref]$childStdErr, [ref]$childTimedOut,
+                [ref]$childTruncated, [ref]$childExitCode
+            )
+            Assert-Equal ($childStdOut -ceq ('O' * 65536)) $true "ChildExec preserves large stdout independently"
+            Assert-Equal ($childStdErr -ceq ('E' * 65536)) $true "ChildExec preserves large stderr independently"
+            Assert-Equal $childExitCode 37 "ChildExec preserves a nonzero process exit"
+            Assert-Equal $childTimedOut $false "ChildExec nonzero exit is not a timeout"
+            Assert-Equal $childTruncated $false "ChildExec below-cap dual streams are not truncated"
+
+            # The executor must not reinterpret a literal working directory
+            # containing whitespace, an apostrophe or wildcard-like brackets.
+            $literalChildDir = Join-Path $childExecWorkingDir "space [literal] apostrophe's"
+            [void][IO.Directory]::CreateDirectory($literalChildDir)
+            [WindoRunner.ChildExec]::RunPowerShell(
+                $childExecHost, '[Console]::Out.Write((Get-Location).Path); exit 0', $literalChildDir, 20000, 131072,
+                [ref]$childStdOut, [ref]$childStdErr, [ref]$childTimedOut,
+                [ref]$childTruncated, [ref]$childExitCode
+            )
+            Assert-Equal $childStdOut $literalChildDir "ChildExec preserves literal special-character working directory"
+            Assert-Equal $childStdErr "" "ChildExec resets stderr between independent invocations"
+            Assert-Equal $childExitCode 0 "ChildExec resets exit code after failed command"
+            Assert-Equal $childTimedOut $false "ChildExec subsequent request is not timed out"
+            Assert-Equal $childTruncated $false "ChildExec subsequent request is not truncated"
+
             $outputLimitStarted = [Diagnostics.Stopwatch]::StartNew()
             [WindoRunner.ChildExec]::RunPowerShell(
                 $childExecHost,
@@ -457,6 +534,7 @@ try {
             )
             $timeoutStarted.Stop()
             Assert-Equal $childTimedOut $true "ChildExec reports a timed-out child"
+            Assert-Equal $childExitCode -1 "ChildExec timeout never reports a successful exit"
             Assert-Equal ($timeoutStarted.ElapsedMilliseconds -lt ($processTreeTimeoutMs + 20000)) $true "ChildExec timeout and stream drain remain bounded"
             $descendantPidPath = Join-Path $childExecWorkingDir "descendant.pid"
             Assert-Equal (Test-Path -LiteralPath $descendantPidPath) $true "process-tree timeout fixture recorded its descendant"
@@ -935,7 +1013,9 @@ if ($installerArgumentLineFn -and $installerUacCancellationFn -and $startDownloa
     } catch {
         $quotedPathError = $_.Exception.Message
     }
-    Assert-Pattern $quotedPathError "unsupported quote" "installer handoff rejects a path that cannot be represented safely"
+    # .NET Framework may reject this input before the WINDO quote guard.
+    # Require rejection, and permit only the known equivalent error messages.
+    Assert-Pattern $quotedPathError "(?i)unsupported quote|illegal characters in path" "installer handoff rejects a path that cannot be represented safely"
 
     $uacInner = [System.ComponentModel.Win32Exception]::new(1223)
     $uacOuter = [System.InvalidOperationException]::new("Start-Process failed", $uacInner)
@@ -1907,6 +1987,9 @@ post
     Remove-WindoProfileBlockFromPath -Path $profileCleanupFixture
     $cleanProfile = (Get-Content -Path $profileCleanupFixture -Raw).Replace("`r", "").TrimEnd("`n")
     Assert-Equal $cleanProfile "pre`npost" "uninstall removes WINDO block without touching adjacent lines"
+    $cleanBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($profileCleanupFixture))
+    Remove-WindoProfileBlockFromPath -Path $profileCleanupFixture
+    Assert-Equal ([Convert]::ToBase64String([IO.File]::ReadAllBytes($profileCleanupFixture))) $cleanBytes "repeated uninstall preserves already-clean profile bytes"
     $missingProfile = Join-Path $profileCleanupDir "profile-cleanup-missing.txt"
     New-Item -ItemType File -Path $missingProfile -Value "pre`r`npost" | Out-Null
     Remove-WindoProfileBlockFromPath -Path $missingProfile
@@ -2431,7 +2514,12 @@ Assert-Equal ($installerSource.Contains("function _windo_completion_repair") -eq
 Assert-Equal ($installerSource.Contains('if ($sub -eq "doctor")') -eq $true) $true "completion command handles doctor"
 Assert-Equal ($installerSource.Contains('if ($sub -eq "repair")') -eq $true) $true "completion command handles repair"
 Assert-Equal ($installerSource.Contains("trust = @('--online','--offline','--json')") -eq $true) $true "profile completer knows trust syntax"
-Assert-Equal ($installerSource.Contains('if ($mode -eq "native-first") { return }') -eq $false) $true "profile completer offers WINDO verbs at empty windo prefix"
+Assert-Equal ($installerSource.Contains('function Register-WindoTransparentTabExpansion {') -eq $true) $true "profile installs transparent TabExpansion2 completion layer"
+Assert-Equal ($installerSource.Contains('$global:__WindoOriginalTabExpansion2 = $current.ScriptBlock') -eq $true) $true "profile preserves the pre-WINDO TabExpansion2 implementation"
+Assert-Equal ($installerSource.Contains('$delegate = $inputScript.Substring($prefix.Length)') -eq $true) $true "profile removes only the WINDO prefix before native completion"
+Assert-Equal ($installerSource.Contains('$completion.ReplacementIndex -lt 0') -and $installerSource.Contains('[int]$completion.ReplacementIndex + [int]$prefix.Length')) $true "profile remaps native replacement index by only the WINDO prefix and preserves sentinels"
+Assert-Equal ($installerSource.Contains('::new($emptyMatches, -1, $prefix.Length, 0)')) $true "bare WINDO prefix returns no completion without buffer mutation"
+Assert-Equal ($installerSource.Contains('if ($mode -eq "off" -or $mode -eq "native-first") { return }') -eq $true) $true "legacy WINDO argument completer stays out of native-first mode"
 $psReadLineBlockStart = $installerSource.IndexOf('$WindoPsReadLineBlock = @', [StringComparison]::Ordinal)
 $psReadLineBlockEnd = $installerSource.IndexOf('$WindoCompleterBlock = @', $psReadLineBlockStart, [StringComparison]::Ordinal)
 $psReadLineProfileBlock = if ($psReadLineBlockStart -ge 0 -and $psReadLineBlockEnd -gt $psReadLineBlockStart) { $installerSource.Substring($psReadLineBlockStart, $psReadLineBlockEnd - $psReadLineBlockStart) } else { "" }
@@ -2718,6 +2806,8 @@ if ($repairStart -ge 0 -and $repairEnd -gt $repairStart) {
     Assert-Equal (Repair-WindoProfileText -Text $brokenProfile) "pre`r`npost`r`n" "profile repair removes orphan payload before valid bracket block"
     $legacyBrokenProfile = "pre`r`n$WindoLegacyBeginMarker`r`nfunction windo { }`r`n$WindoLegacyEndMarker`r`npost`r`n"
     Assert-Equal (Repair-WindoProfileText -Text $legacyBrokenProfile) "pre`r`npost`r`n" "profile repair removes legacy >>> marker blocks"
+    $onceRepaired = Repair-WindoProfileText -Text $brokenProfile
+    Assert-Equal (Repair-WindoProfileText -Text $onceRepaired) $onceRepaired "profile repair is idempotent after orphan cleanup"
 }
 Assert-Equal ($installerSource.Contains("function _windo_verify_log_state") -eq $true) $true "installer has shared audit-chain verifier"
 Assert-Equal ($installerSource.Contains('if ($Command.Count -ge 1 -and $Command[0] -eq "dashboard")') -eq $true) $true "installer handles dashboard command"

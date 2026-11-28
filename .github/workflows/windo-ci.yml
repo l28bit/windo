@@ -6,6 +6,7 @@ on:
       - jonex/windo-production-ready
       - ci/hosted-runner-lab-20260903
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     branches:
       - jonex/windo-production-ready
   workflow_dispatch:
@@ -18,6 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  WINDO_DEVELOPMENT_PRESIGN: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
   PSSCRIPTANALYZER_VERSION: '1.25.0'
 
 jobs:
@@ -41,6 +43,8 @@ jobs:
             'windo_heal.ps1',
             'tools/Test-WindoLogic.ps1',
             'tools/Test-WindoKnownPs51Baseline.ps1',
+            'tools/Test-WindoPs51DpapiRuntime.ps1',
+            'tools/Test-WindoChildExecStress.ps1',
             'tools/Validate-Windo.ps1',
             'tools/Test-WindoReservedVariables.ps1',
             'tools/Invoke-PrometheusLocalValidation.ps1',
@@ -90,6 +94,39 @@ jobs:
             }
           }
 
+      - name: Generate unsigned candidate checksum manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidate = Join-Path $env:RUNNER_TEMP 'windo-unsigned-candidate'
+          New-Item -ItemType Directory -Force -Path $candidate | Out-Null
+          $env:WINDO_TRACKING_BRANCH = 'jonex/windo-production-ready'
+          & ./tools/Sync-InstallerChecksum.ps1 -ChecksumPath (Join-Path $candidate 'installer.sha256')
+          if (-not $?) { throw 'Canonical checksum generation failed.' }
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[a-f0-9]{40}$') { throw 'Cannot bind candidate to checkout SHA.' }
+          [IO.File]::WriteAllText((Join-Path $candidate 'checkout-sha.txt'), $head)
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'Checksum generation unexpectedly changed tracked source.' }
+          Write-Host 'UNSIGNED CANDIDATE ONLY: private signature and release acceptance required.'
+
+      - name: Retain unsigned candidate checksum evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-candidate-checksums
+          path: ${{ runner.temp }}/windo-unsigned-candidate
+          if-no-files-found: error
+          retention-days: 7
+
+  signed-release:
+    name: Signed release manifest (mandatory)
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft == true) }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Verify signed release manifest
         shell: pwsh
         run: ./tools/Test-WindoChecksumSignature.ps1
@@ -119,67 +156,28 @@ jobs:
           [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery -RequiredVersion $env:PSSCRIPTANALYZER_VERSION -ErrorAction Stop
 
-      - name: Probe Windows PowerShell 5.1 DPAPI resolution
+      - name: Certify shipping DPAPI resolver and CurrentUser round-trip
         id: dpapi
-        continue-on-error: true
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $lines = New-Object System.Collections.Generic.List[string]
-          $lines.Add("PSVersion=$($PSVersionTable.PSVersion)")
-          $lines.Add("CLRVersion=$($PSVersionTable.CLRVersion)")
-          $lines.Add("OS=$([Environment]::OSVersion.VersionString)")
-
-          $directType = $null
-          try { $directType = [System.Security.Cryptography.ProtectedData] } catch { $lines.Add("DirectTypeError=$($_.Exception.Message)") }
-          $lines.Add("DirectType=$directType")
-
-          $resolved = $null
-          foreach ($qualifiedName in @(
-            'System.Security.Cryptography.ProtectedData, System.Security.Cryptography.ProtectedData',
-            'System.Security.Cryptography.ProtectedData, System.Security'
-          )) {
-            try {
-              $candidate = [type]::GetType($qualifiedName, $false)
-              $lines.Add("GetType[$qualifiedName]=$candidate")
-              if ($null -eq $resolved -and $null -ne $candidate) { $resolved = $candidate }
-            } catch {
-              $lines.Add("GetTypeError[$qualifiedName]=$($_.Exception.Message)")
-            }
-          }
-
-          $directProtectOk = $false
-          if ($null -ne $directType) {
-            try {
-              $bytes = [Text.Encoding]::UTF8.GetBytes('windo-ci-dpapi-probe')
-              $sealed = [System.Security.Cryptography.ProtectedData]::Protect(
-                $bytes,
-                $null,
-                [System.Security.Cryptography.DataProtectionScope]::CurrentUser
-              )
-              $directProtectOk = $null -ne $sealed -and $sealed.Length -gt 0
-              $lines.Add("DirectProtectBytes=$($sealed.Length)")
-            } catch {
-              $lines.Add("DirectProtectError=$($_.Exception.Message)")
-            }
-          }
-          $lines.Add("DirectProtectOk=$directProtectOk")
-          $lines.Add("WindoResolverFoundType=$($null -ne $resolved)")
-          $lines | Set-Content -LiteralPath ci-forensics/ps51-dpapi-probe.txt
-          $lines | ForEach-Object { Write-Host $_ }
-
-          if (-not $directProtectOk) {
-            throw 'Windows PowerShell 5.1 cannot perform direct CurrentUser DPAPI protection on this supported Windows runner.'
-          }
-          if ($null -eq $resolved) {
-            throw 'WINDO DPAPI type-resolution strategy cannot find ProtectedData under Windows PowerShell 5.1 even though direct DPAPI works.'
+          Start-Transcript -Path ci-forensics/ps51-dpapi-probe.txt -Force | Out-Null
+          try {
+            .\tools\Test-WindoPs51DpapiRuntime.ps1
+          } finally {
+            Stop-Transcript | Out-Null
           }
 
       - name: Release validation
         id: release
         if: always()
         shell: powershell
-        run: .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
+        run: |
+          if ($env:WINDO_DEVELOPMENT_PRESIGN -eq 'true') {
+            .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot -DevelopmentPreSign
+          } else {
+            .\tools\Validate-Windo.ps1 -RequireCurrentSnapshot
+          }
 
       - name: Logic tests
         id: logic
@@ -194,6 +192,17 @@ jobs:
           } finally {
             Stop-Transcript | Out-Null
           }
+
+      - name: Transparent shell completion contract
+        if: always()
+        shell: powershell
+        run: .\tools\Test-WindoTransparentCompletion.ps1
+
+      - name: Concurrent shipping executor stress
+        id: stress
+        if: always()
+        shell: powershell
+        run: .\tools\Test-WindoChildExecStress.ps1
 
       - name: PSScriptAnalyzer
         id: analyzer
@@ -232,11 +241,12 @@ jobs:
             'release=${{ steps.release.outcome }}',
             'logic=${{ steps.logic.outcome }}',
             'analyzer=${{ steps.analyzer.outcome }}',
-            'deep=${{ steps.deep.outcome }}'
+            'deep=${{ steps.deep.outcome }}',
+            'stress=${{ steps.stress.outcome }}'
           ) | Set-Content ci-forensics/step-outcomes.txt
 
       - name: Upload PS5.1 forensic pack
-        if: always() && (steps.module.outcome != 'success' || steps.dpapi.outcome != 'success' || steps.release.outcome != 'success' || steps.logic.outcome != 'success' || steps.analyzer.outcome != 'success' || steps.deep.outcome != 'success')
+        if: always() && (steps.module.outcome != 'success' || steps.dpapi.outcome != 'success' || steps.release.outcome != 'success' || steps.logic.outcome != 'success' || steps.analyzer.outcome != 'success' || steps.deep.outcome != 'success' || steps.stress.outcome != 'success')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: forensics-ps51-${{ matrix.runner }}
@@ -244,20 +254,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Enforce PS5.1 compatibility or exact issue 8 baseline
+      - name: Enforce strict PS5.1 results (no issue 8 waiver)
         if: always()
         shell: powershell
         run: |
-          .\tools\Test-WindoKnownPs51Baseline.ps1 `
-            -ProbePath 'ci-forensics/ps51-dpapi-probe.txt' `
-            -LogicTranscriptPath 'ci-forensics/logic-transcript.txt' `
-            -DeepTranscriptPath 'ci-forensics/deep-presign-transcript.txt' `
-            -ModuleOutcome '${{ steps.module.outcome }}' `
-            -DpapiOutcome '${{ steps.dpapi.outcome }}' `
-            -ReleaseOutcome '${{ steps.release.outcome }}' `
-            -LogicOutcome '${{ steps.logic.outcome }}' `
-            -AnalyzerOutcome '${{ steps.analyzer.outcome }}' `
-            -DeepOutcome '${{ steps.deep.outcome }}'
+          $outcomes = @(
+            '${{ steps.module.outcome }}',
+            '${{ steps.dpapi.outcome }}',
+            '${{ steps.release.outcome }}',
+            '${{ steps.logic.outcome }}',
+            '${{ steps.analyzer.outcome }}',
+            '${{ steps.deep.outcome }}',
+            '${{ steps.stress.outcome }}'
+          )
+          if (@($outcomes | Where-Object { $_ -ne 'success' }).Count -ne 0) {
+            throw ('PS5.1 required checks failed or did not execute: ' + ($outcomes -join ', '))
+          }
 
   compatibility-ps7:
     name: PS7 / ${{ matrix.runner }}
@@ -281,17 +293,35 @@ jobs:
 
       - name: Release validation
         shell: pwsh
-        run: ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+        run: |
+          if ($env:WINDO_DEVELOPMENT_PRESIGN -eq 'true') {
+            ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot -DevelopmentPreSign
+          } else {
+            ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot
+          }
 
       - name: Logic tests
+        if: always()
         shell: pwsh
         run: ./tools/Test-WindoLogic.ps1
 
+      - name: Transparent shell completion contract
+        if: always()
+        shell: pwsh
+        run: ./tools/Test-WindoTransparentCompletion.ps1
+
+      - name: Concurrent shipping executor stress
+        if: always()
+        shell: pwsh
+        run: ./tools/Test-WindoChildExecStress.ps1
+
       - name: PSScriptAnalyzer
+        if: always()
         shell: pwsh
         run: ./tools/Invoke-PSScriptAnalyzer.ps1
 
       - name: Deep pre-sign contract
+        if: always()
         shell: pwsh
         run: ./tools/Invoke-PrometheusLocalValidation.ps1 -Mode PreSign -Worker -WorkerLabel 'PowerShell 7 / ${{ matrix.runner }}'
 
@@ -366,16 +396,49 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $tampered = Join-Path $env:RUNNER_TEMP 'installer-tampered.sha256'
-          Copy-Item checksums/installer.sha256 $tampered
+          # Verify a previously signed snapshot first so a stale candidate
+          # signature cannot make the tamper test pass vacuously.
+          $fixture = 'versions/v8.5.9'
+          $manifest = Join-Path $fixture 'checksums/installer.sha256'
+          $signature = Join-Path $fixture 'checksums/installer.sha256.sig'
+          $key = Join-Path $fixture 'keys/windo-release-public.rsa.xml'
+          & pwsh -NoLogo -NoProfile -File ./tools/Test-WindoChecksumSignature.ps1 -ManifestPath $manifest -SignaturePath $signature -PublicKeyPath $key
+          if ($LASTEXITCODE -ne 0) { throw 'Signed positive-control fixture failed verification.' }
+          Copy-Item $manifest $tampered
           Add-Content -LiteralPath $tampered -Value '# intentional CI tamper'
 
-          & pwsh -NoLogo -NoProfile -File ./tools/Test-WindoChecksumSignature.ps1 -ManifestPath $tampered
+          & pwsh -NoLogo -NoProfile -File ./tools/Test-WindoChecksumSignature.ps1 -ManifestPath $tampered -SignaturePath $signature -PublicKeyPath $key
           $code = $LASTEXITCODE
           if ($code -eq 0) {
             throw 'Signature verifier unexpectedly accepted a tampered manifest.'
           }
           Write-Host "Expected signature rejection observed (exit=$code)."
           $global:LASTEXITCODE = 0
+
+      - name: Unsigned development mode must reject corrupted candidate hashes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifestPath = (Resolve-Path 'checksums/installer.sha256').Path
+          $originalBytes = [IO.File]::ReadAllBytes($manifestPath)
+          try {
+            $text = [Text.Encoding]::UTF8.GetString($originalBytes)
+            $pattern = '(?m)^installerSha256=[A-Fa-f0-9]{64}\r?$'
+            if ([regex]::Matches($text, $pattern).Count -ne 1) { throw 'Expected exactly one installer SHA256 field.' }
+            $corrupt = [regex]::Replace($text, $pattern, ('installerSha256=' + ('0' * 64)))
+            [IO.File]::WriteAllText($manifestPath, $corrupt, [Text.UTF8Encoding]::new($false))
+            $result = (& pwsh -NoLogo -NoProfile -File ./tools/Validate-Windo.ps1 -RequireCurrentSnapshot -DevelopmentPreSign 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+            Write-Host $result
+            if ($code -eq 0 -or $result -notmatch 'installerSha256 does not match windo_install\.ps1') {
+              throw 'Development validator did not reject the deliberately corrupted installer digest.'
+            }
+          } finally {
+            [IO.File]::WriteAllBytes($manifestPath, $originalBytes)
+          }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'Negative test left tracked source modifications.' }
+          Write-Host 'PASS: development signature deferral cannot bypass installer integrity.'
 
       - name: Hosted elevated bootstrap boundary must fail cleanly
         shell: pwsh
@@ -419,11 +482,95 @@ jobs:
             done < <(grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*[^#]+@' "$file" || true)
           done
 
-  ci-green:
-    name: WINDO CI green
-    if: always()
+  development-green:
+    name: WINDO development qualified (unsigned)
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
     needs:
       - source-contract
+      - compatibility-ps51
+      - compatibility-ps7
+      - generated-artifacts
+      - negative-path
+      - workflow-policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every development gate
+        shell: bash
+        run: |
+          test '${{ needs.source-contract.result }}' = 'success'
+          test '${{ needs.compatibility-ps51.result }}' = 'success'
+          test '${{ needs.compatibility-ps7.result }}' = 'success'
+          test '${{ needs.generated-artifacts.result }}' = 'success'
+          test '${{ needs.negative-path.result }}' = 'success'
+          test '${{ needs.workflow-policy.result }}' = 'success'
+          echo 'Development qualification only. No production release authorization.'
+
+      - name: Checkout qualified candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Record unsigned development qualification receipt
+        shell: bash
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+
+          checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          for sha in (checkout, os.environ["PR_HEAD_SHA"], os.environ["PR_BASE_SHA"]):
+              if not re.fullmatch(r"[0-9a-f]{40}", sha):
+                  raise RuntimeError("Invalid qualification commit identity")
+          if checkout != os.environ["GITHUB_SHA"]:
+              raise RuntimeError("Qualification checkout does not match the tested workflow SHA")
+          manifest = pathlib.Path("checksums/installer.sha256").read_bytes()
+          output = pathlib.Path(os.environ["RUNNER_TEMP"]) / "windo-development-qualification"
+          output.mkdir()
+          receipt = {
+              "schemaVersion": 1,
+              "classification": "UNSIGNED_DEVELOPMENT_ONLY",
+              "productionReleaseAuthorized": False,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "checkoutSha": checkout,
+              "prHeadSha": os.environ["PR_HEAD_SHA"],
+              "prBaseSha": os.environ["PR_BASE_SHA"],
+              "workflowRunId": os.environ["GITHUB_RUN_ID"],
+              "workflowRunAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "manifestFileSha256": hashlib.sha256(manifest).hexdigest(),
+              "requiredJobs": ["source-contract", "compatibility-ps51", "compatibility-ps7",
+                               "generated-artifacts", "negative-path", "workflow-policy"],
+              "windowsMatrix": ["windows-2022/PS5.1", "windows-2025/PS5.1",
+                                "windows-2022/PS7", "windows-2025/PS7"],
+              "limitations": ["Not a cryptographic release attestation",
+                              "No interactive UAC or owner-local lifecycle certification",
+                              "No production signing or publication authority"]
+          }
+          (output / "qualification.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+          (output / "installer.sha256").write_bytes(manifest)
+          PY
+
+      - name: Retain development qualification receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-development-qualification
+          path: ${{ runner.temp }}/windo-development-qualification
+          if-no-files-found: error
+          retention-days: 14
+
+  ci-green:
+    name: WINDO CI green
+    if: ${{ always() && !(github.event_name == 'pull_request' && github.event.pull_request.draft == true) }}
+    needs:
+      - source-contract
+      - signed-release
       - compatibility-ps51
       - compatibility-ps7
       - generated-artifacts
@@ -435,6 +582,7 @@ jobs:
         shell: bash
         run: |
           test '${{ needs.source-contract.result }}' = 'success'
+          test '${{ needs.signed-release.result }}' = 'success'
           test '${{ needs.compatibility-ps51.result }}' = 'success'
           test '${{ needs.compatibility-ps7.result }}' = 'success'
           test '${{ needs.generated-artifacts.result }}' = 'success'
